@@ -1,0 +1,1219 @@
+// src/pages/staff/noc/NOCAllTickets.tsx
+import React, { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import {
+  Search, ArrowLeft, Eye, Clock, RefreshCw, X, User, MessageSquare,
+  Calendar, Mail, Plus, AlertCircle, CheckCircle, UserCheck, Globe, Phone, FileText
+} from 'lucide-react';
+import { cxApi } from '../../../api';
+import { API_URL } from '@/lib/api';
+import { useAuth } from '@/context/AuthContext';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '../../../components/ui/alert-dialog';
+
+
+interface TeamMember {
+  id: number;
+  fullName: string;
+  role: string;
+}
+
+interface TimelineEntry {
+  action: string;
+  message: string;
+  visibility: 'public' | 'internal';
+  actor_role: string;
+  actor_name: string;
+  created_at: string;
+}
+
+interface Ticket {
+  ticket_id: string;
+  title: string;
+  status: string;
+  priority: string;
+  customer_name: string;
+  customer_email?: string;
+  customer_phone?: string;
+  customer_code?: string;
+  contact_email?: string;
+  contact_phone?: string;
+  project_name: string;
+  project_id?: string;
+  source?: 'portal' | 'email' | 'phone';
+  description?: string;
+  creator_name?: string;
+  creator_type?: 'customer' | 'staff';
+  assignee_name?: string;
+  assignee_role?: string;
+  created_at: string;
+  updated_at?: string;
+  attachments?: any;
+  timeline?: TimelineEntry[];
+}
+
+const ITEMS_PER_PAGE = 10;
+
+// Manual Email Form Component
+const ManualEmailForm: React.FC<{ ticketId: string; customerEmail: string }> = ({ ticketId, customerEmail }) => {
+  const [subject, setSubject] = useState('');
+  const [message, setMessage] = useState('');
+  const [sending, setSending] = useState(false);
+  const [success, setSuccess] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleSend = async () => {
+    if (!message.trim()) {
+      setError('Message is required');
+      return;
+    }
+
+    setSending(true);
+    setError(null);
+    setSuccess(null);
+
+    try {
+      const token = localStorage.getItem('token');
+      const response = await fetch(`${API_URL}/cx/tickets/${ticketId}/send-email`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          subject: subject.trim() || `Update on Ticket ${ticketId}`,
+          message: message.trim()
+        })
+      });
+
+      if (!response.ok) throw new Error('Failed to send email');
+      setSuccess('Email sent successfully');
+      setSubject('');
+      setMessage('');
+      setTimeout(() => setSuccess(null), 5000);
+    } catch (err: any) {
+      setError(err.message || 'Failed to send email');
+    } finally {
+      setSending(false);
+    }
+  };
+
+  return (
+    <div className="space-y-3">
+      <div>
+        <label className="block text-xs font-medium text-slate-700 mb-1">Subject</label>
+        <input
+          type="text"
+          value={subject}
+          onChange={(e) => setSubject(e.target.value)}
+          placeholder={`Update on Ticket ${ticketId}`}
+          className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+        />
+      </div>
+      <div>
+        <label className="block text-xs font-medium text-slate-700 mb-1">Message</label>
+        <textarea
+          value={message}
+          onChange={(e) => setMessage(e.target.value)}
+          placeholder="Enter your message to the customer..."
+          rows={4}
+          className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none resize-none"
+        />
+      </div>
+      {error && <p className="text-red-600 text-xs">{error}</p>}
+      {success && <p className="text-green-600 text-xs">{success}</p>}
+      <button
+        onClick={handleSend}
+        disabled={sending || !message.trim()}
+        className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+      >
+        <Mail className="w-4 h-4" />
+        {sending ? 'Sending...' : 'Send Email'}
+      </button>
+    </div>
+  );
+};
+
+const NOCAllTickets: React.FC = () => {
+  const navigate = useNavigate();
+  const { user } = useAuth();
+  const [tickets, setTickets] = useState<Ticket[]>([]);
+  const [filteredTickets, setFilteredTickets] = useState<Ticket[]>([]);
+  const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadingTeam, setLoadingTeam] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [priorityFilter, setPriorityFilter] = useState<string>('all');
+  const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null);
+  const [modalOpen, setModalOpen] = useState(false);
+  const [modalLoading, setModalLoading] = useState(false);
+  const [assigningTicketId, setAssigningTicketId] = useState<string | null>(null);
+  const [assignSuccess, setAssignSuccess] = useState<string | null>(null);
+  const [assignError, setAssignError] = useState<string | null>(null);
+  const [updatingStatus, setUpdatingStatus] = useState(false);
+  const [statusSuccess, setStatusSuccess] = useState<string | null>(null);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [isAssignConfirmOpen, setAssignConfirmOpen] = useState(false);
+  const [assignTarget, setAssignTarget] = useState<{ ticketId: string; userId: number; userName: string } | null>(null);
+
+  // Status change popup state
+  const [statusPopupOpen, setStatusPopupOpen] = useState(false);
+  const [pendingStatus, setPendingStatus] = useState<string | null>(null);
+  const [reason, setReason] = useState('');
+  const [showAckPrompt, setShowAckPrompt] = useState(false);
+
+  const fetchTeamMembers = async () => {
+    try {
+      setLoadingTeam(true);
+      const token = localStorage.getItem('token');
+      const response = await fetch(`${API_URL}/cx/team-members`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (!response.ok) throw new Error('Failed to load team members');
+      const data = await response.json();
+
+      // Filter for NOC members only
+      const nocMembers = data.filter((m: any) =>
+        m.role?.toLowerCase() === 'noc' ||
+        m.role?.toLowerCase().includes('noc')
+      );
+
+      setTeamMembers(nocMembers);
+      return nocMembers;
+    } catch (err) {
+      console.error('Failed to load team members:', err);
+      return [];
+    } finally {
+      setLoadingTeam(false);
+    }
+  };
+
+  const fetchTickets = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+
+      const nocMembers = await fetchTeamMembers();
+      const nocMemberNames = new Set(nocMembers.map((m: any) => m.fullName));
+
+      const data = await cxApi.getAllTickets();
+      let ticketList: any[] = [];
+      if (data?.data) ticketList = data.data;
+      else if (Array.isArray(data)) ticketList = data;
+      else if (data?.tickets) ticketList = data.tickets;
+
+      // NOC unit queue: tickets at escalation stage "noc" (unassigned until someone claims)
+      const processed = ticketList
+        .filter((t: any) => {
+          const stage = String(t.escalation_stage || 'noc').toLowerCase();
+          if (stage !== 'noc') return false;
+          const assignee = t.assignee_name || t.assigned_to?.name || '';
+          const assigneeRole = t.assignee_role?.toLowerCase() || '';
+          return !assignee || assigneeRole === 'noc' || assigneeRole.includes('noc') || nocMemberNames.has(assignee);
+        })
+        .map((t: any) => ({
+          ...t,
+          ticket_id: t.ticket_id || t.id || `TKT-${Date.now()}`,
+          title: t.title || t.subject || 'No Title',
+          status: (t.status || 'NEW').toUpperCase(),
+          priority: (t.priority || 'NORMAL').toUpperCase(),
+          customer_name: t.customer_name || 'Unknown Customer',
+          customer_email: t.customer_email || t.contact_email,
+          customer_phone: t.customer_phone || t.contact_phone,
+          customer_code: t.customer_code,
+          project_name: t.project_name || 'General',
+          project_id: t.project_id,
+          source: t.source?.toLowerCase() || 'portal',
+          description: t.description || 'No description provided.',
+          creator_name: t.creator_name || 'Unknown',
+          creator_type: t.creator_type || 'customer',
+          assignee_name: t.assignee_name || t.assigned_to?.name,
+          assignee_role: t.assignee_role,
+          escalation_stage: t.escalation_stage,
+          escalation_due_at: t.escalation_due_at,
+          created_at: t.created_at || new Date().toISOString(),
+          timeline: t.timeline || [],
+          attachments: t.attachments,
+        }));
+
+      processed.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+
+      setTickets(processed);
+      setFilteredTickets(processed);
+    } catch (err: any) {
+      console.error('Failed to fetch tickets:', err);
+      setError(err.message || 'Failed to load tickets');
+      setTickets([]);
+      setFilteredTickets([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchTickets();
+    const interval = setInterval(fetchTickets, 45000);
+    return () => clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
+    let result = tickets;
+    if (searchTerm) {
+      const term = searchTerm.toLowerCase();
+      result = result.filter(t =>
+        t.title?.toLowerCase().includes(term) ||
+        t.customer_name?.toLowerCase().includes(term) ||
+        t.project_name?.toLowerCase().includes(term) ||
+        t.ticket_id?.toLowerCase().includes(term) ||
+        t.customer_email?.toLowerCase().includes(term) ||
+        t.customer_phone?.toLowerCase().includes(term)
+      );
+    }
+    if (statusFilter !== 'all') {
+      result = result.filter(t => t.status === statusFilter.toUpperCase());
+    }
+    if (priorityFilter !== 'all') {
+      result = result.filter(t => t.priority === priorityFilter.toUpperCase());
+    }
+    setFilteredTickets(result);
+    setCurrentPage(1);
+  }, [searchTerm, statusFilter, priorityFilter, tickets]);
+
+  const assignTicket = (ticketId: string, userId: number | '') => {
+    if (!userId) return;
+  
+    const member = teamMembers.find(m => m.id === userId);
+    if (!member) return;
+  
+    setAssignTarget({ ticketId, userId: Number(userId), userName: member.fullName });
+    setAssignConfirmOpen(true);
+  };
+  
+  const handleAssignConfirm = async () => {
+    if (!assignTarget) return;
+  
+    const { ticketId, userId, userName } = assignTarget;
+  
+    setAssigningTicketId(ticketId);
+    setAssignSuccess(null);
+    setAssignError(null);
+  
+    try {
+      await cxApi.updateTicket(ticketId, { assigned_to: userId });
+      setAssignSuccess(`Assigned to ${userName}`);
+      setTickets(prev => prev.map(t => t.ticket_id === ticketId ? { ...t, assignee_name: userName, status: 'OPEN' } : t));
+      setTimeout(() => setAssignSuccess(null), 5000);
+    } catch (err: any) {
+      if (err.response && err.response.status === 403) {
+        setAssignError(err.response.data.error || 'You do not have permission to assign this ticket.');
+      } else {
+        setAssignError('Failed to assign ticket. Please try again.');
+      }
+      setTimeout(() => setAssignError(null), 7000);
+    } finally {
+      setAssigningTicketId(null);
+      setAssignConfirmOpen(false);
+      setAssignTarget(null);
+    }
+  };
+  
+  const handleCancelAssign = () => {
+    if (assignTarget) {
+      const select = document.getElementById(`assign-${assignTarget.ticketId}`) as HTMLSelectElement;
+      if(select) select.value = "";
+    }
+    setAssignConfirmOpen(false);
+    setAssignTarget(null);
+  };
+
+  const handleStatusAction = (newStatus: string) => {
+    if (!selectedTicket || newStatus === selectedTicket.status) return;
+    if (selectedTicket.status === 'CLOSED' && newStatus !== 'REOPEN') return;
+
+    // Show acknowledgement prompt for IN_PROGRESS or OPEN
+    if ((newStatus === 'IN_PROGRESS' || newStatus === 'OPEN') && 
+        selectedTicket.status !== 'IN_PROGRESS' && selectedTicket.status !== 'OPEN') {
+      setPendingStatus(newStatus);
+      setShowAckPrompt(true);
+      return;
+    }
+
+    // For RESOLVED, CLOSED, REOPEN - show description prompt
+    if (['RESOLVED', 'CLOSED', 'REOPEN'].includes(newStatus)) {
+      setPendingStatus(newStatus);
+      setReason('');
+      setStatusPopupOpen(true);
+      return;
+    }
+
+    // For other status changes, update directly
+    setPendingStatus(newStatus);
+    setReason('');
+    confirmStatusChangeDirect(newStatus);
+  };
+
+  const handleAcknowledge = async (acknowledged: boolean) => {
+    setShowAckPrompt(false);
+    if (acknowledged && pendingStatus) {
+      await confirmStatusChangeDirect(pendingStatus, true);
+    }
+    setPendingStatus(null);
+  };
+
+  const confirmStatusChangeDirect = async (status: string, acknowledged: boolean = false) => {
+    if (!selectedTicket) return;
+
+    setUpdatingStatus(true);
+    try {
+      let comment = `Status changed to ${status.replace('_', ' ')}`;
+      if (acknowledged) {
+        comment = `Ticket acknowledged for work by ${teamMembers.find(m => m.fullName === selectedTicket.assignee_name)?.fullName || 'NOC Staff'}`;
+      }
+
+      await cxApi.updateTicket(selectedTicket.ticket_id, {
+        status,
+        comment,
+        visibility: 'public'
+      });
+
+      const data = await cxApi.getTicketDetails(selectedTicket.ticket_id);
+      const detailData = data.data || data;
+      const fullTicketInfo = detailData.ticket || detailData;
+      const timeline = detailData.timeline || [];
+
+      const updatedTicket = {
+        ...selectedTicket,
+        status: fullTicketInfo.status || status,
+        timeline: timeline.map((entry: any) => ({
+          action: entry.action || 'STATUS_CHANGE',
+          message: entry.message,
+          visibility: entry.visibility,
+          actor_role: entry.actor_role,
+          actor_name: entry.actor_name,
+          created_at: entry.created_at,
+        })),
+      };
+
+      setSelectedTicket(updatedTicket);
+      setTickets(prev => prev.map(t =>
+        t.ticket_id === selectedTicket.ticket_id ? { ...t, status } : t
+      ));
+
+      setStatusSuccess(`Ticket successfully ${status.toLowerCase().replace('_', ' ')}${acknowledged ? ' and acknowledged' : ''}`);
+      setTimeout(() => setStatusSuccess(null), 4000);
+    } catch (err) {
+      console.error('Status update failed:', err);
+      alert('Failed to update status');
+    } finally {
+      setUpdatingStatus(false);
+    }
+  };
+
+  const confirmStatusChange = async () => {
+    if (!selectedTicket || !pendingStatus) return;
+
+    const needsReason = ['RESOLVED', 'CLOSED', 'REOPEN'].includes(pendingStatus);
+    if (needsReason && !reason.trim()) {
+      alert('Please provide a description/reason for this action');
+      return;
+    }
+
+    setStatusPopupOpen(false);
+    setUpdatingStatus(true);
+    setStatusSuccess(null);
+
+    try {
+      let comment = `Status changed to ${pendingStatus.replace('_', ' ')}`;
+      if (pendingStatus === 'RESOLVED') comment = `Resolved: ${reason.trim()}`;
+      if (pendingStatus === 'CLOSED') comment = `Closed: ${reason.trim()}`;
+      if (pendingStatus === 'REOPEN') comment = `Reopened: ${reason.trim()}`;
+
+      await cxApi.updateTicket(selectedTicket.ticket_id, {
+        status: pendingStatus,
+        comment,
+        visibility: ['RESOLVED', 'CLOSED'].includes(pendingStatus) ? 'public' : 'internal'
+      });
+
+      const data = await cxApi.getTicketDetails(selectedTicket.ticket_id);
+      const detailData = data.data || data;
+      const fullTicketInfo = detailData.ticket || detailData;
+      const timeline = detailData.timeline || [];
+
+      const updatedTicket = {
+        ...selectedTicket,
+        status: fullTicketInfo.status || pendingStatus,
+        timeline: timeline.map((entry: any) => ({
+          action: entry.action || 'STATUS_CHANGE',
+          message: entry.message,
+          visibility: entry.visibility,
+          actor_role: entry.actor_role,
+          actor_name: entry.actor_name,
+          created_at: entry.created_at,
+        })),
+      };
+
+      setSelectedTicket(updatedTicket);
+      setTickets(prev => prev.map(t =>
+        t.ticket_id === selectedTicket.ticket_id ? { ...t, status: pendingStatus } : t
+      ));
+
+      setStatusSuccess(`Ticket successfully ${pendingStatus.toLowerCase().replace('_', ' ')}`);
+      setTimeout(() => setStatusSuccess(null), 4000);
+    } catch (err) {
+      console.error('Status update failed:', err);
+      alert('Failed to update status');
+    } finally {
+      setUpdatingStatus(false);
+    }
+  };
+
+  const openModal = async (ticket: Ticket) => {
+    setModalLoading(true);
+    setSelectedTicket(ticket);
+    setModalOpen(true);
+    document.body.style.overflow = 'hidden';
+
+    try {
+      const data = await cxApi.getTicketDetails(ticket.ticket_id);
+      const detailData = data.data || data;
+      const fullTicketInfo = detailData.ticket || detailData;
+      const timeline = detailData.timeline || [];
+
+      const processed = {
+        ...fullTicketInfo,
+        ticket_id: fullTicketInfo.ticket_id || ticket.ticket_id,
+        title: fullTicketInfo.title || ticket.title,
+        status: fullTicketInfo.status || ticket.status,
+        priority: fullTicketInfo.priority || ticket.priority,
+        customer_name: fullTicketInfo.customer_name || ticket.customer_name,
+        customer_code: fullTicketInfo.customer_code || ticket.customer_code,
+        customer_email: fullTicketInfo.customer_email || fullTicketInfo.contact_email || ticket.customer_email || ticket.contact_email,
+        customer_phone: fullTicketInfo.customer_phone || fullTicketInfo.contact_phone || ticket.customer_phone || ticket.contact_phone,
+        project_name: fullTicketInfo.project_name || ticket.project_name,
+        description: fullTicketInfo.description || ticket.description || 'No description provided.',
+        creator_name: fullTicketInfo.creator_name || ticket.creator_name || 'Unknown',
+        source: fullTicketInfo.source || ticket.source,
+        created_at: fullTicketInfo.created_at || ticket.created_at,
+        attachments: fullTicketInfo.attachments || ticket.attachments,
+        timeline: timeline.map((entry: any) => ({
+          action: entry.action,
+          message: entry.message,
+          visibility: entry.visibility || 'public',
+          actor_role: entry.actor_role || 'Staff',
+          actor_name: entry.actor_name || 'Unknown',
+          created_at: entry.created_at,
+        })),
+      };
+
+      setSelectedTicket(processed);
+    } catch (err) {
+      console.error('Failed to load ticket details:', err);
+    } finally {
+      setModalLoading(false);
+    }
+  };
+
+  const closeModal = () => {
+    setModalOpen(false);
+    setSelectedTicket(null);
+    setModalLoading(false);
+    document.body.style.overflow = 'unset';
+    setStatusPopupOpen(false);
+    setShowAckPrompt(false);
+  };
+
+  const getStatusColor = (status: string) => {
+    const s = status?.toUpperCase() || '';
+    switch (s) {
+      case 'NEW': return { bg: 'bg-blue-100', text: 'text-blue-700', border: 'border-blue-200' };
+      case 'OPEN': return { bg: 'bg-yellow-100', text: 'text-yellow-700', border: 'border-yellow-200' };
+      case 'IN_PROGRESS': return { bg: 'bg-purple-100', text: 'text-purple-700', border: 'border-purple-200' };
+      case 'RESOLVED': return { bg: 'bg-green-100', text: 'text-green-700', border: 'border-green-200' };
+      case 'CLOSED': return { bg: 'bg-gray-100', text: 'text-gray-700', border: 'border-gray-200' };
+      default: return { bg: 'bg-slate-100', text: 'text-slate-600', border: 'border-slate-200' };
+    }
+  };
+
+  const getPriorityColor = (priority: string) => {
+    const p = priority?.toUpperCase() || '';
+    switch (p) {
+      case 'URGENT': return { dot: 'bg-red-500', text: 'text-red-600' };
+      case 'HIGH': return { dot: 'bg-orange-500', text: 'text-orange-600' };
+      case 'MEDIUM': return { dot: 'bg-yellow-500', text: 'text-yellow-600' };
+      case 'LOW': return { dot: 'bg-blue-500', text: 'text-blue-600' };
+      default: return { dot: 'bg-slate-400', text: 'text-slate-600' };
+    }
+  };
+
+  const getSourceIcon = (source?: string) => {
+    switch (source?.toLowerCase()) {
+      case 'email': return <Mail className="w-3.5 h-3.5" />;
+      case 'phone': return <Phone className="w-3.5 h-3.5" />;
+      default: return <Globe className="w-3.5 h-3.5" />;
+    }
+  };
+
+  const formatCreatedTime = (dateString: string) => {
+    const date = new Date(dateString);
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+
+    if (diffDays === 0) return 'Today';
+    if (diffDays === 1) return 'Yesterday';
+    if (diffDays < 7) return `${diffDays} days ago`;
+    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  };
+
+  const formatFullDate = (dateString: string) => {
+    return new Date(dateString).toLocaleString('en-US', {
+      month: 'long',
+      day: 'numeric',
+      year: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit'
+    });
+  };
+
+  const totalPages = Math.ceil(filteredTickets.length / ITEMS_PER_PAGE);
+  const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
+  const paginatedTickets = filteredTickets.slice(startIndex, startIndex + ITEMS_PER_PAGE);
+
+  if (loading || loadingTeam) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-orange-50 flex items-center justify-center">
+        <div className="text-center">
+          <RefreshCw className="w-10 h-10 text-orange-600 animate-spin mx-auto mb-4" />
+          <p className="text-slate-600 text-sm">Loading NOC tickets...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-orange-50 flex items-center justify-center">
+        <div className="text-center max-w-md">
+          <AlertCircle className="w-12 h-12 text-red-500 mx-auto mb-4" />
+          <h3 className="text-lg font-semibold text-slate-800 mb-2">Error loading tickets</h3>
+          <p className="text-slate-600 text-sm">{error}</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-orange-50 text-xs">
+        <div className="p-3 md:p-4 max-w-[1700px] mx-auto">
+          {/* Header */}
+          <div className="mb-4">
+            <button
+              onClick={() => navigate('/staff/noc/dashboard')}
+              className="flex items-center gap-1 text-orange-600 hover:text-orange-800 text-xs font-medium mb-2 group"
+            >
+              <ArrowLeft className="w-3 h-3 group-hover:-translate-x-1 transition-transform" />
+              Back to NOC Dashboard
+            </button>
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+              <div>
+                <h1 className="text-lg md:text-xl font-black text-slate-900">NOC Ticket Queue</h1>
+                <p className="text-xs text-slate-600">
+                  {tickets.length} total • {filteredTickets.length} shown
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={fetchTickets}
+                  className="p-1.5 bg-white border border-slate-300 rounded-lg hover:bg-slate-50"
+                  title="Refresh"
+                >
+                  <RefreshCw className="w-3.5 h-3.5 text-slate-600" />
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Filters */}
+          <div className="bg-white rounded-lg border border-slate-200 p-3 mb-3 shadow-sm">
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+              <div className="md:col-span-2">
+                <label className="block text-xs font-semibold text-slate-500 mb-1">SEARCH</label>
+                <div className="relative">
+                  <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
+                  <input
+                    type="text"
+                    placeholder="ID, customer, project, email, phone..."
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    className="pl-8 pr-3 py-1.5 w-full bg-white border border-slate-300 rounded-lg text-xs focus:ring-2 focus:ring-orange-500/30 outline-none"
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-500 mb-1">STATUS</label>
+                <select
+                  value={statusFilter}
+                  onChange={(e) => setStatusFilter(e.target.value)}
+                  className="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-xs outline-none"
+                >
+                  <option value="all">All Status</option>
+                  <option value="NEW">New</option>
+                  <option value="OPEN">Open</option>
+                  <option value="IN_PROGRESS">In Progress</option>
+                  <option value="RESOLVED">Resolved</option>
+                  <option value="CLOSED">Closed</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-500 mb-1">PRIORITY</label>
+                <select
+                  value={priorityFilter}
+                  onChange={(e) => setPriorityFilter(e.target.value)}
+                  className="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-xs outline-none"
+                >
+                  <option value="all">All Priority</option>
+                  <option value="URGENT">Urgent</option>
+                  <option value="HIGH">High</option>
+                  <option value="MEDIUM">Medium</option>
+                  <option value="LOW">Low</option>
+                </select>
+              </div>
+            </div>
+
+            {(searchTerm || statusFilter !== 'all' || priorityFilter !== 'all') && (
+              <div className="mt-2 text-right">
+                <button
+                  onClick={() => {
+                    setSearchTerm('');
+                    setStatusFilter('all');
+                    setPriorityFilter('all');
+                  }}
+                  className="text-orange-600 hover:text-orange-800 text-xs font-medium"
+                >
+                  Clear filters
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Table */}
+          <div className="bg-white rounded-lg shadow-sm border border-slate-200 overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[1000px]">
+                <thead className="bg-gradient-to-r from-orange-800 to-red-800 text-white text-xs uppercase tracking-wider">
+                  <tr>
+                    <th className="px-4 py-3 text-left font-medium">Ticket ID</th>
+                    <th className="px-4 py-3 text-left font-medium">Source</th>
+                    <th className="px-4 py-3 text-left font-medium">Customer</th>
+                    <th className="px-4 py-3 text-left font-medium">Phone</th>
+                    <th className="px-4 py-3 text-left font-medium">Email</th>
+                    <th className="px-4 py-3 text-left font-medium">Project</th>
+                    <th className="px-4 py-3 text-left font-medium">Created</th>
+                    <th className="px-4 py-3 text-left font-medium">Status</th>
+                    <th className="px-4 py-3 text-left font-medium">Priority</th>
+                    <th className="px-4 py-3 text-left font-medium">Assigned</th>
+                    <th className="px-4 py-3 text-left font-medium">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {paginatedTickets.map((ticket) => {
+                    const statusColors = getStatusColor(ticket.status);
+                    const priorityColors = getPriorityColor(ticket.priority);
+                    return (
+                      <tr 
+                      key={ticket.ticket_id} 
+                      className="hover:bg-orange-50/40 transition-colors cursor-pointer"
+                      onClick={(e) => {
+                          if ((e.target as HTMLElement).closest('select, button')) return;
+                          navigate(`/staff/noc/tickets/${ticket.ticket_id}`);
+                      }}
+                    >
+                        <td className="px-4 py-3">
+                          <span className="font-mono bg-orange-100 text-orange-700 px-2 py-0.5 rounded-full text-xs font-bold">
+                            #{ticket.ticket_id}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-1.5 text-slate-600">
+                            {getSourceIcon(ticket.source)}
+                            <span className="capitalize">{ticket.source || 'portal'}</span>
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 font-medium text-slate-800">{ticket.customer_name}</td>
+                        <td className="px-4 py-3 text-slate-600">
+                          {ticket.customer_phone || ticket.contact_phone || <span className="text-slate-400 italic">—</span>}
+                        </td>
+                        <td className="px-4 py-3 text-slate-600">
+                          {ticket.customer_email || ticket.contact_email || <span className="text-slate-400 italic">—</span>}
+                        </td>
+                        <td className="px-4 py-3 font-medium text-slate-800">{ticket.project_name}</td>
+                        <td className="px-4 py-3 text-slate-600">
+                          <div className="flex items-center gap-1.5">
+                            <Clock className="w-4 h-4" />
+                            {formatCreatedTime(ticket.created_at)}
+                          </div>
+                        </td>
+                        <td className="px-4 py-3">
+                          <span className={`px-2.5 py-1 rounded-full text-xs font-bold uppercase ${statusColors.bg} ${statusColors.text} border ${statusColors.border}`}>
+                            {ticket.status.replace('_', ' ')}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-2">
+                            <div className={`w-3 h-3 rounded-full ${priorityColors.dot}`} />
+                            <span className={`${priorityColors.text} font-medium`}>{ticket.priority.toLowerCase()}</span>
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 text-slate-700">
+                          {ticket.assignee_name || <span className="text-slate-400 italic">Unassigned</span>}
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-2">
+                            {!ticket.assignee_name && user?.id && (
+                              <button
+                                type="button"
+                                disabled={assigningTicketId === ticket.ticket_id}
+                                onClick={() => assignTicket(ticket.ticket_id, user.id)}
+                                className="whitespace-nowrap rounded border border-orange-300 bg-orange-50 px-2 py-1 text-xs font-medium text-orange-800 hover:bg-orange-100"
+                              >
+                                Assign to me
+                              </button>
+                            )}
+                            <select
+                              id={`assign-${ticket.ticket_id}`}
+                              disabled={assigningTicketId === ticket.ticket_id}
+                              onChange={e => assignTicket(ticket.ticket_id, parseInt(e.target.value) || 0)}
+                              className="text-xs px-2 py-1 border border-slate-300 rounded bg-white"
+                              defaultValue=""
+                            >
+                              <option value="" disabled>Assign…</option>
+                              {teamMembers.map(m => (
+                                <option key={m.id} value={m.id}>
+                                  {m.fullName}
+                                </option>
+                              ))}
+                            </select>
+                            <button
+                              onClick={() => navigate(`/staff/noc/tickets/${ticket.ticket_id}`)}
+                              className="px-3 py-1.5 bg-gradient-to-r from-orange-600 to-red-600 text-white rounded hover:from-orange-700 hover:to-red-700 text-xs font-medium flex items-center gap-1.5"
+                            >
+                              <Eye className="w-4 h-4" /> View
+                            </button>
+                          </div>
+                          {assignError && assigningTicketId === ticket.ticket_id && (
+                              <div className="text-red-500 text-xs mt-1">{assignError}</div>
+                          )}
+                          {assignSuccess && assigningTicketId === ticket.ticket_id && (
+                            <div className="text-green-500 text-xs mt-1">{assignSuccess}</div>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            {filteredTickets.length === 0 && (
+              <div className="py-12 text-center">
+                <Search className="w-10 h-10 text-slate-300 mx-auto mb-3" />
+                <p className="text-slate-600 font-medium">No tickets found</p>
+                <p className="text-slate-500 text-xs mt-1">Try adjusting your filters</p>
+              </div>
+            )}
+
+            {totalPages > 1 && (
+              <div className="flex items-center justify-between px-4 py-3 bg-slate-50 border-t border-slate-200 text-xs">
+                <div className="text-slate-600">
+                  Showing <strong>{startIndex + 1}–{Math.min(startIndex + ITEMS_PER_PAGE, filteredTickets.length)}</strong> of <strong>{filteredTickets.length}</strong>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                    disabled={currentPage === 1}
+                    className="p-1.5 rounded border disabled:opacity-40 disabled:cursor-not-allowed hover:bg-white"
+                  >
+                    ←
+                  </button>
+                  <span className="px-3 py-1 font-medium">
+                    Page {currentPage} of {totalPages}
+                  </span>
+                  <button
+                    onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                    disabled={currentPage === totalPages}
+                    className="p-1.5 rounded border disabled:opacity-40 disabled:cursor-not-allowed hover:bg-white"
+                  >
+                    →
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <AlertDialog open={isAssignConfirmOpen} onOpenChange={setAssignConfirmOpen}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Confirm Ticket Assignment</AlertDialogTitle>
+          <AlertDialogDescription>
+            Are you sure you want to assign this ticket to <strong>{assignTarget?.userName}</strong>?
+            They will be notified and this action will be logged.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel onClick={handleCancelAssign}>Cancel</AlertDialogCancel>
+          <AlertDialogAction onClick={handleAssignConfirm}>Assign</AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+
+      {/* Modal - Same design as CX Tickets */}
+      {modalOpen && selectedTicket && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-md"
+          onClick={closeModal}
+        >
+          <div
+            className="bg-white rounded-2xl shadow-2xl max-w-4xl w-full max-h-[92vh] overflow-hidden flex flex-col"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="bg-gradient-to-r from-orange-800 to-red-800 text-white p-5 flex items-center justify-between">
+              <div>
+                <h2 className="text-xl font-bold">Ticket #{selectedTicket.ticket_id}</h2>
+                <p className="text-orange-200 text-sm mt-1">
+                  Created by <strong>{selectedTicket.creator_name}</strong> • {formatFullDate(selectedTicket.created_at)}
+                </p>
+              </div>
+              <button onClick={closeModal} className="p-2 rounded-full hover:bg-white/20">
+                <X className="w-6 h-6" />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-6 space-y-6 bg-gradient-to-br from-slate-50 to-white">
+              {modalLoading ? (
+                <div className="flex flex-col items-center justify-center h-64">
+                  <RefreshCw className="w-10 h-10 text-orange-600 animate-spin mb-4" />
+                  <p className="text-slate-600">Loading ticket details...</p>
+                </div>
+              ) : (
+                <>
+                  {/* Title & Description */}
+                  <div className="bg-gradient-to-r from-orange-50 to-red-50 rounded-xl p-5 border border-orange-100">
+                    <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2 mb-3">
+                      <MessageSquare className="w-5 h-5 text-orange-700" />
+                      {selectedTicket.title}
+                    </h3>
+                    <p className="text-slate-700 whitespace-pre-wrap text-sm leading-relaxed">
+                      {selectedTicket.description}
+                    </p>
+                  </div>
+
+                  {/* Info cards */}
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div className="bg-white p-4 rounded-xl border border-slate-100 shadow-sm">
+                      <h4 className="font-semibold text-slate-800 mb-3 flex items-center gap-2 text-sm">
+                        <User className="w-4 h-4 text-orange-600" /> Customer Details
+                      </h4>
+                      <div className="space-y-1.5 text-xs">
+                        <p><strong>Name:</strong> {selectedTicket.customer_name}</p>
+                        <p><strong>Customer ID:</strong> {selectedTicket.customer_code || '—'}</p>
+                        <p><strong>Email:</strong> {selectedTicket.customer_email || selectedTicket.contact_email || '—'}</p>
+                        <p><strong>Phone:</strong> {selectedTicket.customer_phone || selectedTicket.contact_phone || '—'}</p>
+                      </div>
+                    </div>
+
+                    <div className="bg-white p-4 rounded-xl border border-slate-100 shadow-sm">
+                      <h4 className="font-semibold text-slate-800 mb-3 flex items-center gap-2 text-sm">
+                        <Globe className="w-4 h-4 text-orange-600" /> Project / Source
+                      </h4>
+                      <div className="space-y-1.5 text-xs">
+                        <p><strong>Project:</strong> {selectedTicket.project_name}</p>
+                        <p><strong>Source:</strong> <span className="inline-flex items-center gap-1.5">{getSourceIcon(selectedTicket.source)} {selectedTicket.source || 'portal'}</span></p>
+                      </div>
+                    </div>
+
+                    <div className="bg-white p-4 rounded-xl border border-slate-100 shadow-sm">
+                      <h4 className="font-semibold text-slate-800 mb-3 flex items-center gap-2 text-sm">
+                        <Clock className="w-4 h-4 text-orange-600" /> Status & Priority
+                      </h4>
+                      <div className="space-y-1.5 text-xs">
+                        <p>
+                          <strong>Status:</strong>{' '}
+                          <span className={`ml-1 px-2.5 py-0.5 rounded-full text-xs font-bold uppercase ${getStatusColor(selectedTicket.status).bg} ${getStatusColor(selectedTicket.status).text}`}>
+                            {selectedTicket.status.replace('_', ' ')}
+                          </span>
+                        </p>
+                        <p>
+                          <strong>Priority:</strong>{' '}
+                          <span className="ml-1 inline-flex items-center gap-1.5">
+                            <div className={`w-3 h-3 rounded-full ${getPriorityColor(selectedTicket.priority).dot}`} />
+                            {selectedTicket.priority.toLowerCase()}
+                          </span>
+                        </p>
+                        <p><strong>Created:</strong> {formatFullDate(selectedTicket.created_at)}</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Status buttons */}
+                  <div className="bg-gradient-to-r from-orange-50 to-red-50 rounded-xl p-5 border border-orange-100">
+                    <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2">
+                      <UserCheck className="w-5 h-5 text-orange-600" />
+                      Update Status
+                    </h3>
+                    <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+                      {['OPEN', 'IN_PROGRESS', 'RESOLVED', 'CLOSED', 'REOPEN'].map(status => {
+                        const isCurrent = selectedTicket.status === status;
+                        const disabled = updatingStatus || isCurrent || (selectedTicket.status === 'CLOSED' && status !== 'REOPEN');
+                        let color = "bg-orange-600 hover:bg-orange-700";
+                        if (status === 'RESOLVED') color = "bg-green-600 hover:bg-green-700";
+                        if (status === 'CLOSED') color = "bg-red-600 hover:bg-red-700";
+                        if (status === 'REOPEN') color = "bg-amber-600 hover:bg-amber-700";
+
+                        return (
+                          <button
+                            key={status}
+                            onClick={() => handleStatusAction(status)}
+                            disabled={disabled}
+                            className={`px-4 py-2.5 rounded-xl text-white text-xs sm:text-sm font-medium transition ${color} ${disabled ? 'opacity-50 cursor-not-allowed' : 'shadow hover:shadow-md'}`}
+                          >
+                            {status === 'REOPEN' ? 'Reopen' : status.replace('_', ' ')}
+                            {isCurrent && ' (current)'}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    {statusSuccess && (
+                      <p className="mt-4 text-green-700 flex items-center gap-2 text-sm font-medium">
+                        <CheckCircle className="w-4 h-4" /> {statusSuccess}
+                      </p>
+                    )}
+                  </div>
+
+                  {/* Attachments */}
+                  {selectedTicket.attachments && (() => {
+                    try {
+                      const attachments = typeof selectedTicket.attachments === 'string' 
+                        ? JSON.parse(selectedTicket.attachments) 
+                        : selectedTicket.attachments;
+                      if (Array.isArray(attachments) && attachments.length > 0) {
+                        return (
+                          <div className="bg-white rounded-xl p-5 border border-slate-100 shadow-sm">
+                            <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2">
+                              <FileText className="w-5 h-5 text-orange-600" /> Attachments ({attachments.length})
+                            </h3>
+                            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                              {attachments.map((att: any, idx: number) => {
+                                let imagePath = att.path || att.savedName || '';
+                                if (typeof imagePath === 'string' && imagePath.trim()) {
+                                  imagePath = imagePath.replace(/\\/g, '/').replace(/^\/+/, '');
+                                  if (!imagePath.startsWith('uploads/')) {
+                                    if (imagePath.startsWith('tickets/')) {
+                                      imagePath = `uploads/${imagePath}`;
+                                    } else {
+                                      imagePath = `uploads/tickets/${imagePath}`;
+                                    }
+                                  }
+                                  const imageUrl = imagePath.startsWith('/') ? imagePath : `/${imagePath}`;
+                                  return (
+                                    <div key={idx} className="relative group">
+                                      <img
+                                        src={imageUrl}
+                                        alt={att.originalName || `Attachment ${idx + 1}`}
+                                        className="w-full h-32 object-cover rounded-lg border border-slate-200 cursor-pointer hover:border-orange-400 transition"
+                                        onClick={() => window.open(imageUrl, '_blank')}
+                                        onError={(e) => {
+                                          (e.target as HTMLImageElement).src = '/placeholder.svg';
+                                        }}
+                                      />
+                                      <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition rounded-lg flex items-center justify-center">
+                                        <Eye className="w-6 h-6 text-white opacity-0 group-hover:opacity-100 transition" />
+                                      </div>
+                                      <p className="text-xs text-slate-600 mt-1 truncate" title={att.originalName}>
+                                        {att.originalName || `Image ${idx + 1}`}
+                                      </p>
+                                    </div>
+                                  );
+                                }
+                                return null;
+                              })}
+                            </div>
+                          </div>
+                        );
+                      }
+                    } catch (e) {
+                      console.error('Error parsing attachments:', e);
+                    }
+                    return null;
+                  })()}
+
+                  {/* Manual Email Send */}
+                  {selectedTicket.customer_email || selectedTicket.contact_email ? (
+                    <div className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-xl p-5 border border-blue-100">
+                      <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2">
+                        <Mail className="w-5 h-5 text-blue-600" />
+                        Send Email to Customer
+                      </h3>
+                      <ManualEmailForm ticketId={selectedTicket.ticket_id} customerEmail={selectedTicket.customer_email || selectedTicket.contact_email} />
+                    </div>
+                  ) : null}
+
+                  {/* Timeline */}
+                  <div className="bg-white rounded-xl p-5 border border-slate-100 shadow-sm">
+                    <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2">
+                      <Calendar className="w-5 h-5 text-orange-600" /> Activity Timeline
+                    </h3>
+                    {selectedTicket.timeline?.length ? (
+                      <div className="space-y-5">
+                        {selectedTicket.timeline.map((entry, i) => (
+                          <div key={i} className="flex gap-4">
+                            <div className={`w-10 h-10 rounded-full flex items-center justify-center text-white font-bold text-sm flex-shrink-0 ${
+                              entry.visibility === 'public' ? 'bg-teal-600' : 'bg-orange-600'
+                            }`}>
+                              {entry.actor_name?.[0]?.toUpperCase() || '?'}
+                            </div>
+                            <div className="flex-1 bg-slate-50 rounded-lg p-4">
+                              <div className="flex justify-between items-start mb-2 text-xs">
+                                <p className="font-semibold text-slate-900">{entry.actor_name}</p>
+                                <p className="text-slate-500">{formatFullDate(entry.created_at)}</p>
+                              </div>
+                              <p className="text-slate-700 whitespace-pre-wrap text-sm">{entry.message}</p>
+                              {entry.visibility === 'public' && (
+                                <span className="mt-2 inline-block px-2.5 py-1 bg-teal-100 text-teal-800 rounded-full text-xs">
+                                  Visible to customer
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-center text-slate-500 py-8 text-sm">No activity recorded yet.</p>
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
+
+            <div className="border-t border-slate-200 px-6 py-4 bg-white flex justify-end">
+              <button
+                onClick={closeModal}
+                className="px-6 py-2.5 bg-slate-200 text-slate-800 rounded-xl hover:bg-slate-300 transition font-medium text-sm"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Acknowledgement Prompt */}
+      {showAckPrompt && pendingStatus && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6">
+            <h3 className="text-xl font-bold text-slate-900 mb-4">Acknowledge Ticket</h3>
+            <p className="text-slate-700 mb-6">
+              Do you acknowledge this ticket for work? This will mark the ticket as acknowledged and notify the customer.
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => handleAcknowledge(true)}
+                className="flex-1 px-4 py-2 bg-orange-600 text-white rounded-lg font-medium hover:bg-orange-700"
+              >
+                Yes, Acknowledge
+              </button>
+              <button
+                onClick={() => handleAcknowledge(false)}
+                className="flex-1 px-4 py-2 bg-slate-200 text-slate-700 rounded-lg font-medium hover:bg-slate-300"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Status popup */}
+      {statusPopupOpen && pendingStatus && (
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4"
+          onClick={() => setStatusPopupOpen(false)}
+        >
+          <div
+            className="bg-white rounded-2xl shadow-2xl max-w-lg w-full p-6"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="flex justify-between items-center mb-5">
+              <h3 className="text-xl font-bold text-slate-900">
+                {pendingStatus === 'RESOLVED' ? 'Resolve Ticket' :
+                 pendingStatus === 'CLOSED' ? 'Close Ticket' :
+                 pendingStatus === 'REOPEN' ? 'Reopen Ticket' : 'Confirm Status Change'}
+              </h3>
+              <button onClick={() => setStatusPopupOpen(false)}>
+                <X className="w-6 h-6 text-slate-500 hover:text-slate-700" />
+              </button>
+            </div>
+
+            <div className="mb-6 text-slate-600 text-sm space-y-2">
+              {pendingStatus === 'RESOLVED' && <p>Marking as resolved will send an email to the customer. Please describe the resolution.</p>}
+              {pendingStatus === 'CLOSED' && <p>Closing finalizes the ticket and will send an email to the customer. Provide a summary or final note.</p>}
+              {pendingStatus === 'REOPEN' && <p>Explain why this ticket needs to be reopened.</p>}
+            </div>
+
+            {['RESOLVED', 'CLOSED', 'REOPEN'].includes(pendingStatus) && (
+              <div className="mb-6">
+                <label className="block text-sm font-medium text-slate-700 mb-2">
+                  {pendingStatus === 'RESOLVED' ? 'Resolution summary' :
+                   pendingStatus === 'CLOSED' ? 'Closing summary' :
+                   'Reason for reopening'} <span className="text-red-600">*</span>
+                </label>
+                <textarea
+                  value={reason}
+                  onChange={e => setReason(e.target.value)}
+                  className="w-full h-32 p-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-orange-400 focus:border-orange-400 outline-none resize-none text-sm"
+                  placeholder="Enter details here..."
+                />
+              </div>
+            )}
+
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={() => setStatusPopupOpen(false)}
+                className="px-5 py-2.5 bg-slate-200 text-slate-800 rounded-lg hover:bg-slate-300"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmStatusChange}
+                disabled={['RESOLVED', 'CLOSED', 'REOPEN'].includes(pendingStatus) && !reason.trim()}
+                className={`px-6 py-2.5 rounded-lg text-white font-medium ${
+                  ['RESOLVED', 'CLOSED', 'REOPEN'].includes(pendingStatus) && !reason.trim()
+                    ? 'bg-gray-400 cursor-not-allowed'
+                    : pendingStatus === 'RESOLVED' ? 'bg-green-600 hover:bg-green-700' :
+                      pendingStatus === 'CLOSED' ? 'bg-red-600 hover:bg-red-700' :
+                      'bg-amber-600 hover:bg-amber-700'
+                }`}
+              >
+                Confirm
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+};
+
+export default NOCAllTickets;

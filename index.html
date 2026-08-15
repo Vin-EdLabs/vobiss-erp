@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=1, viewport-fit=cover, user-scalable=no"
+    />
+
+    <title>Vobiss Erp</title>
+    <script>
+      (function () {
+        try {
+          var path = location.pathname || '';
+          if (path === '/login' || path.indexOf('/login') !== -1) {
+            document.documentElement.removeAttribute('data-theme');
+            document.documentElement.classList.remove('dark');
+            return;
+          }
+          var t = localStorage.getItem('vobiss-theme') || localStorage.getItem('theme');
+          if (t === 'dark') {
+            document.documentElement.setAttribute('data-theme', 'dark');
+            document.documentElement.classList.add('dark');
+          }
+        } catch (e) {}
+      })();
+    </script>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
+
+    <meta name="description" content="Vobiss Erp — operations, people, inventory, and customer support" />
+    <meta name="author" content="Vobiss Solutions Limited" />
+
+    <!-- ================== PWA Essentials ================== -->
+    <link rel="manifest" href="/manifest.json" />
+    <meta name="theme-color" content="#059669" />
+
+    <!-- iOS / Android / PWA support -->
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Vobiss Erp" />
+
+    <!-- Splash-style launch (iOS uses apple-touch + background from manifest) -->
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+    <link rel="icon" href="/favicon.ico" sizes="any" />
+    <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16.png" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
+    <link rel="icon" type="image/png" sizes="192x192" href="/vobiss-logo-192.png" />
+    <link rel="icon" type="image/png" sizes="512x512" href="/vobiss-logo-512.png" />
+    <link rel="shortcut icon" href="/favicon.ico" />
+
+    <!-- Open Graph / Social sharing -->
+    <meta property="og:title" content="Vobiss Erp" />
+    <meta property="og:description" content="Field engineering, asset tracking, and inventory control" />
+    <meta property="og:type" content="website" />
+    <meta property="og:image" content="/vobiss-logo.png" />
+
+    <!-- Twitter Cards -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Vobiss Erp" />
+    <meta name="twitter:description" content="Field engineering, asset tracking, and inventory control" />
+    <meta name="twitter:image" content="/vobiss-logo.png" />
+
+    <!-- Your custom styles -->
+  
+  </head>
+
+  <body>
+    <div id="root"></div>
+
+    <!-- Main app entry -->
+    <script type="module" src="/src/main.tsx"></script>
+
+    <noscript>
+      <strong>Vobiss Management System requires JavaScript to function properly.</strong>
+    </noscript>
+  </body>
+</html>

@@ -1,0 +1,548 @@
+
+app.get('/api/audit-logs', authenticateToken, async (req, res) => {
+  try {
+    const logs = await getAuditLogs();
+    res.json(logs);
+  } catch (error) {
+    console.error('Error fetching audit logs:', error.stack);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/users/approvers', authenticateToken, async (req, res) => {
+  try {
+    const approvers = await getApprovers();
+    res.json(approvers);
+  } catch (error) {
+    console.error('Error fetching approvers:', error.stack);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/settings', authenticateToken, async (req, res) => {
+  try {
+    const settings = await getSettings();
+    res.json(settings);
+  } catch (error) {
+    console.error('Error fetching settings:', error.stack);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/settings/:key', authenticateToken, async (req, res) => {
+  try {
+    const { key } = req.params;
+    const { value } = req.body;
+    const updated = await updateSetting(key, value);
+    res.json(updated);
+  } catch (error) {
+    console.error('Error updating setting:', error.stack);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/backup', authenticateToken, requireSuperAdmin, async (req, res) => {
+  try {
+    const { developerCode } = req.body;
+    if (!developerCode) return res.status(400).json({ error: 'Developer code is required' });
+    const backup = await backupDatabase(developerCode);
+    res.json(backup);
+  } catch (error) {
+    console.error('Error creating backup:', error.stack);
+    res.status(400).json({ error: error.message });
+  }
+});
+
+app.post('/api/restore', authenticateToken, requireSuperAdmin, async (req, res) => {
+  try {
+    const { backup, developerCode } = req.body;
+    if (!backup || !developerCode) return res.status(400).json({ error: 'Backup data and developer code are required' });
+    const backupData = typeof backup === 'string' ? JSON.parse(backup) : backup;
+    await restoreDatabase(backupData, developerCode);
+    res.json({ message: 'Database restored successfully' });
+  } catch (error) {
+    console.error('Error restoring database:', error.stack);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/wipe', authenticateToken, requireSuperAdmin, async (req, res) => {
+  try {
+    const { developerCode } = req.body;
+    if (!developerCode) return res.status(400).json({ error: 'Developer code is required' });
+    const result = await wipeDatabase(developerCode);
+    res.json(result);
+  } catch (error) {
+    console.error('Error wiping database:', error.stack);
+    res.status(400).json({ error: error.message });
+  }
+});
+
+app.get('/api/supervisors', authenticateToken, requireSuperAdmin, async (req, res) => {
+  try {
+    const supervisors = await getSupervisors();
+    res.json(supervisors);
+  } catch (error) {
+    console.error('Error fetching supervisors:', error.stack);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/supervisors', authenticateToken, requireSuperAdmin, async (req, res) => {
+  try {
+    const supervisor = await addSupervisor(req.body);
+    res.status(201).json(supervisor);
+  } catch (error) {
+    console.error('Error adding supervisor:', error.stack);
+    res.status(400).json({ error: error.message });
+  }
+});
+
+app.put('/api/supervisors/:id', authenticateToken, requireSuperAdmin, async (req, res) => {
+  try {
+    const supervisorId = parseInt(req.params.id);
+    const supervisor = await updateSupervisor(supervisorId, req.body);
+    res.json(supervisor);
+  } catch (error) {
+    console.error('Error updating supervisor:', error.stack);
+    res.status(error.message === 'Supervisor not found' ? 404 : 400).json({ error: error.message });
+  }
+});
+
+app.delete('/api/supervisors/:id', authenticateToken, requireSuperAdmin, async (req, res) => {
+  try {
+    const result = await deleteSupervisor(parseInt(req.params.id));
+    res.json(result);
+  } catch (error) {
+    console.error('Error deleting supervisor:', error.stack);
+    res.status(error.message === 'Supervisor not found' ? 404 : 500).json({ error: error.message });
+  }
+});
+
+app.get('/api/users', authenticateToken, requireSuperAdmin, async (req, res) => {
+  try {
+    const users = await getUsers();
+    res.json(users);
+  } catch (error) {
+    console.error('Error fetching users:', error.stack);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/users', authenticateToken, requireSuperAdmin, async (req, res) => {
+  try {
+    const { first_name, last_name, email, role } = req.body;
+    const validRoles = ['requester', 'approver', 'issuer', 'superadmin', 'field_engineer', 'field_engineer_admin', 'finance'];
+    if (!validRoles.includes(role)) return res.status(400).json({ error: 'Invalid role' });
+    const user = await createUser(first_name, last_name, email, role, req.user.id, getClientIp(req));
+    res.status(201).json(user);
+  } catch (error) {
+    console.error('Error creating user:', error.stack);
+    res.status(400).json({ error: error.message });
+  }
+});
+
+app.put('/api/users/:id/role', authenticateToken, requireSuperAdmin, async (req, res) => {
+  try {
+    const userId = parseInt(req.params.id);
+    const { role } = req.body;
+    const validRoles = ['requester', 'approver', 'issuer', 'superadmin', 'field_engineer', 'field_engineer_admin', 'finance'];
+    if (!validRoles.includes(role)) return res.status(400).json({ error: 'Invalid role' });
+    const user = await updateUserRole(userId, role, req.user.id, getClientIp(req));
+    res.json(user);
+  } catch (error) {
+    console.error('Error updating user role:', error.stack);
+    res.status(400).json({ error: error.message });
+  }
+});
+
+app.put('/api/users/:id', authenticateToken, requireSuperAdmin, async (req, res) => {
+  try {
+    const userId = parseInt(req.params.id);
+    const updates = req.body;
+    const user = await updateUser(userId, updates, req.user.id, getClientIp(req));
+    res.json(user);
+  } catch (error) {
+    console.error('Error updating user:', error.stack);
+    res.status(error.message.includes('already exists') ? 400 : (error.message.includes('not found') ? 404 : 500)).json({ error: error.message });
+  }
+});
+
+app.delete('/api/users/:id', authenticateToken, requireSuperAdmin, async (req, res) => {
+  try {
+    const userId = parseInt(req.params.id);
+    const result = await deleteUser(userId, req.user.id, getClientIp(req));
+    res.json(result);
+  } catch (error) {
+    console.error('Error deleting user:', error.stack);
+    res.status(error.message.includes('not found') ? 404 : 500).json({ error: error.message });
+  }
+});
+
+app.post('/api/users/:id/reset-password', authenticateToken, requireSuperAdmin, async (req, res) => {
+  try {
+    const userId = parseInt(req.params.id);
+    const result = await resetUserPassword(userId, req.user.id, getClientIp(req));
+    res.json(result);
+  } catch (error) {
+    console.error('Error resetting password:', error.stack);
+    res.status(400).json({ error: error.message });
+  }
+});
+
+app.post('/api/send-low-stock-alert', authenticateToken, async (req, res) => {
+  try {
+    const { lowStockItems, supervisors } = req.body;
+    await sendLowStockAlert(lowStockItems, supervisors);
+    res.json({ message: 'Low stock alert sent successfully' });
+  } catch (error) {
+    console.error('Error in manual low stock alert trigger:', error);
+    res.status(500).json({ error: 'Failed to send alert: ' + error.message });
+  }
+});
+
+app.get('/api/items', authenticateToken, async (req, res) => {
+  try {
+    const items = await getItems();
+    res.json(items);
+  } catch (error) {
+    console.error('Error fetching items:', error.stack);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/items', authenticateToken, upload.single('receiptImage'), async (req, res) => {
+  try {
+    const itemData = req.body;
+    let receiptImages = [];
+    if (req.file) receiptImages = [`/uploads/${req.file.filename}`];
+    const ip = getClientIp(req);
+    const item = await addItem({ ...itemData, receipt_images: JSON.stringify(receiptImages) }, req.user.id, ip);
+    const parsedQuantity = parseInt(itemData.quantity, 10);
+    const threshold = item.low_stock_threshold || 5;
+    if (parsedQuantity <= threshold) {
+      sendLowStockAlert([item]).catch(err => console.error('Alert failed after item add:', err));
+    }
+    res.status(201).json(item);
+  } catch (error) {
+    console.error('Error adding item - Full stack:', error.stack);
+    res.status(500).json({ error: `Failed to add item: ${error.message}` });
+  }
+});
+
+app.put('/api/items/:id', authenticateToken, upload.single('receiptImage'), async (req, res) => {
+  try {
+    const itemId = parseInt(req.params.id);
+    const currentItems = await getItems();
+    const currentItem = currentItems.find(item => item.id === itemId);
+    if (!currentItem) return res.status(404).json({ error: 'Item not found' });
+    const itemData = req.body;
+    let receiptImages = typeof currentItem.receipt_images === 'string' ? JSON.parse(currentItem.receipt_images) : currentItem.receipt_images || [];
+    if (req.file) receiptImages.push(`/uploads/${req.file.filename}`);
+    const updatedItemData = { ...itemData, receipt_images: JSON.stringify(receiptImages) };
+    const ip = getClientIp(req);
+    const item = await updateItem(itemId, updatedItemData, req.user.id, ip);
+    const oldQuantity = parseInt(currentItem.quantity, 10);
+    const newQuantity = parseInt(itemData.quantity, 10);
+    const threshold = item.low_stock_threshold || 5;
+    if (newQuantity < oldQuantity && newQuantity <= threshold) {
+      sendLowStockAlert([item]).catch(err => console.error('Alert failed after item update:', err));
+    }
+    res.json(item);
+  } catch (error) {
+    console.error(`Error updating item ID ${req.params.id} - Full stack:`, error.stack);
+    res.status(error.message === 'Item not found' ? 404 : 500).json({ error: `Failed to update item: ${error.message}` });
+  }
+});
+
+app.delete('/api/items/:id', authenticateToken, requireSuperAdmin, async (req, res) => {
+  try {
+    const currentItems = await getItems();
+    const itemToDelete = currentItems.find(item => item.id === parseInt(req.params.id));
+    if (itemToDelete) {
+      let receiptImages = typeof itemToDelete.receipt_images === 'string' ? JSON.parse(itemToDelete.receipt_images) : itemToDelete.receipt_images || [];
+      receiptImages.forEach(imgPath => {
+        try { fs.unlinkSync(`.${imgPath}`); } catch (e) { console.warn('Could not delete image:', e); }
+      });
+    }
+    const ip = getClientIp(req);
+    const result = await deleteItem(req.params.id, req.user.id, ip);
+    res.json(result);
+  } catch (error) {
+    console.error(`Error deleting item ID ${req.params.id} - Full stack:`, error.stack);
+    res.status(error.message === 'Item not found' ? 404 : 500).json({ error: error.message });
+  }
+});
+
+app.get('/api/categories', authenticateToken, async (req, res) => {
+  try {
+    const categories = await getCategories();
+    res.json(categories);
+  } catch (error) {
+    console.error('Error fetching categories:', error.stack);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/categories', authenticateToken, async (req, res) => {
+  try {
+    const ip = getClientIp(req);
+    const category = await addCategory(req.body, req.user.id, ip);
+    res.status(201).json(category);
+  } catch (error) {
+    console.error('Error adding category - Full stack:', error.stack);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.put('/api/categories/:id', authenticateToken, async (req, res) => {
+  try {
+    const ip = getClientIp(req);
+    const category = await updateCategory(req.params.id, req.body, req.user.id, ip);
+    res.json(category);
+  } catch (error) {
+    console.error(`Error updating category ID ${req.params.id} - Full stack:`, error.stack);
+    res.status(error.message === 'Category not found' ? 404 : 500).json({ error: error.message });
+  }
+});
+
+app.delete('/api/categories/:id', authenticateToken, requireSuperAdmin, async (req, res) => {
+  try {
+    const ip = getClientIp(req);
+    const result = await deleteCategory(req.params.id, req.user.id, ip);
+    res.json(result);
+  } catch (error) {
+    console.error(`Error deleting category ID ${req.params.id} - Full stack:`, error.stack);
+    res.status(error.message === 'Category not found' ? 404 : 500).json({ error: error.message });
+  }
+});
+
+app.get('/api/items-out', authenticateToken, async (req, res) => {
+  try {
+    const itemsOut = await getItemsOut();
+    res.json(itemsOut);
+  } catch (error) {
+    console.error('Error fetching items out:', error.stack);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/items-out', authenticateToken, async (req, res) => {
+  try {
+    const ip = getClientIp(req);
+    const itemOut = await issueItem(req.body, req.user.id, ip);
+    sendLowStockAlert().catch(err => console.error('Alert failed after item issue:', err));
+    res.status(201).json(itemOut);
+  } catch (error) {
+    console.error('Error issuing item:', error.stack);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/low-stock', authenticateToken, async (req, res) => {
+  try {
+    const lowStockItems = await getLowStockItems();
+    res.json(lowStockItems);
+  } catch (error) {
+    console.error('Error fetching low stock items:', error.stack);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/dashboard-stats', authenticateToken, async (req, res) => {
+  try {
+    const stats = await getDashboardStats();
+    res.json(stats);
+  } catch (error) {
+    console.error('Error fetching dashboard stats:', error.stack);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/requests', authenticateToken, async (req, res) => {
+  try {
+    let requestData, selectedApproverIds, requestType = 'material_request', lineItems = [];
+
+    if (req.body.requestData && req.body.selectedApproverIds !== undefined) {
+      requestData = req.body.requestData;
+      selectedApproverIds = req.body.selectedApproverIds;
+      requestType = req.body.requestType || 'cash_request';
+      lineItems = req.body.lineItems || [];
+    } else {
+      requestData = req.body;
+      selectedApproverIds = req.body.selectedApproverIds || [];
+      requestType = req.body.type || 'material_request';
+    }
+
+    if (!selectedApproverIds || !Array.isArray(selectedApproverIds) || selectedApproverIds.length === 0) {
+      return res.status(400).json({ error: 'At least one approver must be selected' });
+    }
+
+    const ip = getClientIp(req);
+    const newRequest = await createRequest(
+      requestData,
+      selectedApproverIds,
+      requestType,
+      req.user.id,
+      ip,
+      lineItems
+    );
+
+    await insertAuditLog(
+      req.user.id,
+      'create_request',
+      ip,
+      {
+        request_id: newRequest.id,
+        type: requestType,
+        total_amount: requestData.totalAmount || null,
+        line_items_count: lineItems.length
+      }
+    );
+
+    res.status(201).json(newRequest);
+  } catch (error) {
+    console.error('Error creating request:', error.stack);
+    res.status(500).json({ 
+      error: error.message || 'Failed to create request',
+    });
+  }
+});
+
+app.get('/api/requests', authenticateToken, async (req, res) => {
+  try {
+    const requests = await getRequests(req.user.role, req.user.id);
+    res.json(requests);
+  } catch (error) {
+    console.error('Error fetching requests:', error.stack);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.put('/api/requests/:id', authenticateToken, async (req, res) => {
+  try {
+    const ip = getClientIp(req);
+    const result = await updateRequest(req.params.id, req.body, req.user.id, ip, req.user.role);
+    res.json(result);
+  } catch (error) {
+    console.error(`Error updating request ID ${req.params.id} - Full stack:`, error.stack);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/requests/:id/reject', authenticateToken, requireManager, async (req, res) => {
+  try {
+    const { reason, rejectorName } = req.body;
+    const ip = getClientIp(req);
+    const result = await rejectRequest(req.params.id, req.user.id, ip, { reason, rejectorName });
+    res.json(result);
+  } catch (error) {
+    console.error(`Error rejecting request ID ${req.params.id} - Full stack:`, error.stack);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/requests/:id/approve', authenticateToken, async (req, res) => {
+  try {
+    const requestId = req.params.id;
+    const { approverName, signature, stage } = req.body;
+
+    if (!approverName || typeof approverName !== 'string' || approverName.trim() === '') {
+      return res.status(400).json({ error: 'approverName is required and must be a non-empty string' });
+    }
+
+    if (stage !== 'approver' && stage !== 'finance') {
+      return res.status(400).json({ error: `Invalid stage: '${stage}'. Must be 'approver' or 'finance'` });
+    }
+
+    const ip = getClientIp(req);
+
+    console.log(`Approving request ${requestId} as ${stage} by ${approverName}`);
+
+    const result = await approveRequest(
+      requestId,
+      { approverName: approverName.trim(), signature: signature?.trim() || '', stage },
+      req.user.id,
+      ip
+    );
+
+    console.log(`Request ${requestId} approved successfully as ${stage}`);
+    res.json(result);
+  } catch (error) {
+    console.error(`Failed to approve request ${req.params.id}:`, error.message);
+    console.error('Stack:', error.stack);
+    res.status(500).json({ error: error.message || 'Approval failed' });
+  }
+});
+
+app.post('/api/requests/:id/finalize', authenticateToken, requireSuperAdminOrIssuer, async (req, res) => {
+  try {
+    console.log('=== FINALIZE REQUEST RECEIVED ===');
+    console.log('Request ID:', req.params.id);
+    console.log('User:', req.user.id, req.user.role);
+    console.log('Full body:', req.body);
+    console.log('releasedBy:', req.body.releasedBy);
+    console.log('items:', req.body.items ? `array of ${req.body.items.length}` : 'missing');
+    console.log('waybill:', !!req.body.waybill);
+
+    const { items, releasedBy, waybill } = req.body;
+
+    const ip = getClientIp(req);
+    const result = await finalizeRequest(req.params.id, { items, releasedBy, waybill }, req.user.id, ip);
+    console.log('Finalize success');
+    res.json(result);
+  } catch (error) {
+    console.error(`Error finalizing request ID ${req.params.id}:`, error.message);
+    console.error('Full stack:', error.stack);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/requests/:id', authenticateToken, async (req, res) => {
+  try {
+    const request = await getRequestDetails(req.params.id);
+    res.json(request);
+  } catch (error) {
+    console.error('Error fetching request details:', error.stack);
+    res.status(error.message === 'Request not found' ? 404 : 500).json({ error: error.message });
+  }
+});
+
+app.post('/api/requests/:id/cash-received', authenticateToken, async (req, res) => {
+  try {
+    const { receivedBy } = req.body;
+    if (!receivedBy) return res.status(400).json({ error: 'receivedBy is required' });
+    const ip = getClientIp(req);
+    const result = await markCashAsReceived(req.params.id, receivedBy, req.user.id, ip);
+    res.json(result);
+  } catch (error) {
+    console.error('Error marking cash received:', error.stack);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/field/users', authenticateToken, async (req, res) => {
+  try {
+    if (!['superadmin', 'field_engineer_admin'].includes(req.user.role)) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+    const result = await pool.query(`
+      SELECT id, first_name, last_name, username, email, role 
+      FROM users 
+      WHERE role IN ('field_engineer', 'field_engineer_admin') 
+        AND deleted_at IS NULL 
+      ORDER BY first_name, last_name
+    `);
+    const users = result.rows.map(u => ({
+      id: u.id,
+      fullName: `${u.first_name} ${u.last_name}`.trim(),
+      username: u.username,
+      email: u.email,
+      role: u.role
+    }));
+    res.json(users);
+  } catch (error) {
+    console.error('Error fetching field users:', error);
+    res.status(500).json({ error: 'Failed to load field team' });
+  }
+});

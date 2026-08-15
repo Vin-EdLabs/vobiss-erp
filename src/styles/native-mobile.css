@@ -1,0 +1,69 @@
+/* Native-app feel on phones: no horizontal scroll, no auto-zoom on focus */
+
+@media (max-width: 767px) {
+  html {
+    overflow-x: hidden;
+    overscroll-behavior-x: none;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  html,
+  body {
+    touch-action: manipulation;
+    width: 100%;
+    max-width: 100%;
+  }
+
+  body {
+    overflow-x: hidden;
+    overscroll-behavior-x: none;
+    position: relative;
+  }
+
+  body.native-app-shell {
+    overscroll-behavior: none;
+  }
+
+  #root {
+    overflow-x: hidden;
+    max-width: 100%;
+    width: 100%;
+    min-height: 100dvh;
+  }
+
+  .app-shell {
+    overflow-x: hidden;
+    max-width: 100%;
+    width: 100%;
+    min-width: 0;
+  }
+
+  .app-shell > * {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  /* iOS Safari zooms focused fields below 16px — enforce minimum */
+  input,
+  textarea,
+  select,
+  [contenteditable='true'] {
+    font-size: 16px !important;
+    touch-action: manipulation;
+  }
+
+  /* Long words / attachments must not widen the viewport */
+  img,
+  video,
+  iframe,
+  pre,
+  table {
+    max-width: 100%;
+  }
+
+  pre,
+  code {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+}

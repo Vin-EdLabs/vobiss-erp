@@ -1,0 +1,450 @@
+import express from 'express';
+import multer from 'multer';
+import path from 'path';
+import fs from 'fs';
+import { fileURLToPath } from 'url';
+import pool from '../db.js';
+import { authenticateToken } from '../middleware/auth.js';
+import { ensureLeaveBalances, LEAVE_TYPES } from '../db/hr.js';
+import {
+  countWeekdays,
+  normalizeLeaveType,
+  ghanaYear,
+  isoDateOnly,
+  remainingLeaveDays,
+  notifyHrUsers,
+  getEmployeeByUserId,
+  FORM_TYPES,
+  publicUploadUrl,
+  hrUploadsDir,
+} from '../utils/hrShared.js';
+
+const router = express.Router();
+router.use(authenticateToken);
+
+if (!fs.existsSync(hrUploadsDir)) fs.mkdirSync(hrUploadsDir, { recursive: true });
+
+const storage = multer.diskStorage({
+  destination: (_req, _file, cb) => cb(null, hrUploadsDir),
+  filename: (_req, file, cb) => {
+    const unique = Date.now() + '-' + Math.round(Math.random() * 1e9);
+    cb(null, `hr-req-${unique}${path.extname(file.originalname)}`);
+  },
+});
+
+const upload = multer({
+  storage,
+  limits: { fileSize: 25 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    const ext = path.extname(file.originalname || '').toLowerCase();
+    const allowed = ['.jpg', '.jpeg', '.png', '.webp', '.gif', '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.txt'];
+    if (!allowed.includes(ext)) return cb(new Error('Attach an image or document (PDF, Word, Excel, or image)'));
+    cb(null, true);
+  },
+});
+
+async function requireLinkedEmployee(req, res) {
+  const emp = await getEmployeeByUserId(req.user.id);
+  if (!emp) {
+    res.status(404).json({ error: 'Your HR profile has not been set up yet. Contact HR to get started.' });
+    return null;
+  }
+  return emp;
+}
+
+router.get('/me', async (req, res) => {
+  try {
+    const emp = await getEmployeeByUserId(req.user.id);
+    if (!emp) return res.json(null);
+    const [pending, docs] = await Promise.all([
+      pool.query(
+        `SELECT COUNT(*)::int AS n FROM hr_leave_requests WHERE user_id = $1 AND status = 'pending'`,
+        [req.user.id]
+      ),
+      pool.query(
+        `SELECT document_name, category, created_at FROM hr_documents WHERE employee_id = $1 ORDER BY created_at DESC`,
+        [emp.id]
+      ),
+    ]);
+    res.json({ ...emp, pending_leave_count: pending.rows[0].n, documents: docs.rows });
+  } catch (err) {
+    console.error('hr-self me:', err);
+    res.status(500).json({ error: 'Failed to load HR profile' });
+  }
+});
+
+router.get('/attendance', async (req, res) => {
+  try {
+    const emp = await requireLinkedEmployee(req, res);
+    if (!emp) return;
+    const year = Number(req.query.year) || ghanaYear();
+    const month = Number(req.query.month) || new Date().getMonth() + 1;
+    const result = await pool.query(
+      `SELECT * FROM hr_attendance
+       WHERE employee_id = $1 AND EXTRACT(YEAR FROM date) = $2 AND EXTRACT(MONTH FROM date) = $3
+       ORDER BY date ASC`,
+      [emp.id, year, month]
+    );
+    const start = `${year}-${String(month).padStart(2, '0')}-01`;
+    const end = `${year}-${String(month).padStart(2, '0')}-${String(new Date(year, month, 0).getDate()).padStart(2, '0')}`;
+    const { leaveDatesByEmployee, withLeaveAttendanceRows } = await import('../utils/hrGps.js');
+    const leaveSet = (await leaveDatesByEmployee(start, end)).get(Number(emp.id)) || new Set();
+    res.json(withLeaveAttendanceRows(result.rows, leaveSet));
+  } catch (err) {
+    console.error('hr-self attendance:', err);
+    res.status(500).json({ error: 'Failed to load attendance' });
+  }
+});
+
+router.get('/attendance/today', async (req, res) => {
+  try {
+    const emp = await requireLinkedEmployee(req, res);
+    if (!emp) return;
+    const { ghanaToday } = await import('../utils/hrShared.js');
+    const { getHrSettings, leaveEmployeeIdsOn } = await import('../utils/hrGps.js');
+    const today = ghanaToday();
+    const result = await pool.query(
+      `SELECT * FROM hr_attendance WHERE employee_id = $1 AND date = $2 LIMIT 1`,
+      [emp.id, today]
+    );
+    const settings = await getHrSettings();
+    const onLeave = (await leaveEmployeeIdsOn(today)).has(Number(emp.id));
+    res.json({
+      record: result.rows[0] || null,
+      on_leave: onLeave,
+      office: settings
+        ? {
+            office_name: settings.office_name,
+            office_latitude: settings.office_latitude,
+            office_longitude: settings.office_longitude,
+            office_radius_meters: settings.office_radius_meters,
+            expected_clock_in: settings.expected_clock_in,
+            expected_clock_out: settings.expected_clock_out,
+          }
+        : null,
+    });
+  } catch (err) {
+    console.error('hr-self attendance today:', err);
+    res.status(500).json({ error: 'Failed to load today attendance' });
+  }
+});
+
+router.post('/attendance/clock-in', async (req, res) => {
+  try {
+    const emp = await requireLinkedEmployee(req, res);
+    if (!emp) return;
+    const {
+      getHrSettings,
+      parseCoords,
+      haversineDistance,
+      accraClockParts,
+      timeToMinutes,
+      hasClockedIn,
+    } = await import('../utils/hrGps.js');
+    const coords = parseCoords(req.body);
+    if (!coords) return res.status(400).json({ error: 'Latitude and longitude are required' });
+
+    const settings = await getHrSettings();
+    if (!settings?.office_latitude || !settings?.office_longitude) {
+      return res.status(400).json({ error: 'HR has not set the office location yet' });
+    }
+    const officeLat = Number(settings.office_latitude);
+    const officeLng = Number(settings.office_longitude);
+    const radius = Number(settings.office_radius_meters || 100);
+    const distance = Math.round(haversineDistance(coords.latitude, coords.longitude, officeLat, officeLng));
+    if (distance > radius) {
+      return res.status(400).json({
+        error: 'You are not within the office location',
+        distance,
+        required: radius,
+        office: { latitude: officeLat, longitude: officeLng, name: settings.office_name },
+        current: coords,
+      });
+    }
+
+    const clock = accraClockParts();
+    const existing = await pool.query(
+      `SELECT * FROM hr_attendance WHERE employee_id = $1 AND date = $2 LIMIT 1`,
+      [emp.id, clock.today]
+    );
+    if (existing.rows[0] && hasClockedIn(existing.rows[0])) {
+      return res.status(400).json({ error: 'Already clocked in today' });
+    }
+
+    const expectedMin = timeToMinutes(settings.expected_clock_in);
+    const lateMinutes = expectedMin == null ? 0 : Math.max(0, clock.minutes - expectedMin);
+    const isLate = lateMinutes > 0;
+    const status = isLate ? 'Late' : 'Present';
+    const now = new Date();
+
+    let row;
+    if (existing.rows[0]) {
+      row = (
+        await pool.query(
+          `UPDATE hr_attendance SET
+            status = $1, clock_in = $2, clock_in_time = $3, clock_in_lat = $4, clock_in_lng = $5,
+            clock_in_distance_meters = $6, is_late = $7, late_minutes = $8, is_remote = false
+           WHERE id = $9 RETURNING *`,
+          [status, clock.time, now, coords.latitude, coords.longitude, distance, isLate, lateMinutes, existing.rows[0].id]
+        )
+      ).rows[0];
+    } else {
+      row = (
+        await pool.query(
+          `INSERT INTO hr_attendance (
+            employee_id, date, status, clock_in, clock_in_time, clock_in_lat, clock_in_lng,
+            clock_in_distance_meters, is_late, late_minutes, is_remote, recorded_by
+          ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,false,$11)
+          RETURNING *`,
+          [emp.id, clock.today, status, clock.time, now, coords.latitude, coords.longitude, distance, isLate, lateMinutes, req.user.id]
+        )
+      ).rows[0];
+    }
+    res.json({ success: true, attendance: row });
+  } catch (err) {
+    console.error('hr-self clock-in:', err);
+    res.status(500).json({ error: 'Failed to clock in' });
+  }
+});
+
+router.post('/attendance/clock-out', async (req, res) => {
+  try {
+    const emp = await requireLinkedEmployee(req, res);
+    if (!emp) return;
+    const {
+      getHrSettings,
+      parseCoords,
+      haversineDistance,
+      accraClockParts,
+      timeToMinutes,
+      hasClockedIn,
+      hasClockedOut,
+    } = await import('../utils/hrGps.js');
+    const coords = parseCoords(req.body);
+    if (!coords) return res.status(400).json({ error: 'Latitude and longitude are required' });
+
+    const clock = accraClockParts();
+    const existing = await pool.query(
+      `SELECT * FROM hr_attendance WHERE employee_id = $1 AND date = $2 LIMIT 1`,
+      [emp.id, clock.today]
+    );
+    const row = existing.rows[0];
+    if (!row || !hasClockedIn(row)) {
+      return res.status(400).json({ error: 'You have not clocked in today' });
+    }
+    if (hasClockedOut(row)) {
+      return res.status(400).json({ error: 'Already clocked out today' });
+    }
+
+    const settings = await getHrSettings();
+    const radius = Number(settings?.office_radius_meters || 100);
+    let distance = 0;
+    let isRemote = false;
+    if (settings?.office_latitude && settings?.office_longitude) {
+      distance = Math.round(
+        haversineDistance(
+          coords.latitude,
+          coords.longitude,
+          Number(settings.office_latitude),
+          Number(settings.office_longitude)
+        )
+      );
+      isRemote = distance > radius;
+    }
+
+    const expectedOut = timeToMinutes(settings?.expected_clock_out);
+    const overtimeHours =
+      expectedOut == null ? 0 : Math.round((Math.max(0, clock.minutes - expectedOut) / 60) * 100) / 100;
+    const now = new Date();
+
+    const updated = await pool.query(
+      `UPDATE hr_attendance SET
+        clock_out = $1, clock_out_time = $2, clock_out_lat = $3, clock_out_lng = $4,
+        clock_out_distance_meters = $5, is_remote = $6, overtime_hours = $7
+       WHERE id = $8 RETURNING *`,
+      [clock.time, now, coords.latitude, coords.longitude, distance, isRemote, overtimeHours, row.id]
+    );
+    res.json({ success: true, attendance: updated.rows[0] });
+  } catch (err) {
+    console.error('hr-self clock-out:', err);
+    res.status(500).json({ error: 'Failed to clock out' });
+  }
+});
+
+router.get('/leave/balances', async (req, res) => {
+  try {
+    const emp = await requireLinkedEmployee(req, res);
+    if (!emp) return;
+    const year = Number(req.query.year) || ghanaYear();
+    await ensureLeaveBalances(pool, emp.id, year);
+    const result = await pool.query(
+      `SELECT *, GREATEST(total_days - used_days, 0) AS remaining_days
+       FROM hr_leave_balances WHERE employee_id = $1 AND year = $2
+       ORDER BY leave_type`,
+      [emp.id, year]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error('hr-self leave balances:', err);
+    res.status(500).json({ error: 'Failed to load leave balances' });
+  }
+});
+
+router.get('/leave/requests', async (req, res) => {
+  try {
+    const emp = await requireLinkedEmployee(req, res);
+    if (!emp) return;
+    const result = await pool.query(
+      `SELECT * FROM hr_leave_requests WHERE user_id = $1 ORDER BY created_at DESC`,
+      [req.user.id]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error('hr-self leave requests:', err);
+    res.status(500).json({ error: 'Failed to load leave requests' });
+  }
+});
+
+router.post('/leave/requests', upload.single('attachment'), async (req, res) => {
+  try {
+    const emp = await requireLinkedEmployee(req, res);
+    if (!emp) return;
+    const b = req.body || {};
+    const leaveType = normalizeLeaveType(b.leave_type);
+    if (!leaveType || !LEAVE_TYPES.includes(leaveType)) {
+      return res.status(400).json({ error: `Leave type must be one of: ${LEAVE_TYPES.join(', ')}` });
+    }
+    const start = isoDateOnly(b.start_date);
+    const end = isoDateOnly(b.end_date);
+    if (!start || !end) return res.status(400).json({ error: 'Start and end dates are required' });
+    if (end < start) return res.status(400).json({ error: 'End date cannot be before start date' });
+    const days = countWeekdays(start, end);
+    if (days < 1) return res.status(400).json({ error: 'Selected range has no working days (weekends are excluded)' });
+
+    const reasonRequired = ['Sick', 'Emergency', 'Unpaid'].includes(leaveType);
+    const reason = String(b.reason || '').trim();
+    if (reasonRequired && !reason) {
+      return res.status(400).json({ error: 'A reason is required for this leave type' });
+    }
+
+    const year = Number(start.slice(0, 4));
+    if (leaveType !== 'Unpaid') {
+      const remaining = await remainingLeaveDays(emp.id, leaveType, year);
+      if (days > remaining) {
+        return res.status(400).json({
+          error: `Insufficient ${leaveType} leave balance. You have ${remaining} day(s) remaining, but requested ${days}.`,
+        });
+      }
+    }
+
+    const attachmentUrl = req.file ? publicUploadUrl(req.file.filename) : null;
+    const attachmentName = req.file ? req.file.originalname : null;
+
+    const result = await pool.query(
+      `INSERT INTO hr_leave_requests (
+        user_id, employee_id, leave_type, start_date, end_date, days, reason, status, attachment_url, attachment_name
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,'pending',$8,$9) RETURNING *`,
+      [req.user.id, emp.id, leaveType, start, end, days, reason || null, attachmentUrl, attachmentName]
+    );
+    const row = result.rows[0];
+    await notifyHrUsers(
+      'New leave request',
+      `New leave request from ${emp.full_name} — ${leaveType} Leave, ${days} day${days === 1 ? '' : 's'}`,
+      '/hr/leave'
+    );
+    res.status(201).json(row);
+  } catch (err) {
+    console.error('hr-self create leave:', err);
+    res.status(500).json({ error: err.message || 'Failed to submit leave request' });
+  }
+});
+
+router.post('/leave/requests/:id/cancel', async (req, res) => {
+  try {
+    const emp = await requireLinkedEmployee(req, res);
+    if (!emp) return;
+    const existing = await pool.query(
+      `SELECT * FROM hr_leave_requests WHERE id = $1 AND user_id = $2`,
+      [req.params.id, req.user.id]
+    );
+    if (existing.rowCount === 0) return res.status(404).json({ error: 'Leave request not found' });
+    if (existing.rows[0].status !== 'pending') {
+      return res.status(400).json({ error: 'Only pending requests can be cancelled' });
+    }
+    const result = await pool.query(
+      `UPDATE hr_leave_requests SET status = 'cancelled' WHERE id = $1 RETURNING *`,
+      [req.params.id]
+    );
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('hr-self cancel leave:', err);
+    res.status(500).json({ error: 'Failed to cancel leave request' });
+  }
+});
+
+router.get('/forms/requests', async (req, res) => {
+  try {
+    const emp = await requireLinkedEmployee(req, res);
+    if (!emp) return;
+    const result = await pool.query(
+      `SELECT * FROM hr_form_requests WHERE user_id = $1 ORDER BY created_at DESC`,
+      [req.user.id]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error('hr-self form requests:', err);
+    res.status(500).json({ error: 'Failed to load form requests' });
+  }
+});
+
+router.post('/forms/requests', upload.single('attachment'), async (req, res) => {
+  try {
+    const emp = await requireLinkedEmployee(req, res);
+    if (!emp) return;
+    const b = req.body || {};
+    const formType = String(b.form_type || '').trim();
+    if (!FORM_TYPES.includes(formType)) {
+      return res.status(400).json({ error: `Form type must be one of: ${FORM_TYPES.join(', ')}` });
+    }
+    const reason = String(b.reason || '').trim();
+    if (!reason) return res.status(400).json({ error: 'Please provide a reason or details' });
+    let details = {};
+    if (b.details) {
+      try {
+        details = typeof b.details === 'string' ? JSON.parse(b.details) : b.details;
+      } catch {
+        details = {};
+      }
+    }
+    if (typeof details !== 'object' || details == null) details = {};
+    if (formType === 'Salary Advance Request') {
+      const amount = Number(details.amount);
+      if (!Number.isFinite(amount) || amount <= 0) {
+        return res.status(400).json({ error: 'Enter a valid amount for the salary advance' });
+      }
+    }
+    const attachmentUrl = req.file ? publicUploadUrl(req.file.filename) : null;
+    const attachmentName = req.file ? req.file.originalname : null;
+    const result = await pool.query(
+      `INSERT INTO hr_form_requests (user_id, employee_id, form_type, reason, details, status, attachment_url, attachment_name)
+       VALUES ($1,$2,$3,$4,$5::jsonb,'pending',$6,$7) RETURNING *`,
+      [req.user.id, emp.id, formType, reason, JSON.stringify(details), attachmentUrl, attachmentName]
+    );
+    await notifyHrUsers(
+      'New form request',
+      `New form request from ${emp.full_name} — ${formType}`,
+      '/hr/forms'
+    );
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    console.error('hr-self create form:', err);
+    res.status(500).json({ error: err.message || 'Failed to submit form request' });
+  }
+});
+
+router.use((err, _req, res, next) => {
+  if (err) return res.status(400).json({ error: err.message || 'Upload failed' });
+  next();
+});
+
+export default router;

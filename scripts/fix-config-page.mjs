@@ -1,0 +1,14 @@
+import fs from 'fs';
+const p = new URL('../src/pages/ConfigurationPage.tsx', import.meta.url);
+let lines = fs.readFileSync(p, 'utf8').split(/\r?\n/);
+lines[449] = '              </motion>';
+lines[450] = '            </motion>';
+lines[451] = '          ))}';
+lines[452] = '        </motion>';
+lines[453] = '      </section>';
+lines[454] = '    </motion>';
+lines[455] = '  );';
+lines[456] = '}';
+const fixed = lines.slice(0, 457).join('\n').replaceAll('</motion>', '</div>').replaceAll('<motion ', '<div ');
+fs.writeFileSync(p, fixed);
+console.log('fixed', lines[449], lines[450]);
