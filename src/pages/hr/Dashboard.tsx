@@ -77,7 +77,7 @@ const HrDashboard = () => {
       />
 
       {(stats?.pendingLeaveRequests > 0 || stats?.pendingFormRequests > 0) && (
-        <div className="mb-4 rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow)] p-4">
+        <div className="mb-4 rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow-md)] p-4">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex items-start gap-3">
               <AlertCircle className="mt-0.5 h-5 w-5 text-[var(--primary)]" />
@@ -133,7 +133,7 @@ const HrDashboard = () => {
         </div>
 
       <div className="mt-4 grid gap-4 sm:grid-cols-2">
-        <div className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow)] p-5">
+        <div className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow-md)] p-5">
           <p className="text-sm font-semibold">This month attendance</p>
           <div className="mt-4 flex items-center gap-4">
             <div
@@ -149,7 +149,7 @@ const HrDashboard = () => {
             <p className="text-sm text-[var(--text-secondary)]">Share of working days marked present this month.</p>
           </div>
         </div>
-        <div className="flex min-h-[200px] items-center justify-center rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow)] p-4">
+        <div className="flex min-h-[200px] items-center justify-center rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow-md)] p-4">
           <div className="h-[200px] w-[200px]">
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
@@ -172,7 +172,7 @@ const HrDashboard = () => {
         </div>
       </div>
 
-      <div className="mt-4 rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow)] p-4">
+      <div className="mt-4 rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow-md)] p-4">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <p className="text-sm font-semibold text-[var(--text-primary)]">Payroll status</p>
@@ -204,7 +204,7 @@ const HrDashboard = () => {
       </div>
 
       <div className="mt-4 grid min-w-0 gap-4 xl:grid-cols-3 sm:mt-6">
-        <div className="min-w-0 rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow)] p-4 sm:p-5 xl:col-span-2">
+        <div className="min-w-0 rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow-md)] p-4 sm:p-5 xl:col-span-2">
           <div className="flex items-center justify-between">
             <h2 className="text-sm font-semibold text-[var(--text-primary)]">Headcount by department</h2>
             <span className="text-[13px] text-[var(--primary)]">This month</span>
@@ -220,7 +220,7 @@ const HrDashboard = () => {
             </ResponsiveContainer>
           </div>
         </div>
-        <div className="min-w-0 rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow)] p-4 sm:p-5">
+        <div className="min-w-0 rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow-md)] p-4 sm:p-5">
           <h2 className="text-sm font-semibold text-[var(--text-primary)]">Employment type</h2>
           <div className="mt-4 h-52">
             <ResponsiveContainer width="100%" height="100%">
@@ -257,7 +257,7 @@ const HrDashboard = () => {
       </div>
 
       <div className="mt-6 grid gap-4 lg:grid-cols-2">
-        <div className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow)] p-5">
+        <div className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow-md)] p-5">
           <h2 className="text-sm font-semibold text-[var(--text-primary)]">Recent activity</h2>
           <div className="mt-4 space-y-1">
             {(stats?.activity || []).length === 0 && (
@@ -277,7 +277,7 @@ const HrDashboard = () => {
             ))}
           </div>
         </div>
-        <div className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow)] p-5">
+        <div className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow-md)] p-5">
           <h2 className="text-sm font-semibold text-[var(--text-primary)]">On leave today</h2>
           <div className="mt-4 flex flex-wrap gap-2">
             {onLeaveToday.length === 0 && (
@@ -294,7 +294,7 @@ const HrDashboard = () => {
         </div>
       </div>
 
-      <div className="mt-6 rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow)] p-5">
+      <div className="mt-6 rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow-md)] p-5">
         <h2 className="text-sm font-semibold text-[var(--text-primary)]">Upcoming contract renewals (60 days)</h2>
         <div className="mt-4 overflow-x-auto">
           {(stats?.upcomingRenewals || []).length === 0 ? (

@@ -4,6 +4,7 @@ import { getChannelMessages, sendChannelMessage, type ChatMessage } from '@/api/
 import { postVobiCommand } from '@/api/vobi';
 import type { VobiCommandMeta } from '@/api/vobi';
 import { VobiMessageCard } from './VobiMessageCard';
+import { VobiMessage } from './VobiMessage';
 import { VobiDigestCard, VobiThreadSummaryCard } from './VobiChatSummaryCard';
 import { VobiCommandBar } from './VobiCommandBar';
 import { useAuth } from '@/context/AuthContext';
@@ -95,10 +96,7 @@ export function VobiChatView({ channelId }: { channelId: string }) {
               draggable={false}
             />
             <p className="mt-2 text-sm font-medium text-[var(--color-text-primary)]">
-              Vobi is ready.
-            </p>
-            <p className="mt-1 text-xs text-[var(--color-text-tertiary)]">
-              Ask about approvals, tickets, mentions, or what you missed.
+              Vobi
             </p>
             <button
               type="button"
@@ -148,7 +146,7 @@ function VobiChatMessage({
         </span>
         <div className="max-w-[82%]">
           <div className="rounded-[14px_14px_14px_3px] bg-[var(--color-background-secondary)] px-[13px] py-2.5 text-[13px] leading-[1.5] text-[var(--color-text-primary)]">
-            <div className="whitespace-pre-line">{message.body}</div>
+            <VobiMessage content={message.body} />
             {meta?.threadSummary && (
               <VobiThreadSummaryCard summary={meta.threadSummary} />
             )}

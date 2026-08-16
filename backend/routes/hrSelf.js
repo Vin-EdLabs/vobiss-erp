@@ -5,6 +5,7 @@ import fs from 'fs';
 import { fileURLToPath } from 'url';
 import pool from '../db.js';
 import { authenticateToken } from '../middleware/auth.js';
+import { invalidateOnMutation } from '../services/vobiCache.js';
 import { ensureLeaveBalances, LEAVE_TYPES } from '../db/hr.js';
 import {
   countWeekdays,
@@ -13,7 +14,7 @@ import {
   isoDateOnly,
   remainingLeaveDays,
   notifyHrUsers,
-  getEmployeeByUserId,
+  ensureEmployeeForUser,
   FORM_TYPES,
   publicUploadUrl,
   hrUploadsDir,
@@ -21,6 +22,7 @@ import {
 
 const router = express.Router();
 router.use(authenticateToken);
+router.use(invalidateOnMutation);
 
 if (!fs.existsSync(hrUploadsDir)) fs.mkdirSync(hrUploadsDir, { recursive: true });
 
@@ -44,7 +46,7 @@ const upload = multer({
 });
 
 async function requireLinkedEmployee(req, res) {
-  const emp = await getEmployeeByUserId(req.user.id);
+  const emp = await ensureEmployeeForUser(req.user);
   if (!emp) {
     res.status(404).json({ error: 'Your HR profile has not been set up yet. Contact HR to get started.' });
     return null;
@@ -54,11 +56,15 @@ async function requireLinkedEmployee(req, res) {
 
 router.get('/me', async (req, res) => {
   try {
-    const emp = await getEmployeeByUserId(req.user.id);
+    const emp = await ensureEmployeeForUser(req.user);
     if (!emp) return res.json(null);
-    const [pending, docs] = await Promise.all([
+    const [pending, pendingForms, docs] = await Promise.all([
       pool.query(
         `SELECT COUNT(*)::int AS n FROM hr_leave_requests WHERE user_id = $1 AND status = 'pending'`,
+        [req.user.id]
+      ),
+      pool.query(
+        `SELECT COUNT(*)::int AS n FROM hr_form_requests WHERE user_id = $1 AND status = 'pending'`,
         [req.user.id]
       ),
       pool.query(
@@ -66,7 +72,12 @@ router.get('/me', async (req, res) => {
         [emp.id]
       ),
     ]);
-    res.json({ ...emp, pending_leave_count: pending.rows[0].n, documents: docs.rows });
+    res.json({
+      ...emp,
+      pending_leave_count: pending.rows[0].n,
+      pending_form_count: pendingForms.rows[0].n,
+      documents: docs.rows,
+    });
   } catch (err) {
     console.error('hr-self me:', err);
     res.status(500).json({ error: 'Failed to load HR profile' });

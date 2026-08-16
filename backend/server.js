@@ -22,7 +22,7 @@ import {
   getSupervisors, addSupervisor, updateSupervisor, deleteSupervisor,
   initDB, getSettings, updateSetting,
   getUsers, createUser, getUserByLogin, resetUserPassword, updateUserRole, updateUser, deleteUser,
-  getApprovers, getWorkflowConfig, updateWorkflowConfig, backupDatabase, restoreDatabase, wipeDatabase,
+  getApprovers, getWorkflowConfig, updateWorkflowConfig, getRealmApprovers, updateRealmApprovers, backupDatabase, restoreDatabase, wipeDatabase,
   markCashAsReceived,
   getNotificationsForUser, createNotification, markNotificationRead, deleteNotification,
   getUserWorkspace,
@@ -58,6 +58,8 @@ import {
   canAccessGlobalDashboard,
   getPrimaryUnit,
   getSystemRole,
+  isRealmMaterialApprover,
+  isRealmCashApprover,
 } from './permissions.js';
 import { processAutoEscalations } from './ticketEscalation.js';
 import { startInboundEmailService } from './inboundEmailService.js';
@@ -74,7 +76,7 @@ import hrSelfRoutes from './routes/hrSelf.js';
 import { registerTodoRoutes } from './routes/todos.js';
 import { initHrSchema, seedHrDemo } from './db/hr.js';
 import { initFieldSchema } from './db/field.js';
-import { initChat } from './services/chatInit.js';
+import { initChat, ensureUserChatMembership } from './services/chatInit.js';
 import {
   postRequestSystemMessage,
   postTicketSystemMessage,
@@ -423,6 +425,22 @@ const requireManager = (req, res, next) => {
   next();
 };
 
+function permissionFlags(permissionUser) {
+  return {
+    system_role: getSystemRole(permissionUser),
+    primary_unit: getPrimaryUnit(permissionUser),
+    can_create_material_request: canCreateMaterialRequest(permissionUser),
+    can_create_cash_request: canCreateCashRequest(permissionUser),
+    can_approve_material_request: canApproveMaterialRequest(permissionUser),
+    can_execute_material: canExecuteMaterial(permissionUser),
+    can_approve_cash_request: canApproveCashRequest(permissionUser),
+    can_release_cash: canReleaseCash(permissionUser),
+    can_access_global_dashboard: canAccessGlobalDashboard(permissionUser),
+    realm_material_approver: isRealmMaterialApprover(permissionUser),
+    realm_cash_approver: isRealmCashApprover(permissionUser),
+  };
+}
+
 async function getFreshPermissionUser(userId) {
   const result = await pool.query(
     `SELECT id, username, first_name, last_name, role, main_role, roles, units, unit, position
@@ -564,6 +582,7 @@ async function notifyRequestRealtime(requestId, action, meta = {}) {
 // INIT DB + SEED SUPERADMIN
 (async () => {
   await initDB();
+  await getRealmApprovers();
   await initHrSchema(pool);
   await initFieldSchema(pool);
   await initChat();
@@ -660,6 +679,8 @@ app.post('/api/login', async (req, res) => {
       : [user.role || 'requester'];
     const units = user.units && Array.isArray(user.units) ? user.units : [];
     const permissionUser = { ...user, main_role: mainRole, roles, units };
+    await getRealmApprovers();
+    const loginPermissions = permissionFlags(permissionUser);
     
     const token = jwt.sign({ 
       id: user.id, 
@@ -670,11 +691,7 @@ app.post('/api/login', async (req, res) => {
       units: units,   // Units for access control
       unit: user.unit || null,
       position: user.position || null,
-      permissions: {
-        system_role: getSystemRole(permissionUser),
-        primary_unit: getPrimaryUnit(permissionUser),
-        can_access_global_dashboard: canAccessGlobalDashboard(permissionUser),
-      }
+      permissions: loginPermissions,
     }, JWT_SECRET, { expiresIn: process.env.JWT_EXPIRES_IN || '7d' });
     
     const ip = getClientIp(req);
@@ -691,17 +708,7 @@ app.post('/api/login', async (req, res) => {
         units: units,  // Units
         unit: user.unit || null,
         position: user.position || null,
-        permissions: {
-          system_role: getSystemRole(permissionUser),
-          primary_unit: getPrimaryUnit(permissionUser),
-          can_create_material_request: canCreateMaterialRequest(permissionUser),
-          can_create_cash_request: canCreateCashRequest(permissionUser),
-          can_approve_material_request: canApproveMaterialRequest(permissionUser),
-          can_execute_material: canExecuteMaterial(permissionUser),
-          can_approve_cash_request: canApproveCashRequest(permissionUser),
-          can_release_cash: canReleaseCash(permissionUser),
-          can_access_global_dashboard: canAccessGlobalDashboard(permissionUser),
-        },
+        permissions: loginPermissions,
         first_name: user.first_name,
         last_name: user.last_name,
         full_name: `${user.first_name} ${user.last_name}`.trim(),
@@ -737,7 +744,13 @@ app.get('/api/me', authenticateToken, async (req, res) => {
     const rolesArr = Array.isArray(roles) && roles.length > 0 ? roles : [dbUser.role || 'requester'];
     const units = dbUser.units && (typeof dbUser.units === 'string' ? JSON.parse(dbUser.units) : dbUser.units);
     const unitsArr = Array.isArray(units) ? units : [];
+    await getRealmApprovers();
     const permissionUser = { ...dbUser, main_role: mainRole, roles: rolesArr, units: unitsArr };
+    try {
+      await ensureUserChatMembership(dbUser.id, rolesArr);
+    } catch (e) {
+      console.warn('[chat] ensure membership on /me:', e.message);
+    }
     res.json({
       id: dbUser.id,
       username: dbUser.username,
@@ -747,17 +760,7 @@ app.get('/api/me', authenticateToken, async (req, res) => {
       units: unitsArr,
       unit: dbUser.unit || null,
       position: dbUser.position || null,
-      permissions: {
-        system_role: getSystemRole(permissionUser),
-        primary_unit: getPrimaryUnit(permissionUser),
-        can_create_material_request: canCreateMaterialRequest(permissionUser),
-        can_create_cash_request: canCreateCashRequest(permissionUser),
-        can_approve_material_request: canApproveMaterialRequest(permissionUser),
-        can_execute_material: canExecuteMaterial(permissionUser),
-        can_approve_cash_request: canApproveCashRequest(permissionUser),
-        can_release_cash: canReleaseCash(permissionUser),
-        can_access_global_dashboard: canAccessGlobalDashboard(permissionUser),
-      },
+      permissions: permissionFlags(permissionUser),
       first_name: dbUser.first_name,
       last_name: dbUser.last_name,
       full_name: `${dbUser.first_name || ''} ${dbUser.last_name || ''}`.trim(),
@@ -864,6 +867,44 @@ app.put('/api/config/workflow', authenticateToken, requireSuperAdmin, async (req
   } catch (error) {
     console.error('Error updating workflow config:', error.stack);
     res.status(500).json({ error: error.message || 'Failed to update workflow config' });
+  }
+});
+
+app.get('/api/realm', authenticateToken, requireSuperAdmin, async (req, res) => {
+  try {
+    const realm = await getRealmApprovers();
+    const ids = [...new Set([...(realm.material_user_ids || []), ...(realm.cash_user_ids || [])])];
+    let people = [];
+    if (ids.length) {
+      const result = await pool.query(
+        `SELECT id, first_name, last_name, username, role, position, unit
+         FROM users WHERE deleted_at IS NULL AND id = ANY($1::int[])
+         ORDER BY last_name ASC, first_name ASC`,
+        [ids]
+      );
+      people = result.rows.map((row) => ({
+        id: row.id,
+        fullName: `${row.first_name || ''} ${row.last_name || ''}`.trim() || row.username,
+        username: row.username,
+        role: row.role,
+        position: row.position,
+        unit: row.unit,
+      }));
+    }
+    res.json({ ...realm, people });
+  } catch (error) {
+    console.error('Error fetching realm:', error.stack);
+    res.status(500).json({ error: error.message || 'Failed to load Realm' });
+  }
+});
+
+app.put('/api/realm', authenticateToken, requireSuperAdmin, async (req, res) => {
+  try {
+    const realm = await updateRealmApprovers(req.body || {});
+    res.json(realm);
+  } catch (error) {
+    console.error('Error updating realm:', error.stack);
+    res.status(500).json({ error: error.message || 'Failed to save Realm' });
   }
 });
 
@@ -1509,30 +1550,15 @@ app.post('/api/requests', authenticateToken, async (req, res) => {
       ]);
     }
     const selectedIds = selectedApproverIds.map((id) => Number(id)).filter(Boolean);
-    const approverRows = selectedIds.length
-      ? await pool.query(
-          `SELECT id, username, first_name, last_name, role, main_role, roles, units, unit, position
-           FROM users
-           WHERE id = ANY($1::int[]) AND deleted_at IS NULL`,
-          [selectedIds]
-        )
-      : { rows: [] };
-    const validApproverIds = new Set(
-      approverRows.rows
-        .filter((approver) =>
-          requestType === 'cash_request'
-            ? canApproveCashRequest(approver)
-            : canApproveMaterialRequest(approver)
-        )
-        .map((approver) => Number(approver.id))
+    const realm = await getRealmApprovers();
+    const allowedIds = new Set(
+      (requestType === 'cash_request' ? realm.cash_user_ids : realm.material_user_ids).map(Number)
     );
-    if (selectedIds.some((id) => !validApproverIds.has(id))) {
+    if (selectedIds.some((id) => !allowedIds.has(id))) {
       return validationErrorResponse(
         res,
-          requestType === 'cash_request'
-            ? 'Cash requests can only be assigned to Finance approvers, Directors, or ADMIN SUPER'
-            : 'Material requests can only be assigned to valid material approvers',
-        [{ field: 'approver_ids', message: 'Choose approvers who have permission for this request type.' }]
+        'Choose approvers from the Realm list for this request type.',
+        [{ field: 'approver_ids', message: 'Only people added in Realm can be assigned to approve this request.' }]
       );
     }
     if (requestType === 'cash_request' && !canCreateCashRequest(req.user)) {
@@ -1804,20 +1830,14 @@ app.post('/api/requests/:id/approve', authenticateToken, async (req, res) => {
   }
 });
 
-const ASSIGNED_ONLY_REQUEST_ROLES = new Set([
-  'approver',
-  'finance_manager',
-  'noc_manager',
-  'noc_supervisor',
-  'ip_manager',
-  'ip_supervisor',
-  'ts_manager',
-  'ts_supervisor',
-]);
-
 async function assertRequestDetailAccess(requestId, user) {
-  const role = String(user.main_role || user.role || '').toLowerCase();
-  if (['superadmin', 'director', 'cto'].includes(role)) return;
+  const permissionUser = await getFreshPermissionUser(user.id);
+  if (!permissionUser) {
+    const err = new Error('User not found');
+    err.status = 401;
+    throw err;
+  }
+  if (canBypassApprovalRestrictions(permissionUser)) return;
 
   const { rows } = await pool.query(
     `SELECT r.id, r.type, r.created_by_id, r.created_by,
@@ -1836,20 +1856,9 @@ async function assertRequestDetailAccess(requestId, user) {
     throw err;
   }
 
-  if (request.created_by_id === user.id || request.assigned_to_user) return;
-  if (role === 'finance' && request.type === 'cash_request') return;
-  if (['issuer', 'stock_admin'].includes(role) && request.type !== 'cash_request') return;
-
-  if (ASSIGNED_ONLY_REQUEST_ROLES.has(role)) {
-    const err = new Error('This request is not assigned to you');
-    err.status = 403;
-    throw err;
-  }
-
-  const fullName = `${user.first_name || ''} ${user.last_name || ''}`.trim().toLowerCase();
-  const username = String(user.username || '').toLowerCase();
-  const createdBy = String(request.created_by || '').toLowerCase();
-  if ((fullName && createdBy.includes(fullName)) || (username && createdBy.includes(username))) return;
+  if (Number(request.created_by_id) === Number(user.id) || request.assigned_to_user) return;
+  if (canReleaseCash(permissionUser) && request.type === 'cash_request') return;
+  if (canExecuteMaterial(permissionUser) && request.type !== 'cash_request') return;
 
   const err = new Error('You do not have permission to view this request');
   err.status = 403;

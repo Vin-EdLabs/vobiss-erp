@@ -112,7 +112,9 @@ const FieldAllTickets: React.FC = () => {
         return (
           ['field_engineer', 'field_engineer_admin'].includes(role) ||
           unit === 'tx' ||
+          unit === 'ts' ||
           position.includes('tx') ||
+          position.includes('ts') ||
           position.includes('transmission') ||
           position === 'engineer'
         );
@@ -149,7 +151,9 @@ const FieldAllTickets: React.FC = () => {
           return (
             (assignee && fieldMemberNames.has(assignee)) ||
             assigneeUnit === 'tx' ||
+            assigneeUnit === 'ts' ||
             assigneePosition.includes('tx') ||
+            assigneePosition.includes('ts') ||
             assigneePosition.includes('transmission') ||
             assigneePosition === 'engineer'
           );

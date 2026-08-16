@@ -22,7 +22,7 @@ const UNIT_OPTIONS = [
   { value: '', label: 'No unit / Global' },
   { value: 'noc', label: 'NOC (Network Operations Center)' },
   { value: 'ip', label: 'IP (Infrastructure & Provisioning)' },
-  { value: 'tx', label: 'TS (Transmission Unit)' },
+  { value: 'ts', label: 'TS (Transmission Unit)' },
   { value: 'project', label: 'Project Unit' },
   { value: 'cx', label: 'CX (Customer Experience)' },
   { value: 'finance', label: 'Finance' },
@@ -70,8 +70,9 @@ function resolveSystemAccessRole(user: {
 }
 
 const formatUnitLabel = (unit?: string | null) => {
-  const value = String(unit || '').trim();
+  const value = String(unit || '').trim().toLowerCase();
   if (!value) return 'No unit';
+  if (value === 'tx' || value === 'ts') return 'TS (Transmission Unit)';
   return UNIT_OPTIONS.find((opt) => opt.value === value)?.label || value.toUpperCase();
 };
 
@@ -80,7 +81,11 @@ const formatUnitsLabel = (user: any) => {
     user?.unit,
     ...(Array.isArray(user?.units) ? user.units : []),
   ]
-    .map((v) => String(v || '').trim())
+    .map((v) => {
+      const slug = String(v || '').trim().toLowerCase();
+      if (!slug) return '';
+      return slug === 'tx' ? 'ts' : slug;
+    })
     .filter(Boolean);
   const unique = [...new Set(slugs)].slice(0, 2);
   if (unique.length === 0) return 'No unit';
@@ -92,14 +97,26 @@ const pairFromUser = (user: any) => {
     user?.unit,
     ...(Array.isArray(user?.units) ? user.units : []),
   ]
-    .map((v) => String(v || '').trim())
+    .map((v) => {
+      const slug = String(v || '').trim().toLowerCase();
+      if (!slug) return '';
+      return slug === 'tx' ? 'ts' : slug;
+    })
     .filter(Boolean);
   const unique = [...new Set(slugs)].slice(0, 2);
   return { unit: unique[0] || '', unit2: unique[1] || '' };
 };
 
 const uniqueUnits = (unit: string, unit2: string) =>
-  [...new Set([unit, unit2].map((v) => String(v || '').trim()).filter(Boolean))].slice(0, 2);
+  [...new Set(
+    [unit, unit2]
+      .map((v) => {
+        const slug = String(v || '').trim().toLowerCase();
+        if (!slug) return '';
+        return slug === 'tx' ? 'ts' : String(v || '').trim();
+      })
+      .filter(Boolean)
+  )].slice(0, 2);
 
 const ROLE_LABELS: Record<string, string> = {
   user: 'User',

@@ -13,11 +13,14 @@ interface ProtectedRouteProps {
 const norm = (value?: string | null) => String(value || '').trim().toLowerCase();
 
 const userHasAnyUnit = (user: any, units: string[]) => {
-  const wanted = units.map(norm).filter(Boolean);
+  const wanted = units.map(norm).map((unit) => (unit === 'tx' ? 'ts' : unit)).filter(Boolean);
   const userUnits = [
     user?.unit,
     ...(Array.isArray(user?.units) ? user.units : []),
-  ].map(norm).filter(Boolean);
+  ]
+    .map(norm)
+    .map((unit) => (unit === 'tx' ? 'ts' : unit))
+    .filter(Boolean);
   return wanted.some((unit) => userUnits.includes(unit) || (unit === 'project' && userUnits.some((u) => u.startsWith('project'))));
 };
 
@@ -27,7 +30,7 @@ const userHasAnyPosition = (user: any, positions: string[]) => {
   if (wanted.includes(position)) return true;
   const isMgr = position.includes('manager') || position.includes('supervisor');
   if (!isMgr) return false;
-  return wanted.some((item) => item.includes('project')) && userHasAnyUnit(user, ['project', 'project unit']);
+  return wanted.some((item) => item.includes('manager') || item.includes('supervisor'));
 };
 
 const isDirectorAccess = (user: any) =>

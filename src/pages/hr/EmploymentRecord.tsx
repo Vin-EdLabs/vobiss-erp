@@ -102,8 +102,8 @@ export function EmploymentRecord({
           <div className="grid gap-4 sm:grid-cols-2">
             <Field label="Email" value={dash(employee.email)} />
             <Field label="Phone" value={dash(employee.phone)} />
+            <Field label="Gender" value={employee.gender === 'male' ? 'Male' : employee.gender === 'female' ? 'Female' : dash(employee.gender)} />
             <Field label="Location" value={dash(employee.location)} />
-            <Field label="Status" value={dash(employee.status)} />
           </div>
         </section>
 
@@ -111,11 +111,11 @@ export function EmploymentRecord({
           <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">Employment</p>
           <div className="grid gap-4 sm:grid-cols-2">
             <Field label="Employment type" value={dash(employee.employment_type)} />
-            <Field label="Position" value={dash(employee.position)} />
+            <Field label="Position" value={dash(employee.position || 'Staff')} />
             <Field label="Department" value={dash(employee.department)} />
             <Field label="Line manager" value={dash(employee.line_manager)} />
             <Field label="Start date" value={dateOnly(employee.start_date)} />
-            <Field label="Contract end" value={dateOnly(employee.contract_end_date)} />
+            <Field label="End date" value={dateOnly(employee.contract_end_date) === '—' ? 'Open-ended' : dateOnly(employee.contract_end_date)} />
             <Field label="Tenure" value={formatTenure(employee.start_date)} />
             <Field label="System role" value={dash(employee.system_role)} />
           </div>

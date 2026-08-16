@@ -39,7 +39,7 @@ function SectionHeader({ title, aside }: { title: string; aside?: string }) {
 
 function Card({ children, className }: { children: React.ReactNode; className?: string }) {
   return (
-    <div className={cn('rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-4 sm:p-5', className)}>
+    <div className={cn('rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-4 sm:p-5 shadow-[var(--shadow-md)]', className)}>
       {children}
     </div>
   );

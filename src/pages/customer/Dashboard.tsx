@@ -120,7 +120,7 @@ const Dashboard: React.FC = () => {
 
   const StatCard: React.FC<StatCardProps> = ({ icon: Icon, title, value, description }, _i?: number) => (
     <div
-      className="rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] px-5 py-[18px] shadow-[var(--shadow)]"
+      className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] px-5 py-[18px] shadow-[var(--shadow-md)]"
       style={{ borderLeftWidth: 3, borderLeftColor: 'var(--accent-green)' }}
     >
       <div className="flex items-start justify-between gap-3">
@@ -196,7 +196,7 @@ const Dashboard: React.FC = () => {
             </div>
 
             {/* Project Card - Premium Style */}
-            <div className="bg-white/90 backdrop-blur-sm rounded-2xl p-8 shadow-xl border border-white/30">
+            <div className="bg-white/90 backdrop-blur-sm rounded-2xl p-8 shadow-[var(--shadow-md)] border border-white/30">
               <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-8">
                 <div>
                   <h2 className="text-2xl font-bold text-gray-800 mb-3 flex items-center">
@@ -220,7 +220,7 @@ const Dashboard: React.FC = () => {
             </div>
 
             {/* Recent Tickets */}
-            <div className="bg-white/80 backdrop-blur-sm rounded-2xl p-6 shadow-xl border border-white/20">
+            <div className="bg-white/80 backdrop-blur-sm rounded-2xl p-6 shadow-[var(--shadow-md)] border border-white/20">
               <div className="flex items-center justify-between mb-6">
                 <h2 className="text-xl font-semibold text-gray-900 flex items-center">
                   <TrendingUp className="h-5 w-5 mr-2 text-indigo-600" />
@@ -258,7 +258,7 @@ const Dashboard: React.FC = () => {
                       <div
                         key={ticket.ticket_id}
                         onClick={() => navigate(`/customer/tickets/${ticket.ticket_id}`)}
-                        className="group flex items-center p-5 rounded-xl bg-gradient-to-r from-gray-50 to-white border border-gray-200 hover:shadow-lg hover:border-indigo-200 transition-all duration-300 cursor-pointer"
+                        className="group flex items-center p-5 rounded-xl bg-gradient-to-r from-gray-50 to-white border border-gray-200 shadow-[var(--shadow-md)] hover:shadow-lg hover:border-indigo-200 transition-all duration-300 cursor-pointer"
                       >
                         <div className={`p-3 rounded-xl ${statusConfig.bg} mr-4 shadow-sm group-hover:scale-110 transition-transform`}>
                           {statusConfig.icon}
@@ -291,7 +291,7 @@ const Dashboard: React.FC = () => {
             </div>
 
             {/* Support Portal Info Card */}
-            <div className="bg-white/90 backdrop-blur-md rounded-2xl p-8 shadow-2xl border border-white/30 text-center">
+            <div className="bg-white/90 backdrop-blur-md rounded-2xl p-8 shadow-[var(--shadow-md)] border border-white/30 text-center">
               <div className="w-16 h-16 bg-gradient-to-br from-indigo-100 to-purple-100 rounded-full flex items-center justify-center mx-auto mb-6">
                 <MessageSquare className="h-9 w-9 text-indigo-600" />
               </div>

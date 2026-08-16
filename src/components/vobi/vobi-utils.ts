@@ -74,11 +74,7 @@ export function buildSinceLastLoginLines(
   }
 
   if (!lines.length) {
-    if (lastLoginAt) {
-      lines.push('Nothing urgent since you were last here — you are all caught up.');
-    } else {
-      lines.push('Welcome back. I will keep track of what needs your attention.');
-    }
+    lines.push('');
   }
 
   return lines.slice(0, 5);
@@ -100,25 +96,12 @@ export function markVobiIntroSeen(userId?: number | null): void {
   localStorage.setItem(vobiIntroStorageKey(userId), '1');
 }
 
-export function buildVobiIntroMessage(firstName: string): {
+export function buildVobiIntroMessage(_firstName: string): {
   greeting: string;
   paragraphs: string[];
   bullets: string[];
 } {
-  const name = firstName || 'there';
-  return {
-    greeting: `${vobiGreeting()}, ${name}. 👋 I'm Vobi.`,
-    paragraphs: [
-      "🤝 I'm your personal work assistant inside Vobiss — not a chatbot, but a calm layer that watches what matters to you across the system.",
-      '✨ I read your tickets, material and cash requests, approvals, project updates, chat mentions, and notifications — then surface what needs your attention right now.',
-    ],
-    bullets: [
-      '✅ See approvals, tasks, and mentions in one place',
-      '📌 Catch up on what changed since you were last here',
-      '💬 Ask plain questions like “what did I miss today?”',
-      '🚀 Open Community Chat anytime to continue our conversation',
-    ],
-  };
+  return { greeting: '', paragraphs: [], bullets: [] };
 }
 
 /** Detect @vobi or /vobi in chat composer (exact command or trailing token). */

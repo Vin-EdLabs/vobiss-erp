@@ -123,6 +123,18 @@ const HrEmployees = () => {
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!form.start_date) {
+      toast.error('Start date is required');
+      return;
+    }
+    if (!form.gender) {
+      toast.error('Please select Male or Female');
+      return;
+    }
+    if (form.contract_end_date && form.contract_end_date < form.start_date) {
+      toast.error('End date cannot be before start date');
+      return;
+    }
     if (form.system_role && !form.email.trim()) {
       toast.error('Email is required when assigning a system role');
       return;
@@ -133,7 +145,7 @@ const HrEmployees = () => {
       return;
     }
     const fd = new FormData();
-    Object.entries(form).forEach(([k, v]) => fd.append(k, v));
+    Object.entries({ ...form, position: form.position.trim() || 'Staff' }).forEach(([k, v]) => fd.append(k, v));
     if (photo) fd.append('photo', photo);
     createMut.mutate({ fd, docs: documents });
   };
@@ -223,7 +235,7 @@ const HrEmployees = () => {
                       </div>
                     </div>
                   </td>
-                  <td className="px-4 py-3">{e.position || '—'}</td>
+                  <td className="px-4 py-3">{e.position || 'Staff'}</td>
                   <td className="px-4 py-3">{e.department || '—'}</td>
                   <td className="px-4 py-3">{e.start_date ? String(e.start_date).slice(0, 10) : '—'}</td>
                   <td className="px-4 py-3 capitalize">{e.employment_type}</td>

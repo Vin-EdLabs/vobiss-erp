@@ -164,6 +164,20 @@ async function loadUserIds(client) {
   return new Set(rows.map((r) => Number(r.id)));
 }
 
+async function loadFallbackUserId(client) {
+  const { rows } = await client.query(
+    `SELECT id FROM users
+      WHERE deleted_at IS NULL
+      ORDER BY CASE
+        WHEN LOWER(username) = 'superadmin' THEN 0
+        WHEN LOWER(COALESCE(main_role, role, '')) IN ('superadmin', 'system_admin') THEN 1
+        ELSE 2
+      END, id
+      LIMIT 1`
+  );
+  return rows[0]?.id ?? null;
+}
+
 function asUserId(value) {
   if (value === null || value === undefined || value === '') return null;
   const n = Number(value);
@@ -205,25 +219,55 @@ async function insertTableRows(client, table, rows, ctx) {
   }
 
   if (table === 'dm_participants') {
+    const byDm = new Map();
     for (const row of rows) {
-      if (!userIds.has(asUserId(row.user_id))) {
-        ctx.skippedDmIds.add(row.dm_id);
+      if (!byDm.has(row.dm_id)) byDm.set(row.dm_id, []);
+      byDm.get(row.dm_id).push(row);
+    }
+    for (const [dmId, members] of byDm) {
+      const kept = members.filter((row) => userIds.has(asUserId(row.user_id)));
+      if (kept.length) {
+        for (const row of kept) {
+          await insertRow(client, table, row, allowedColumns);
+        }
         continue;
       }
-      await insertRow(client, table, row, allowedColumns);
+      if (!ctx.fallbackUserId) {
+        ctx.skippedDmIds.add(dmId);
+        continue;
+      }
+      const seed = members[0] || {};
+      await insertRow(
+        client,
+        table,
+        {
+          dm_id: dmId,
+          user_id: ctx.fallbackUserId,
+          last_read_at: seed.last_read_at || new Date().toISOString(),
+        },
+        allowedColumns
+      );
     }
     return;
   }
 
   if (table === 'chat_messages') {
-    const filtered = rows.filter((row) => {
-      if (row.channel_id && ctx.skippedChannelIds.has(row.channel_id)) return false;
-      if (row.dm_id && ctx.skippedDmIds.has(row.dm_id)) return false;
-      const sender = asUserId(row.sender_id);
-      if (sender != null && !userIds.has(sender)) row.sender_id = null;
-      return true;
-    });
-    await insertChatMessages(client, filtered, allowedColumns);
+    const filtered = [];
+    for (const row of rows) {
+      if (row.channel_id && ctx.skippedChannelIds.has(row.channel_id)) {
+        ctx.skippedMessageIds.add(row.id);
+        continue;
+      }
+      if (row.dm_id && ctx.skippedDmIds.has(row.dm_id)) {
+        ctx.skippedMessageIds.add(row.id);
+        continue;
+      }
+      const next = { ...row };
+      const sender = asUserId(next.sender_id);
+      if (sender != null && !userIds.has(sender)) next.sender_id = null;
+      filtered.push(next);
+    }
+    await insertChatMessages(client, filtered, allowedColumns, ctx);
     return;
   }
 
@@ -237,13 +281,21 @@ async function insertTableRows(client, table, rows, ctx) {
   for (const row of rows) {
     if (row.channel_id && ctx.skippedChannelIds.has(row.channel_id)) continue;
     if (row.dm_id && ctx.skippedDmIds.has(row.dm_id)) continue;
-    if (row.message_id && ctx.skippedMessageIds?.has(row.message_id)) continue;
+    if (row.message_id && !ctx.insertedMessageIds.has(row.message_id)) continue;
     if (required && required.some((col) => !userIds.has(asUserId(row[col])))) continue;
-    await insertRow(client, table, row, allowedColumns);
+    try {
+      await insertRow(client, table, row, allowedColumns);
+    } catch (error) {
+      if (/foreign key constraint/i.test(error.message || '')) {
+        console.warn(`[chat-restore] skipped ${table} row:`, error.message);
+        continue;
+      }
+      throw error;
+    }
   }
 }
 
-async function insertChatMessages(client, rows, allowedColumns) {
+async function insertChatMessages(client, rows, allowedColumns, ctx) {
   const sorted = [...rows].sort(
     (a, b) => new Date(a.created_at || 0).getTime() - new Date(b.created_at || 0).getTime()
   );
@@ -256,15 +308,31 @@ async function insertChatMessages(client, rows, allowedColumns) {
       linkUpdates.push({ id: row.id, reply_to: replyTo, forwarded_from: forwardedFrom });
     }
     const insertPayload = { ...row, reply_to: null, forwarded_from: null };
-    await insertRow(client, 'chat_messages', insertPayload, allowedColumns);
+    try {
+      await insertRow(client, 'chat_messages', insertPayload, allowedColumns);
+      ctx.insertedMessageIds.add(row.id);
+    } catch (error) {
+      ctx.skippedMessageIds.add(row.id);
+      if (/foreign key constraint|null value|check constraint/i.test(error.message || '')) {
+        console.warn('[chat-restore] skipped message', row.id, error.message);
+        continue;
+      }
+      throw error;
+    }
   }
 
   for (const link of linkUpdates) {
+    if (!ctx.insertedMessageIds.has(link.id)) continue;
+    const replyTo = link.reply_to && ctx.insertedMessageIds.has(link.reply_to) ? link.reply_to : null;
+    const forwardedFrom =
+      link.forwarded_from && ctx.insertedMessageIds.has(link.forwarded_from)
+        ? link.forwarded_from
+        : null;
     await client.query(
       `UPDATE chat_messages
        SET reply_to = $2, forwarded_from = $3
        WHERE id = $1`,
-      [link.id, link.reply_to, link.forwarded_from]
+      [link.id, replyTo, forwardedFrom]
     );
   }
 }
@@ -335,8 +403,11 @@ export async function restoreChatData(backup, developerCode) {
 
     const ctx = {
       userIds: await loadUserIds(client),
+      fallbackUserId: await loadFallbackUserId(client),
       skippedChannelIds: new Set(),
       skippedDmIds: new Set(),
+      skippedMessageIds: new Set(),
+      insertedMessageIds: new Set(),
     };
 
     for (const table of INSERT_ORDER) {
@@ -348,7 +419,7 @@ export async function restoreChatData(backup, developerCode) {
     columnCache.clear();
     await initChat();
 
-    const messageCount = tables.chat_messages?.length ?? 0;
+    const messageCount = ctx.insertedMessageIds.size;
     const channelCount = tables.chat_channels?.length ?? 0;
     return {
       message: `Chat restored: ${messageCount} message(s), ${channelCount} channel(s).`,

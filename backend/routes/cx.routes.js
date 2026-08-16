@@ -26,6 +26,7 @@ import { postTicketSystemMessage } from '../services/chatSystemMessage.js';
 import { ensureTicketThread, syncTicketThreadAssignee } from '../services/chatRecordThreads.js';
 import { TICKET_SUPPORT_ROLES } from '../roles.js';
 import { getTicketEscalationConfig, markTicketStageAccepted } from '../ticketEscalation.js';
+import { invalidateOnMutation } from '../services/vobiCache.js';
 
 const router = express.Router();
 const JWT_SECRET = process.env.JWT_SECRET || 'your-super-secret-jwt-key-change-this';
@@ -120,6 +121,7 @@ function requireSupportRole(req, res, next) {
 router.use(authenticateToken);
 
 router.use(requireSupportRole);
+router.use(invalidateOnMutation);
 
 // --- AUTO-FIX: Remove old restrictive role constraint ---
 async function removeOldRoleConstraint() {

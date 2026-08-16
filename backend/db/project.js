@@ -110,7 +110,7 @@ export async function initProjectRequestTables() {
   await migrateProjectRequestConstraints();
 
   const defaults = [
-    { name: 'TX — Transmission', slug: 'ts', unit_stage: 'ts', sort_order: 1 },
+    { name: 'TS — Transmission', slug: 'ts', unit_stage: 'ts', sort_order: 1 },
     { name: 'IP', slug: 'ip', unit_stage: 'ip', sort_order: 2 },
     { name: 'NOC', slug: 'noc', unit_stage: 'noc', sort_order: 3 },
     { name: 'Project Unit', slug: 'project', unit_stage: 'project', sort_order: 0 },
@@ -218,7 +218,8 @@ export async function updateProjectUnit(id, { name, description, is_active, sort
 }
 
 export async function getProjectUnitBySlug(slug) {
-  const { rows } = await pool.query('SELECT * FROM project_units WHERE slug = $1', [slug]);
+  const canonical = String(slug || '').toLowerCase() === 'tx' ? 'ts' : slug;
+  const { rows } = await pool.query('SELECT * FROM project_units WHERE slug = $1', [canonical]);
   return rows[0] || null;
 }
 

@@ -148,7 +148,7 @@ const CXDashboard: React.FC = () => {
   if (error) {
     return (
       <div className="flex min-h-[40vh] items-center justify-center p-6">
-        <div className="w-full max-w-md rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-10 text-center shadow-[var(--shadow)]">
+        <div className="w-full max-w-md rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-10 text-center shadow-[var(--shadow-md)]">
           <AlertCircle className="mx-auto mb-6 h-16 w-16 text-[var(--danger)]" />
           <h2 className="mb-3 text-2xl font-bold text-[var(--text-primary)]">Something went wrong</h2>
           <p className="mb-8 text-[var(--text-secondary)]">{error}</p>
@@ -312,7 +312,7 @@ const CXDashboard: React.FC = () => {
               <div className="absolute inset-0 bg-blue-600/5 group-hover:bg-blue-600/10 transition-all duration-500"></div>
             </div>
 
-            <div className="bg-white/80 backdrop-blur-md rounded-3xl border border-slate-100 p-8 shadow-xl shadow-slate-100/30">
+            <div className="bg-white/80 backdrop-blur-md rounded-3xl border border-slate-100 p-8 shadow-[var(--shadow-md)]">
               <div className="flex items-center justify-between mb-6">
                 <h3 className="text-xl font-bold text-slate-800">Recent Projects</h3>
                 <Building2 className="w-6 h-6 text-slate-400" />
@@ -342,7 +342,7 @@ const CXDashboard: React.FC = () => {
               </div>
             </div>
 
-            <div className="bg-white/80 backdrop-blur-md rounded-3xl border border-slate-100 p-8 shadow-xl shadow-slate-100/30">
+            <div className="bg-white/80 backdrop-blur-md rounded-3xl border border-slate-100 p-8 shadow-[var(--shadow-md)]">
               <div className="flex items-center justify-between mb-6">
                 <h3 className="text-xl font-bold text-slate-800">Team Assignments</h3>
                 <UserCheck className="w-6 h-6 text-slate-400" />

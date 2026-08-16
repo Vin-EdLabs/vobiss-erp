@@ -188,7 +188,7 @@ export default function ServiceRequestReport() {
               <div>
                 <h1 className="text-3xl font-bold">Service Request Report</h1>
                 <p className="mt-2 max-w-3xl text-sm text-cyan-50">
-                  Track service requests across Project, TX, IP, and NOC with status, customer,
+                  Track service requests across Project, TS, IP, and NOC with status, customer,
                   stage, value, and completion visibility.
                 </p>
               </div>
@@ -248,7 +248,7 @@ export default function ServiceRequestReport() {
               </div>
             </ChartCard>
 
-            <ChartCard title="Requests By Unit" subtitle="Project, TX, IP, and NOC volume">
+            <ChartCard title="Requests By Unit" subtitle="Project, TS, IP, and NOC volume">
               <ResponsiveContainer width="100%" height={260}>
                 <BarChart data={chartData.byUnit}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />

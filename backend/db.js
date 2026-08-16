@@ -30,7 +30,14 @@ import {
   canExecuteMaterial,
   canReleaseCash,
   forbidden,
+  setRealmApproverIds,
 } from './permissions.js';
+
+function touchVobiCache(userId) {
+  import('./services/vobiCache.js')
+    .then((mod) => mod.invalidateVobiData(userId))
+    .catch(() => {});
+}
 
 const dbDir = path.dirname(fileURLToPath(import.meta.url));
 config({ path: path.join(dbDir, '.env') });
@@ -256,9 +263,15 @@ export async function restoreDatabase(backupData, developerCode) {
   try {
     await client.query('BEGIN');
     try {
+      await client.query('SAVEPOINT try_replica');
       await client.query('SET LOCAL session_replication_role = replica');
+      await client.query('RELEASE SAVEPOINT try_replica');
     } catch {
-      /* not a superuser — insert in foreign-key order instead */
+      try {
+        await client.query('ROLLBACK TO SAVEPOINT try_replica');
+      } catch {
+        /* continue with foreign-key insert order */
+      }
     }
 
     const existingNames = [];
@@ -272,6 +285,7 @@ export async function restoreDatabase(backupData, developerCode) {
     }
 
     const insertOrder = await orderTablesForInsert(client, existingNames);
+    const skippedRows = [];
     for (const table of insertOrder) {
       const rows = tables[table];
       if (!rows?.length) continue;
@@ -284,31 +298,54 @@ export async function restoreDatabase(backupData, developerCode) {
         const placeholders = keys.map((_, i) => `$${i + 1}`).join(', ');
         const values = keys.map((key) => serializeRestoreValue(row[key], jsonCols.has(key)));
         try {
+          await client.query('SAVEPOINT row_insert');
           await client.query(
             `INSERT INTO ${quoteIdent(table)} (${columns}) VALUES (${placeholders})`,
             values
           );
+          await client.query('RELEASE SAVEPOINT row_insert');
         } catch (insertError) {
-          console.error(`Failed to insert row into table "${table}":`, insertError.message);
-          throw new Error(`Restore failed on ${table}: ${insertError.message}`);
+          try {
+            await client.query('ROLLBACK TO SAVEPOINT row_insert');
+          } catch {
+            /* ignore */
+          }
+          skippedRows.push({ table, error: insertError.message });
+          if (skippedRows.length <= 8) {
+            console.warn(`Skipped row in "${table}":`, insertError.message);
+          }
         }
       }
 
       try {
+        await client.query('SAVEPOINT seq_reset');
         const seq = await client.query('SELECT pg_get_serial_sequence($1, $2) AS seq', [table, 'id']);
         const seqName = seq.rows[0]?.seq;
         if (seqName) {
           const maxId = Math.max(...rows.map((r) => Number(r.id) || 0), 0);
           await client.query('SELECT setval($1, $2, $3)', [seqName, Math.max(maxId, 1), maxId > 0]);
         }
+        await client.query('RELEASE SAVEPOINT seq_reset');
       } catch (seqErr) {
+        try {
+          await client.query('ROLLBACK TO SAVEPOINT seq_reset');
+        } catch {
+          /* ignore */
+        }
         console.warn(`Could not reset sequence for ${table}:`, seqErr.message);
       }
     }
 
     await client.query('COMMIT');
     console.log('Database restore completed successfully.');
-    return { message: 'Database restored successfully' };
+    const skippedSummary = skippedRows.reduce((acc, row) => {
+      acc[row.table] = (acc[row.table] || 0) + 1;
+      return acc;
+    }, {});
+    return {
+      message: 'Database restored successfully',
+      skipped: skippedSummary,
+    };
   } catch (error) {
     await client.query('ROLLBACK');
     console.error('Error restoring database:', error.message);
@@ -1111,6 +1148,49 @@ export async function updateWorkflowConfig(config) {
   return sanitized;
 }
 
+const DEFAULT_REALM_APPROVERS = {
+  material_user_ids: [],
+  cash_user_ids: [],
+};
+
+function normalizeIdList(value) {
+  if (!Array.isArray(value)) return [];
+  return [...new Set(value.map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0))];
+}
+
+export async function getRealmApprovers() {
+  try {
+    const result = await pool.query("SELECT value FROM settings WHERE key_name = 'realm_approvers'");
+    if (result.rowCount === 0 || !result.rows[0].value) {
+      setRealmApproverIds(DEFAULT_REALM_APPROVERS);
+      return { ...DEFAULT_REALM_APPROVERS };
+    }
+    const parsed = typeof result.rows[0].value === 'string'
+      ? JSON.parse(result.rows[0].value)
+      : result.rows[0].value;
+    const realm = {
+      material_user_ids: normalizeIdList(parsed.material_user_ids),
+      cash_user_ids: normalizeIdList(parsed.cash_user_ids),
+    };
+    setRealmApproverIds(realm);
+    return realm;
+  } catch (error) {
+    console.error('Error fetching realm approvers:', error.stack);
+    setRealmApproverIds(DEFAULT_REALM_APPROVERS);
+    return { ...DEFAULT_REALM_APPROVERS };
+  }
+}
+
+export async function updateRealmApprovers(payload = {}) {
+  const realm = {
+    material_user_ids: normalizeIdList(payload.material_user_ids),
+    cash_user_ids: normalizeIdList(payload.cash_user_ids),
+  };
+  await updateSetting('realm_approvers', JSON.stringify(realm));
+  setRealmApproverIds(realm);
+  return realm;
+}
+
 export async function getEligibleApprovers() {
   const workflowConfig = await getWorkflowConfig();
   const roles = workflowConfig.material?.eligible_approver_roles || ['approver'];
@@ -1216,20 +1296,26 @@ export async function getUsers() {
 
 export async function getApprovers() {
   try {
+    const realm = await getRealmApprovers();
+    const ids = [...new Set([...(realm.material_user_ids || []), ...(realm.cash_user_ids || [])])];
+    if (!ids.length) return [];
     const result = await pool.query(
       `SELECT id, first_name, last_name, role, main_role, roles, units, unit, position
        FROM users
-       WHERE deleted_at IS NULL
-       ORDER BY last_name ASC, first_name ASC`
+       WHERE deleted_at IS NULL AND id = ANY($1::int[])
+       ORDER BY last_name ASC, first_name ASC`,
+      [ids]
     );
-    return result.rows.filter((row) => canApproveMaterialRequest(row) || canApproveCashRequest(row)).map(row => ({
+    const material = new Set(realm.material_user_ids.map(Number));
+    const cash = new Set(realm.cash_user_ids.map(Number));
+    return result.rows.map((row) => ({
       id: row.id,
       fullName: `${row.first_name || ''} ${row.last_name || ''}`.trim() || 'User',
       role: row.role,
       position: row.position,
       unit: row.unit,
-      canApproveMaterial: canApproveMaterialRequest(row),
-      canApproveCash: canApproveCashRequest(row),
+      canApproveMaterial: material.has(Number(row.id)),
+      canApproveCash: cash.has(Number(row.id)),
     }));
   } catch (error) {
     console.error('Error fetching approvers:', error.stack);
@@ -2334,7 +2420,7 @@ export async function createRequest(requestData, selectedApproverIds, requestTyp
   if (!Array.isArray(selectedApproverIds) || selectedApproverIds.length === 0) {
     throw new Error('At least one approver ID is required');
   }
-  // Validate selected approvers against the workflow config and position authority.
+  // Validate selected approvers against the Realm list for this request type.
   if (requestType === 'material_request' || requestType === 'item_return' || requestType === 'cash_request') {
     const workflowConfig = await getWorkflowConfig();
     if (requestType !== 'cash_request') {
@@ -2343,22 +2429,22 @@ export async function createRequest(requestData, selectedApproverIds, requestTyp
         throw new Error(`Material requests require at least ${required} approver(s). You selected ${selectedApproverIds.length}.`);
       }
     }
+    const realm = await getRealmApprovers();
+    const allowed = new Set(
+      (requestType === 'cash_request' ? realm.cash_user_ids : realm.material_user_ids).map(Number)
+    );
     const approverRoles = await pool.query(
-      'SELECT id, role, main_role, roles, units, unit, position FROM users WHERE id = ANY($1::int[]) AND deleted_at IS NULL',
+      'SELECT id FROM users WHERE id = ANY($1::int[]) AND deleted_at IS NULL',
       [selectedApproverIds]
     );
-    const userMap = Object.fromEntries(approverRoles.rows.map(r => [r.id, r]));
+    const found = new Set(approverRoles.rows.map((r) => Number(r.id)));
     for (const id of selectedApproverIds) {
-      const approver = userMap[id];
-      if (!approver) {
+      const numId = Number(id);
+      if (!found.has(numId)) {
         throw new Error('Selected approver not found');
       }
-      const canApprove =
-        requestType === 'cash_request'
-          ? canApproveCashRequest(approver)
-          : canApproveMaterialRequest(approver);
-      if (!canApprove) {
-        throw new Error('Only Supervisor, Manager, or Director positions can be selected as approvers. Check Configuration.');
+      if (!allowed.has(numId)) {
+        throw new Error('Choose approvers from the Realm list for this request type.');
       }
     }
   }
@@ -2546,6 +2632,7 @@ export async function createRequest(requestData, selectedApproverIds, requestTyp
 
     await insertAuditLog(client, userId, 'create_request', ip, { request_id: requestId, type: requestType });
     await client.query('COMMIT');
+    touchVobiCache(userId);
     return requestResult.rows[0];
   } catch (error) {
     await client.query('ROLLBACK');
@@ -2559,7 +2646,7 @@ export async function createRequest(requestData, selectedApproverIds, requestTyp
 export async function getRequests(userRole, userId) {
   try {
     const userResult = await pool.query(
-      `SELECT first_name, last_name, username
+      `SELECT id, first_name, last_name, username, role, main_role, roles, units, unit, position
        FROM users
        WHERE id = $1 AND deleted_at IS NULL`,
       [userId]
@@ -2567,16 +2654,7 @@ export async function getRequests(userRole, userId) {
     if (userResult.rowCount === 0) {
       throw new Error('Current user not found');
     }
-    const currentUser = userResult.rows[0];
-    const fullName = `${currentUser.first_name || ''} ${currentUser.last_name || ''}`.trim().toLowerCase();
-    const firstName = (currentUser.first_name || '').toLowerCase();
-    const lastName = (currentUser.last_name || '').toLowerCase();
-    const username = (currentUser.username || '').toLowerCase();
-
-    const ownRequestCondition = `
-      LOWER(r.created_by) ILIKE ANY(ARRAY[$1, $2, $3, $4])
-    `;
-    const ownParams = [`%${fullName}%`, `%${firstName}%`, `%${lastName}%`, `%${username}%`];
+    const currentUser = normalizeLoginUserRow({ ...userResult.rows[0] });
 
     let query = `
       SELECT
@@ -2603,58 +2681,23 @@ export async function getRequests(userRole, userId) {
     let conditions = [];
     let params = [];
 
-    if (userRole === 'superadmin' || userRole === 'director') {
-      // superadmin and director see everything
-    }
-    else if (userRole === 'finance') {
-      conditions.push(`r.type = 'cash_request'`);
-    }
-    else if (['approver', 'noc_manager', 'noc_supervisor', 'ip_manager', 'ip_supervisor', 'ts_manager', 'ts_supervisor', 'finance_manager'].includes(userRole)) {
-      // Approvers:
-      // - See assigned or own material/item-return requests
-      // - See only "normal" cash requests (heavy cash that requires director approval
-      //   is hidden from supervisors and handled at director level)
-      conditions.push(`
-        (
-          r.type IN ('material_request', 'item_return')
-          AND (
-            EXISTS (
-              SELECT 1 FROM request_approvers ra
-              WHERE ra.request_id = r.id AND ra.approver_id = $${ownParams.length + 1}
-            )
-            OR (${ownRequestCondition})
-          )
-        )
-        OR
-        (
-          r.type = 'cash_request'
-          AND (
-            EXISTS (
-              SELECT 1 FROM request_approvers ra
-              WHERE ra.request_id = r.id AND ra.approver_id = $${ownParams.length + 1}
-            )
-            OR (${ownRequestCondition})
-          )
-        )
-      `);
-      params.push(...ownParams, userId);
-    }
-    else if (userRole === 'issuer' || userRole === 'field_engineer_admin') {
-      conditions.push(`
-        (r.type IN ('material_request', 'item_return')) OR
-        (r.type = 'cash_request' AND ${ownRequestCondition})
-      `);
-      params.push(...ownParams);
-    }
-    else {
-      conditions.push(`
-        (${ownRequestCondition})
+    if (canBypassApprovalRestrictions(currentUser)) {
+      // Directors and ADMIN SUPER see everything
+    } else if (canReleaseCash(currentUser)) {
+      conditions.push(`(r.type = 'cash_request' OR r.created_by_id = $1)`);
+      params.push(userId);
+    } else if (canExecuteMaterial(currentUser)) {
+      conditions.push(`(r.type IN ('material_request', 'item_return') OR r.created_by_id = $1)`);
+      params.push(userId);
+    } else {
+      conditions.push(`(
+        r.created_by_id = $1
         OR EXISTS (
           SELECT 1 FROM request_approvers ra
-          WHERE ra.request_id = r.id AND ra.approver_id = $${ownParams.length + 1}
+          WHERE ra.request_id = r.id AND ra.approver_id = $1
         )
-      `);
-      params.push(...ownParams, userId);
+      )`);
+      params.push(userId);
     }
 
     if (conditions.length > 0) {
@@ -2722,8 +2765,8 @@ export async function getRequests(userRole, userId) {
         }
       }
     }
-    // If this user is a supervisor-level approver, hide heavy cash that requires director
-    if (['approver', 'noc_manager', 'noc_supervisor', 'ip_manager', 'ip_supervisor', 'ts_manager', 'ts_supervisor', 'finance_manager'].includes(userRole)) {
+    // Realm cash approvers do not see high-value cash waiting on Director.
+    if (!canBypassApprovalRestrictions(currentUser) && !canReleaseCash(currentUser)) {
       return rows.filter(
         r => !(r.type === 'cash_request' && r.status === 'pending' && r.requires_director_approval)
       );
@@ -3158,6 +3201,7 @@ export async function updateRequest(requestId, requestData, userId, ip, userRole
     }
     await insertAuditLog(client, userId, 'update_request', ip, { request_id: requestId, editor_role: userRole });
     await client.query('COMMIT');
+    touchVobiCache(userId);
     return { message: 'Request updated successfully' };
   } catch (error) {
     await client.query('ROLLBACK');
@@ -3186,6 +3230,7 @@ export async function rejectRequest(requestId, userId, ip, rejectData) {
     );
     await insertAuditLog(client, userId, 'reject_request', ip, { request_id: requestId, reason });
     await client.query('COMMIT');
+    touchVobiCache(userId);
     return { message: 'Request rejected' };
   } catch (error) {
     await client.query('ROLLBACK');
@@ -3373,6 +3418,7 @@ export async function approveRequest(requestId, approverData, userId, ip) {
     );
     
     await client.query('COMMIT');
+    touchVobiCache(userId);
     
     // Send email to issuer (requester) after approval
     if (requestDetailsRes.rowCount > 0) {
@@ -3530,6 +3576,7 @@ export async function finalizeRequest(requestId, finalizeData, userId, ip) {
     });
     await client.query('COMMIT');
     console.log(`Request ${requestId} finalized successfully`);
+    touchVobiCache(userId);
     return { message: 'Request finalized and stock updated successfully' };
   } catch (error) {
     await client.query('ROLLBACK');
@@ -3728,6 +3775,7 @@ export async function markCashAsReceived(requestId, receivedBy, userId, ip) {
     );
     await insertAuditLog(client, userId, 'cash_received', ip, { request_id: requestId, received_by: receivedBy });
     await client.query('COMMIT');
+    touchVobiCache(userId);
     return { message: 'Cash marked as received' };
   } catch (error) {
     await client.query('ROLLBACK');

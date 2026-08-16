@@ -94,13 +94,13 @@ export function defaultUnitsForRole(role) {
 export function parseUserUnitsArray(units) {
   if (!units) return [];
   if (Array.isArray(units)) {
-    return units.map((u) => String(u).toLowerCase().trim()).filter(Boolean);
+    return units.map((u) => canonicalizeUnitSlug(u)).filter(Boolean);
   }
   if (typeof units === 'string') {
     try {
       const parsed = JSON.parse(units);
       if (Array.isArray(parsed)) {
-        return parsed.map((u) => String(u).toLowerCase().trim()).filter(Boolean);
+        return parsed.map((u) => canonicalizeUnitSlug(u)).filter(Boolean);
       }
     } catch {
       /* ignore */
@@ -145,11 +145,20 @@ export function isSystemAdminAccount(user) {
   return false;
 }
 
+/** Transmission is TS. Legacy accounts may still store TX. */
+export function canonicalizeUnitSlug(unit) {
+  const slug = String(unit || '').toLowerCase().trim();
+  if (!slug) return '';
+  if (slug === 'tx') return 'ts';
+  return slug;
+}
+
 /** Units from DB merged with defaults implied by primary role (for project workflow + chat). */
 export function effectiveUnitsForUser(user) {
   const fromDb = parseUserUnitsArray(user?.units);
+  const primary = canonicalizeUnitSlug(user?.unit);
   const fromRole = defaultUnitsForRole(user?.main_role || user?.role);
-  return [...new Set([...fromDb, ...fromRole])];
+  return [...new Set([primary, ...fromDb, ...fromRole].filter(Boolean))];
 }
 
 export function hasProjectUnitAccess(user) {
@@ -191,6 +200,7 @@ export const UNIT_GROUP_MANAGER_ROLES = [
   'system_admin',
   'director',
   'cto',
+  'hr',
   ...MANAGER_ROLES,
 ];
 
@@ -198,7 +208,11 @@ export function canManageUnitGroups(user) {
   if (isSystemAdminAccount(user)) return true;
   if (userHasAnyRole(user, UNIT_GROUP_MANAGER_ROLES)) return true;
   const main = String(user?.main_role || user?.role || '').toLowerCase();
-  return UNIT_GROUP_MANAGER_ROLES.includes(main);
+  if (UNIT_GROUP_MANAGER_ROLES.includes(main)) return true;
+  const units = effectiveUnitsForUser(user);
+  if (units.includes('hr')) return true;
+  const pos = String(user?.position || '').trim().toLowerCase();
+  return pos === 'hr';
 }
 
 export function isSuperAdmin(user) {

@@ -144,6 +144,7 @@ export async function initHrSchema(pool) {
   await pool.query(`ALTER TABLE hr_employees ADD COLUMN IF NOT EXISTS suspended_at TIMESTAMPTZ`);
   await pool.query(`ALTER TABLE hr_employees ADD COLUMN IF NOT EXISTS unsuspend_reason TEXT`);
   await pool.query(`ALTER TABLE hr_employees ADD COLUMN IF NOT EXISTS unsuspended_at TIMESTAMPTZ`);
+  await pool.query(`ALTER TABLE hr_employees ADD COLUMN IF NOT EXISTS gender TEXT`);
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS suspension_reason TEXT`);
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS unsuspend_reason TEXT`);
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS unsuspend_ack BOOLEAN DEFAULT TRUE`);

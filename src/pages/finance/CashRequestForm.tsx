@@ -126,6 +126,7 @@ const CashRequestForm: React.FC = () => {
 
   const isMyRequest = (request: CashRequest) => {
     if (!user) return false;
+    if (Number((request as any).created_by_id) === Number(user.id)) return true;
 
     const createdBy = (request.created_by || '').trim().toLowerCase();
     const username = (user.username || '').trim().toLowerCase();
@@ -371,7 +372,6 @@ const CashRequestForm: React.FC = () => {
           </div>
           <Button
             onClick={() => setIsFormOpen(!isFormOpen)}
-            className="bg-gradient-to-r from-green-600 to-emerald-700 hover:from-green-700 hover:to-emerald-800"
           >
             <Plus className="h-5 w-5 mr-2" />
             {isFormOpen ? 'Close Form' : 'New Cash Request'}
@@ -489,9 +489,9 @@ const CashRequestForm: React.FC = () => {
                       </td>
                     </tr>
                   ))}
-                  <tr className="border-t font-bold bg-green-50">
+                  <tr className="border-t font-bold bg-[var(--accent-green-light)] text-[var(--success-text)]">
                     <td colSpan={3} className="p-4 text-right">TOTAL</td>
-                    <td className="p-4 text-green-800">GHS {calculateTotal()}</td>
+                    <td className="p-4">GHS {calculateTotal()}</td>
                     <td></td>
                   </tr>
                 </tbody>
@@ -524,7 +524,7 @@ const CashRequestForm: React.FC = () => {
             </div>
 
             <div className="flex justify-end pt-6">
-              <Button type="submit" disabled={submitting} className="px-8 py-3 bg-green-600 hover:bg-green-700 text-white font-semibold">
+              <Button type="submit" disabled={submitting} className="px-8 py-3 font-semibold">
                 {submitting ? 'Submitting...' : 'Submit Request'}
               </Button>
             </div>

@@ -11,6 +11,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { userHasAnyRole } from '../config/roles';
 import { vobiAmbientStore } from '@/stores/vobiAmbientStore';
 import { useVobiFormState } from '@/hooks/useVobiFormState';
 import { useVobiSection } from '@/hooks/useVobiSection';
@@ -100,8 +101,14 @@ const RequestForms: React.FC = () => {
     try {
       setLoading(true);
       const data = await getRequests();
-      // Filter only material requests
-      const materialRequests = data.filter((r: any) => r.type === 'material_request');
+      const materialRequests = data.filter((r: any) => {
+        if (r.type !== 'material_request') return false;
+        const privileged =
+          userHasAnyRole(user, ['superadmin', 'director', 'cto']) ||
+          String(user?.position || '').trim().toLowerCase() === 'director';
+        if (privileged) return true;
+        return Number(r.created_by_id) === Number(user?.id);
+      });
       setAllRequests(materialRequests);
     } catch (error) {
       console.error('Error loading requests:', error);

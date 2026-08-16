@@ -382,6 +382,14 @@ export const getMe = async (): Promise<{
   unsuspend_reason?: string | null;
   unsuspend_ack?: boolean;
   avatar_url?: string | null;
+  permissions?: {
+    realm_material_approver?: boolean;
+    realm_cash_approver?: boolean;
+    can_approve_material_request?: boolean;
+    can_approve_cash_request?: boolean;
+    can_release_cash?: boolean;
+    can_execute_material?: boolean;
+  };
 }> => {
   const response = await apiFetch(`${API_URL}/me`);
   return await response.json();
@@ -1125,6 +1133,38 @@ export const updateWorkflowConfig = async (config: Partial<WorkflowConfig>): Pro
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(config),
+  });
+  return await response.json();
+};
+
+export interface RealmPerson {
+  id: number;
+  fullName: string;
+  username?: string;
+  role?: string;
+  position?: string | null;
+  unit?: string | null;
+}
+
+export interface RealmApprovers {
+  material_user_ids: number[];
+  cash_user_ids: number[];
+  people?: RealmPerson[];
+}
+
+export const getRealmApprovers = async (): Promise<RealmApprovers> => {
+  const response = await apiFetch(`${API_URL}/realm`);
+  return await response.json();
+};
+
+export const updateRealmApprovers = async (payload: {
+  material_user_ids: number[];
+  cash_user_ids: number[];
+}): Promise<RealmApprovers> => {
+  const response = await apiFetch(`${API_URL}/realm`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
   });
   return await response.json();
 };

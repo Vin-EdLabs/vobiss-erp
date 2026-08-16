@@ -21,6 +21,14 @@ interface User {
   unsuspend_reason?: string | null;
   unsuspend_ack?: boolean;
   avatar_url?: string | null;
+  permissions?: {
+    realm_material_approver?: boolean;
+    realm_cash_approver?: boolean;
+    can_approve_material_request?: boolean;
+    can_approve_cash_request?: boolean;
+    can_release_cash?: boolean;
+    can_execute_material?: boolean;
+  };
 }
 
 export type AccessMode = 'work' | 'system';
@@ -159,6 +167,7 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
           first_name: payload.first_name,
           last_name: payload.last_name,
           full_name: payload.full_name,
+          permissions: payload.permissions ?? undefined,
         };
         setUser(derivedUser);
         localStorage.setItem('user', JSON.stringify(derivedUser));
@@ -235,6 +244,7 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
           unsuspend_reason: me.unsuspend_reason ?? null,
           unsuspend_ack: me.unsuspend_ack !== false,
           avatar_url: me.avatar_url ?? null,
+          permissions: me.permissions ?? null,
         };
         setUser(next);
         localStorage.setItem('user', JSON.stringify(next));

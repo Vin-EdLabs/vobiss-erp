@@ -14,7 +14,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SYSTEM_CHANNELS = [
   {
     name: 'general',
-    description: 'Company-wide channel for everyone',
+    description: 'Company-wide channel — everyone in Vobiss can see and post here',
     channel_type: 'general',
   },
   {
@@ -170,6 +170,12 @@ export async function initChat() {
   for (const ch of SYSTEM_CHANNELS) {
     channelIds[ch.name] = await ensureChannel(ch);
   }
+  await pool.query(
+    `UPDATE chat_channels
+     SET description = $1
+     WHERE LOWER(name) = 'general' AND COALESCE(is_archived, false) = false`,
+    [SYSTEM_CHANNELS[0].description]
+  );
 
   for (const cat of CATEGORY_CHANNELS) {
     channelIds[cat.name] = await ensureChannel({

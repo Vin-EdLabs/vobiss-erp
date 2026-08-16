@@ -31,7 +31,8 @@ import {
 type WorkflowView = 'project' | 'ts' | 'ip' | 'noc';
 
 export default function ProductionDetail() {
-  const { id, unitSlug } = useParams<{ id: string; unitSlug: string }>();
+  const { id, unitSlug: rawSlug } = useParams<{ id: string; unitSlug: string }>();
+  const unitSlug = rawSlug === 'tx' ? 'ts' : rawSlug;
   const navigate = useNavigate();
   const { toast } = useToast();
   const { user } = useAuth();

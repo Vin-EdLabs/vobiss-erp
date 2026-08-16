@@ -38,6 +38,7 @@ export const UNIT_GROUP_MANAGER_ROLES = [
   'system_admin',
   'director',
   'cto',
+  'hr',
   'noc_manager',
   'ts_manager',
   'ip_manager',
@@ -48,9 +49,13 @@ export function canManageUnitGroups(user?: {
   role?: string;
   main_role?: string;
   roles?: string[];
+  unit?: string | null;
+  units?: string[] | string | null;
+  position?: string | null;
 } | null): boolean {
   if (!user) return false;
   if (isSystemAdminAccount(user) || isAdminOperator(user)) return true;
+  if (isHrStaff(user)) return true;
   const candidates = new Set<string>();
   if (user.role) candidates.add(user.role.toLowerCase());
   if (user.main_role) candidates.add(user.main_role.toLowerCase());
@@ -284,6 +289,13 @@ export const HR_POSITIONS: string[] = ['HR'];
 export const HR_UNITS: string[] = ['hr'];
 export const CX_POSITIONS: string[] = ['Account Manager', 'Relationship Officer', 'Customer Support'];
 
+export function canonicalizeUnitSlug(unit?: string | null): string {
+  const slug = String(unit || '').trim().toLowerCase();
+  if (!slug) return '';
+  if (slug === 'tx') return 'ts';
+  return slug;
+}
+
 export function getUserUnits(user: {
   unit?: string | null;
   units?: string[] | string | null;
@@ -299,7 +311,7 @@ export function getUserUnits(user: {
       raw.push(user.units);
     }
   }
-  return [...new Set(raw.map((v) => String(v || '').trim().toLowerCase()).filter(Boolean))];
+  return [...new Set(raw.map((v) => canonicalizeUnitSlug(String(v || ''))).filter(Boolean))];
 }
 
 /** HR module access: unit, position, or legacy role. Superadmin is handled separately. */
@@ -467,7 +479,13 @@ export function userHasAnyRole(
 }
 
 /** Quick links on My Workspace — includes role dashboard where applicable */
-export function getWorkspaceQuickLinks(role: string): QuickLink[] {
+export function getWorkspaceQuickLinks(
+  role: string,
+  permissions?: {
+    realm_material_approver?: boolean;
+    realm_cash_approver?: boolean;
+  } | null
+): QuickLink[] {
   const r = normalizeMenuRole(role);
   const profile: QuickLink = {
     label: 'Profile & Security',
@@ -615,12 +633,47 @@ export function getWorkspaceQuickLinks(role: string): QuickLink[] {
     ],
   };
 
-  return (
+  let links =
     byRole[r] || [
       { label: 'System Guide', path: '/system-guide', description: 'How to use Vobiss' },
       profile,
-    ]
-  );
+    ];
+  if (r === 'customer') return links;
+
+  if (permissions) {
+    links = links.filter((l) => {
+      if (l.path === '/material-approvals') return !!permissions.realm_material_approver;
+      if (l.path === '/cash-approvals') return !!permissions.realm_cash_approver;
+      return true;
+    });
+    const extras: QuickLink[] = [];
+    if (permissions.realm_material_approver && !links.some((l) => l.path === '/material-approvals')) {
+      extras.push({
+        label: 'Material Approvals',
+        path: '/material-approvals',
+        description: 'Material requests awaiting you',
+      });
+    }
+    if (permissions.realm_cash_approver && !links.some((l) => l.path === '/cash-approvals')) {
+      extras.push({
+        label: 'Cash Approvals',
+        path: '/cash-approvals',
+        description: 'Cash requests awaiting you',
+      });
+    }
+    links = [...extras, ...links];
+  }
+
+  const hrLinks: QuickLink[] = [
+    { label: 'Clock In', path: '/hr-self/attendance', description: 'Sign your attendance' },
+    { label: 'Leave Request', path: '/hr-self/leave', description: 'Apply for leave' },
+    { label: 'HR Forms', path: '/hr-self/forms', description: 'Request letters and advances' },
+  ];
+  const profileIdx = links.findIndex((l) => l.path === '/profile');
+  if (profileIdx >= 0) {
+    return [...links.slice(0, profileIdx), ...hrLinks, ...links.slice(profileIdx)];
+  }
+  return [...links, ...hrLinks];
 }
 
 /** Primary CTA on My Workspace (first non-profile tool for the role). */

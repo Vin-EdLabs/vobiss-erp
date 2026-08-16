@@ -46,9 +46,13 @@ function parseJsonArray(value) {
 
 function getUnitSlugs(user) {
   const units = new Set();
-  if (user?.unit) units.add(normalize(user.unit));
-  parseJsonArray(user?.units).forEach((unit) => units.add(normalize(unit)));
-  return [...units].filter(Boolean);
+  const add = (value) => {
+    const slug = normalize(value) === 'tx' ? 'ts' : normalize(value);
+    if (slug) units.add(slug);
+  };
+  if (user?.unit) add(user.unit);
+  parseJsonArray(user?.units).forEach(add);
+  return [...units];
 }
 
 function canAccessReport(user, roles, reportType) {
@@ -58,7 +62,7 @@ function canAccessReport(user, roles, reportType) {
   if (position === 'director') return true;
   const isManagerOrSupervisor = position.includes('manager') || position.includes('supervisor');
   if (!isManagerOrSupervisor) return false;
-  if (reportType === 'tickets') return units.some((unit) => ['noc', 'ip', 'tx', 'cx'].includes(unit));
+  if (reportType === 'tickets') return units.some((unit) => ['noc', 'ip', 'ts', 'cx'].includes(unit));
   if (reportType === 'cash') return units.includes('finance');
   return false;
 }

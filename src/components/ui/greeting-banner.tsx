@@ -33,7 +33,7 @@ export function GreetingBanner({
   return (
     <section
       className={cn(
-        'mb-4 overflow-hidden rounded-r-[var(--radius-lg)] rounded-l-none border border-[var(--border)] bg-[var(--surface)] px-4 py-4 shadow-[var(--shadow)] sm:mb-6 sm:px-7 sm:py-6',
+        'mb-4 overflow-hidden rounded-r-[var(--radius-lg)] rounded-l-none border border-[var(--border)] bg-[var(--surface)] px-4 py-4 shadow-[var(--shadow-md)] sm:mb-6 sm:px-7 sm:py-6',
         className
       )}
       style={{ borderLeftWidth: 4, borderLeftColor: 'var(--primary)' }}

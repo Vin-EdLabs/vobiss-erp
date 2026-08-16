@@ -43,6 +43,7 @@ import { cn } from '@/lib/utils';
 import { getChatUnreadTotal, getBookmarks } from '@/api/chat';
 import WorkspaceChatSection from '@/components/workspace/WorkspaceChatSection';
 import WorkspaceAttentionSection from '@/components/workspace/WorkspaceAttentionSection';
+import WorkspaceClockCard from '@/components/workspace/WorkspaceClockCard';
 import { StatCard } from '@/components/ui/stat-card';
 import { EmptyState } from '@/components/ui/empty-state';
 import { StatusPill } from '@/components/ui/status-pill';
@@ -75,6 +76,8 @@ function describeActivity(act: WorkspaceActivity): string {
 }
 
 function linkIcon(path: string): React.ElementType {
+  if (path.includes('hr-self/attendance')) return LogIn;
+  if (path.includes('hr-self')) return FileText;
   if (path.includes('dashboard')) return BarChart3;
   if (path.includes('ticket')) return Ticket;
   if (path.includes('finance') || path.includes('cash')) return DollarSign;
@@ -131,7 +134,10 @@ const MyWorkspace: React.FC = () => {
   const [markingAll, setMarkingAll] = useState(false);
 
   const primaryAction = useMemo(() => getPrimaryWorkspaceAction(role), [role]);
-  const quickLinks = useMemo(() => getWorkspaceQuickLinks(role), [role]);
+  const quickLinks = useMemo(
+    () => getWorkspaceQuickLinks(role, user?.permissions),
+    [role, user?.permissions]
+  );
   const roleTip = useMemo(() => getRoleWorkspaceTip(role), [role]);
   const roleLabel =
     (isAdminSuperAccount(user) ? SYSTEM_ADMIN_LABEL : '') ||
@@ -227,31 +233,36 @@ const MyWorkspace: React.FC = () => {
 
   return (
     <div className="space-y-5">
-      <GreetingBanner
-        name={firstName}
-        pills={
-          <>
-            <OutlinePill>{roleLabel}</OutlinePill>
-            {roleTip && <OutlinePill>{roleTip}</OutlinePill>}
-          </>
-        }
-        actions={
-          <>
-            <Button type="button" variant="outline" size="sm" onClick={() => load(true)} disabled={refreshing}>
-              <RefreshCw className={cn('h-4 w-4', refreshing && 'animate-spin')} />
-              Refresh
-            </Button>
-            {primaryAction && (
-              <Button asChild size="sm">
-                <Link to={primaryAction.path}>
-                  <Zap className="h-4 w-4" />
-                  {primaryAction.label}
-                </Link>
-              </Button>
-            )}
-          </>
-        }
-      />
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start">
+        <div className="min-w-0 flex-1">
+          <GreetingBanner
+            name={firstName}
+            pills={
+              <>
+                <OutlinePill>{roleLabel}</OutlinePill>
+                {roleTip && <OutlinePill>{roleTip}</OutlinePill>}
+              </>
+            }
+            actions={
+              <>
+                <Button type="button" variant="outline" size="sm" onClick={() => load(true)} disabled={refreshing}>
+                  <RefreshCw className={cn('h-4 w-4', refreshing && 'animate-spin')} />
+                  Refresh
+                </Button>
+                {primaryAction && (
+                  <Button asChild size="sm">
+                    <Link to={primaryAction.path}>
+                      <Zap className="h-4 w-4" />
+                      {primaryAction.label}
+                    </Link>
+                  </Button>
+                )}
+              </>
+            }
+          />
+        </div>
+        <WorkspaceClockCard />
+      </div>
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         {metrics.map((m, i) => {
@@ -280,7 +291,7 @@ const MyWorkspace: React.FC = () => {
       </div>
 
       {/* Quick access */}
-      <section className="overflow-hidden rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-5 shadow-[var(--shadow-sm)]">
+      <section className="overflow-hidden rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-5 shadow-[var(--shadow-md)]">
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">Quick access</h2>
           <span className="text-[11px] text-[var(--text-muted)]">{quickLinks.length} tools</span>
@@ -307,7 +318,7 @@ const MyWorkspace: React.FC = () => {
 
       {/* Notifications + activity */}
       <div className="grid gap-4 lg:grid-cols-5">
-        <section className="overflow-hidden rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow-sm)] lg:col-span-3">
+        <section className="overflow-hidden rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow-md)] lg:col-span-3">
           <div className="flex items-center justify-between border-b border-[var(--border)] px-4 py-3">
             <div className="flex items-center gap-2">
               <h2 className="text-sm font-semibold text-[var(--text-primary)]">Announcements</h2>
@@ -372,7 +383,7 @@ const MyWorkspace: React.FC = () => {
           </div>
         </section>
 
-        <section className="overflow-hidden rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow-sm)] lg:col-span-2">
+        <section className="overflow-hidden rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow-md)] lg:col-span-2">
           <div className="flex items-center gap-2 border-b border-[var(--border)] px-4 py-3">
             <h2 className="text-sm font-semibold text-[var(--text-primary)]">Recent activity</h2>
           </div>

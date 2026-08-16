@@ -23,6 +23,7 @@ import RequestDetails from './RequestDetails';
 import AuditLogs from './AuditLogs';
 import UsersPage from './UsersPage';
 import ConfigurationPage from './ConfigurationPage';
+import RealmPage from './RealmPage';
 import SystemGuide from './SystemGuide';
 import ProfilePage from './ProfilePage';
 import MyWorkspace from './MyWorkspace';
@@ -401,7 +402,7 @@ const Index = () => {
               <Route
                 path="/material-approvals"
                 element={
-                  <ProtectedRoute allowedRoles={APPROVER_ROLES} allowedPositions={['Director', 'NOC Manager', 'IP Manager', 'TX Manager', 'Project Manager', 'Account Manager', 'NOC Supervisor', 'IP Supervisor', 'TX Supervisor', 'Project Supervisor']}>
+                  <ProtectedRoute allowedRoles={WORKSPACE_ROLES}>
                     <MaterialApprovals />
                   </ProtectedRoute>
                 }
@@ -409,7 +410,7 @@ const Index = () => {
               <Route
                 path="/cash-approvals"
                 element={
-                  <ProtectedRoute allowedRoles={APPROVER_ROLES} allowedPositions={['Director', 'NOC Manager', 'IP Manager', 'TX Manager', 'Project Manager', 'Account Manager', 'NOC Supervisor', 'IP Supervisor', 'TX Supervisor', 'Project Supervisor']}>
+                  <ProtectedRoute allowedRoles={WORKSPACE_ROLES}>
                     <CashApprovals />
                   </ProtectedRoute>
                 }
@@ -417,7 +418,7 @@ const Index = () => {
               <Route
                 path="/pending-approvals"
                 element={
-                  <ProtectedRoute allowedRoles={APPROVER_ROLES} allowedPositions={['Director', 'NOC Manager', 'IP Manager', 'TX Manager', 'Project Manager', 'Account Manager', 'NOC Supervisor', 'IP Supervisor', 'TX Supervisor', 'Project Supervisor']}>
+                  <ProtectedRoute allowedRoles={WORKSPACE_ROLES}>
                     <Navigate to="/material-approvals" replace />
                   </ProtectedRoute>
                 }
@@ -614,6 +615,7 @@ const Index = () => {
               <Route path="/settings" element={<ProtectedRoute allowedRoles={['admin', ...EXEC_ROLES]}><SettingsPage /></ProtectedRoute>} />
               <Route path="/system-messages" element={<ProtectedRoute allowedRoles={['admin', 'superadmin']}><SystemMessages /></ProtectedRoute>} />
               <Route path="/configuration" element={<ProtectedRoute allowedRoles={['admin', 'superadmin']}><ConfigurationPage /></ProtectedRoute>} />
+              <Route path="/realm" element={<ProtectedRoute allowedRoles={['admin', 'superadmin']}><RealmPage /></ProtectedRoute>} />
 
               {/* SUPPORT TICKETING — SHARED ACCESS FOR ALL SUPPORT ROLES */}
               {/* Includes: cx, noc, ip, field_engineer, field_engineer_admin, approver, director, superadmin */}

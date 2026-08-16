@@ -7,7 +7,9 @@ import { useVobiOverview } from '@/hooks/useVobiOverview';
 import { VobiCommandBar } from './VobiCommandBar';
 import { VobiDigestCard, VobiThreadSummaryCard } from './VobiChatSummaryCard';
 import { VobiMessageCard } from './VobiMessageCard';
+import { VobiMessage } from './VobiMessage';
 import {
+  getVobiBriefing,
   getVobiOverview,
   getVobiSummary,
   postVobiCommand,
@@ -18,7 +20,6 @@ import {
   type VobiThreadSummary,
 } from '@/api/vobi';
 import {
-  buildVobiIntroMessage,
   hasSeenVobiIntro,
   markVobiIntroSeen,
   vobiDisplayName,
@@ -38,7 +39,6 @@ type VobiPanelMessage = {
   summary?: VobiDailySummary;
   threadSummary?: VobiThreadSummary;
   digest?: VobiPersonalDigest;
-  about?: boolean;
 };
 
 type VobiDailySummary = {
@@ -108,7 +108,7 @@ function buildDailyBriefing(
 export function VobiPanel({ theme: _theme }: VobiPanelProps) {
   const { isOpen, close } = useVobi();
   const { user } = useAuth();
-  const { firstName, displayName } = vobiDisplayName(user);
+  const { displayName } = vobiDisplayName(user);
   const userId = Number(user?.id) || undefined;
   const { data: overviewData } = useVobiOverview(isOpen);
   const hasPending = (overviewData?.pendingCount ?? 0) > 0;
@@ -124,74 +124,35 @@ export function VobiPanel({ theme: _theme }: VobiPanelProps) {
     const focusTimer = window.setTimeout(() => inputRef.current?.focus(), 280);
     if (!greetedThisSession.current) {
       greetedThisSession.current = true;
-      Promise.all([getVobiOverview(), getVobiSummary('today')])
-        .then(([overview, summary]) => {
-          const pending = overview.pendingCount || 0;
-          const greeting = overview.greeting?.label || 'Hello';
-          const name = overview.greeting?.firstName || firstName || 'there';
-          const text =
-            pending > 0
-              ? `${greeting}, ${name}. You have ${pending} thing${pending === 1 ? '' : 's'} that need your attention.`
-              : `${greeting}, ${name}. You're all clear — nothing pending right now.`;
+      Promise.all([getVobiBriefing(), getVobiOverview(), getVobiSummary('today')])
+        .then(([briefing, overview, summary]) => {
           const nextMessages: VobiPanelMessage[] = [];
           if (!hasSeenVobiIntro(userId)) {
-            const intro = buildVobiIntroMessage(name);
-            nextMessages.push({
-              id: `intro-${Date.now()}`,
-              role: 'vobi',
-              text: [
-                intro.greeting,
-                ...intro.paragraphs,
-                intro.bullets.map((bullet) => `- ${bullet}`).join('\n'),
-              ].join('\n\n'),
-              timestamp: new Date(),
-            });
             markVobiIntroSeen(userId);
           }
           nextMessages.push({
             id: `greet-${Date.now()}`,
             role: 'vobi',
-            text,
+            text: briefing.response,
             timestamp: new Date(),
           });
-          const briefing = buildDailyBriefing(overview, summary);
+          const briefingCard = buildDailyBriefing(overview, summary);
           nextMessages.push({
             id: `briefing-${Date.now()}`,
             role: 'vobi',
-            text: briefing.text,
-            cards: briefing.cards,
-            summary: briefing.summary,
+            text: briefingCard.text,
+            cards: briefingCard.cards,
+            summary: briefingCard.summary,
             timestamp: new Date(),
           });
           setMessages((prev) => [...prev, ...nextMessages]);
         })
         .catch(() => {
-          const nextMessages: VobiPanelMessage[] = [];
-          if (!hasSeenVobiIntro(userId)) {
-            const intro = buildVobiIntroMessage(firstName || 'there');
-            nextMessages.push({
-              id: `intro-${Date.now()}`,
-              role: 'vobi',
-              text: [
-                intro.greeting,
-                ...intro.paragraphs,
-                intro.bullets.map((bullet) => `- ${bullet}`).join('\n'),
-              ].join('\n\n'),
-              timestamp: new Date(),
-            });
-            markVobiIntroSeen(userId);
-          }
-          nextMessages.push({
-            id: `greet-${Date.now()}`,
-            role: 'vobi',
-            text: `Hello, ${firstName || 'there'}. 👋 I’m ready when you are.`,
-            timestamp: new Date(),
-          });
-          setMessages((prev) => [...prev, ...nextMessages]);
+          setMessages((prev) => prev);
         });
     }
     return () => window.clearTimeout(focusTimer);
-  }, [firstName, isOpen, userId]);
+  }, [isOpen, userId]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -214,7 +175,7 @@ export function VobiPanel({ theme: _theme }: VobiPanelProps) {
         {
           id: `v-${Date.now()}`,
           role: 'vobi',
-          text: result.reply,
+          text: result.reply || result.response || '',
           cards: result.cards,
           threadSummary: result.meta?.threadSummary,
           digest: result.meta?.digest,
@@ -240,17 +201,32 @@ export function VobiPanel({ theme: _theme }: VobiPanelProps) {
     }
   };
 
-  const showAboutVobi = () => {
-    setMessages((prev) => [
-      ...prev,
-      {
-        id: `about-${Date.now()}`,
-        role: 'vobi',
-        text: 'About Vobi',
-        about: true,
-        timestamp: new Date(),
-      },
-    ]);
+  const showAboutVobi = async () => {
+    setThinking(true);
+    try {
+      const result = await postVobiCommand('about vobi', { persist: false, command: 'about' });
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: `about-${Date.now()}`,
+          role: 'vobi',
+          text: result.reply || result.response || '',
+          timestamp: new Date(),
+        },
+      ]);
+    } catch (e) {
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: `about-err-${Date.now()}`,
+          role: 'vobi',
+          text: e instanceof Error ? e.message : 'Vobi is unavailable right now.',
+          timestamp: new Date(),
+        },
+      ]);
+    } finally {
+      setThinking(false);
+    }
   };
 
   return (
@@ -336,10 +312,10 @@ export function VobiPanel({ theme: _theme }: VobiPanelProps) {
                 draggable={false}
               />
               <p className="mt-2 text-[12px] font-medium text-[var(--color-text-primary)]">
-                {firstName ? `Hi ${firstName}, I’m Vobi.` : 'Hi, I’m Vobi.'}
+                Vobi
               </p>
               <p className="mt-0.5 text-[11px] text-[var(--color-text-tertiary)]">
-                Ask me about your work, approvals, tickets, and mentions.
+                Your work assistant
               </p>
             </div>
           )}
@@ -405,13 +381,11 @@ function ChatBubble({
         <div className="rounded-[14px_14px_14px_3px] bg-[var(--color-background-secondary)] px-[13px] py-2.5 text-[13px] leading-[1.5] text-[var(--color-text-primary)] shadow-sm ring-1 ring-black/5">
           {message.threadSummary && <VobiThreadSummaryCard summary={message.threadSummary} />}
           {message.digest && <VobiDigestCard digest={message.digest} />}
-          {message.about ? (
-            <VobiAboutCard />
-          ) : message.summary ? (
-            <VobiDailySummaryCard summary={message.summary} />
-          ) : !message.threadSummary && !message.digest ? (
-            <div className="whitespace-pre-line">{message.text}</div>
-          ) : null}
+          {message.summary ? (
+            <VobiDailySummaryCard summary={message.summary} onNavigate={onNavigate} />
+          ) : (
+            <VobiMessage content={message.text} onNavigate={onNavigate} />
+          )}
           {message.cards?.map((item) => (
             <VobiMessageCard key={item.id} item={item} onNavigate={onNavigate} />
           ))}
@@ -424,77 +398,13 @@ function ChatBubble({
   );
 }
 
-function VobiAboutCard() {
-  const currentUses = [
-    'Daily work briefing across tickets, requests, projects, chat, and approvals',
-    'Attention cards that take you directly to the record that needs action',
-    'Quick answers for “what did I miss?”, “my approvals”, “my mentions”, and reports',
-  ];
-  const futureAmbitions = [
-    'Predict urgent work before it becomes overdue',
-    'Prepare smarter handover notes, weekly reports, and follow-up reminders',
-    'Become a calm operations layer that helps every staff member know the next best action',
-  ];
-
-  return (
-    <div className="rounded-xl border border-white/70 bg-white/95 p-3 text-slate-900 shadow-sm ring-1 ring-black/5">
-      <div className="flex items-center gap-2">
-        <span className="vobi-logo-halo flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full bg-[#111827]">
-          <img
-            src="/vobi-logo.png"
-            alt=""
-            className="h-14 w-14 max-w-none object-cover object-left"
-            draggable={false}
-          />
-        </span>
-        <div>
-          <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-[#1D9E75]">
-            About Vobi
-          </p>
-          <p className="text-[13px] font-semibold leading-snug text-slate-950">
-            Your intelligent work companion in Vobiss
-          </p>
-        </div>
-      </div>
-
-      <p className="mt-3 text-[11px] leading-relaxed text-slate-600">
-        Vobi watches the operational signals around you and turns them into a calm,
-        useful briefing: what needs approval, what changed, who mentioned you, and
-        what deserves attention now.
-      </p>
-
-      <div className="mt-3 rounded-lg bg-slate-50 p-2.5">
-        <p className="text-[10px] font-bold uppercase tracking-wide text-slate-500">
-          What I help with now
-        </p>
-        <div className="mt-2 space-y-1.5">
-          {currentUses.map((item) => (
-            <p key={item} className="flex gap-2 text-[11px] leading-snug text-slate-700">
-              <span className="text-[#1D9E75]">•</span>
-              <span>{item}</span>
-            </p>
-          ))}
-        </div>
-      </div>
-
-      <div className="mt-2 rounded-lg bg-gradient-to-br from-[#1D9E75]/10 to-cyan-500/10 p-2.5">
-        <p className="text-[10px] font-bold uppercase tracking-wide text-[#0f7b59]">
-          Future ambition
-        </p>
-        <div className="mt-2 space-y-1.5">
-          {futureAmbitions.map((item) => (
-            <p key={item} className="flex gap-2 text-[11px] leading-snug text-slate-700">
-              <span className="text-[#1D9E75]">✦</span>
-              <span>{item}</span>
-            </p>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function VobiDailySummaryCard({ summary }: { summary: VobiDailySummary }) {
+function VobiDailySummaryCard({
+  summary,
+  onNavigate,
+}: {
+  summary: VobiDailySummary;
+  onNavigate?: () => void;
+}) {
   const tiles = [
     {
       label: 'Tickets',
@@ -534,9 +444,9 @@ function VobiDailySummaryCard({ summary }: { summary: VobiDailySummary }) {
             <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-[#1D9E75]">
               Daily briefing
             </p>
-            <p className="mt-1 text-[13px] font-semibold leading-snug text-slate-950">
-              {summary.statusLine}
-            </p>
+            <div className="mt-1 text-[13px] font-semibold leading-snug text-slate-950">
+              <VobiMessage content={summary.statusLine} onNavigate={onNavigate} />
+            </div>
           </div>
           <span className="rounded-full bg-[#1D9E75]/10 px-2 py-1 text-[10px] font-semibold text-[#0f7b59]">
             Today
@@ -564,11 +474,9 @@ function VobiDailySummaryCard({ summary }: { summary: VobiDailySummary }) {
           })}
         </div>
 
-        <p className="mt-3 text-[11px] leading-snug text-slate-500">
-          {summary.hasCards
-            ? 'Open a quick path below to jump straight into the work.'
-            : 'No urgent cards right now. I’ll keep watching for anything new.'}
-        </p>
+        <div className="mt-3 text-[11px] leading-snug text-slate-500">
+          <VobiMessage content={summary.statusLine} onNavigate={onNavigate} />
+        </div>
       </div>
     </div>
   );

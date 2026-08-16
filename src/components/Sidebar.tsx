@@ -8,7 +8,7 @@ import {
   DollarSign, HandCoins, Sliders, MessageCircle, ChevronsRight, ChevronDown, ChevronRight,
   Headphones, Ticket, MessagesSquare, Users2, User, FilePlus, Headset,
   Globe, CircleAlert, AlertCircle, Search, Network, LayoutDashboard,
-  Briefcase, CalendarDays, CalendarCheck, CalendarOff, Wallet, ClipboardCheck, FolderOpen, PanelLeftClose, PanelLeft
+  Briefcase, CalendarDays, CalendarCheck, CalendarOff, Wallet, ClipboardCheck, FolderOpen, PanelLeftClose, PanelLeft, Landmark
 } from 'lucide-react';
 import { getRequests, getLowStockItems, getNotifications, getWorkspace } from '../api';
 import { resolvePrimaryRole, normalizeMenuRole, userHasAnyRole, formatRoleLabel, isHrStaff, SYSTEM_ADMIN_LABEL } from '../config/roles';
@@ -17,7 +17,27 @@ import { getChatUnreadTotal } from '../api/chat';
 import { useAuth } from '../context/AuthContext';
 import { useQuery } from '@tanstack/react-query';
 import { hrSelfApi } from '@/api/hrSelf';
+import { hrApi } from '@/api/hr';
 import { UserAvatar } from '@/components/UserAvatar';
+
+function filterSidebarMenu(items: any[], query: string) {
+  const q = query.trim().toLowerCase();
+  if (!q) return items;
+  const matches = (label?: string) => String(label || '').toLowerCase().includes(q);
+  return items
+    .map((item) => {
+      if (item?.isCollapsible && Array.isArray(item.subItems)) {
+        const parentHit = matches(item.label);
+        const subItems = parentHit
+          ? item.subItems
+          : item.subItems.filter((sub: any) => matches(sub.label));
+        if (!parentHit && subItems.length === 0) return null;
+        return { ...item, subItems, isOpen: true };
+      }
+      return matches(item?.label) ? item : null;
+    })
+    .filter(Boolean);
+}
 
 const serviceRequestSlugsForUnits = (
   values: Array<string | null | undefined>,
@@ -126,6 +146,8 @@ const Sidebar = ({
   const [isProjectRequestOpen, setIsProjectRequestOpen] = useState(true);
   const [isHrOpen, setIsHrOpen] = useState(true);
   const [isMyHrOpen, setIsMyHrOpen] = useState(true);
+  const [menuQuery, setMenuQuery] = useState('');
+  const searchRef = useRef<HTMLInputElement>(null);
   const [projectUnits, setProjectUnits] = useState<ProjectUnit[]>([]);
   const [projectUnitCounts, setProjectUnitCounts] = useState<Record<string, number>>({});
   const [canCreateProjectRequest, setCanCreateProjectRequest] = useState(false);
@@ -133,11 +155,26 @@ const Sidebar = ({
     queryKey: ['hr-self', 'me'],
     queryFn: hrSelfApi.me,
     enabled: !!user?.id,
-    staleTime: 60_000,
-    refetchOnWindowFocus: false,
+    staleTime: 15_000,
+    refetchInterval: 15_000,
+    refetchOnWindowFocus: true,
     retry: 1,
   });
   const linkedHrEmployee = hrMeQ.data !== undefined ? hrMeQ.data : hrEmployee;
+  const hrStatsQ = useQuery({
+    queryKey: ['hr', 'stats'],
+    queryFn: hrApi.dashboardStats,
+    enabled:
+      !!user?.id &&
+      (isHrStaff(user) ||
+        isAdminSuper ||
+        ['director', 'cto'].includes(String(user?.main_role || user?.role || '').toLowerCase()) ||
+        String(user?.position || '').trim().toLowerCase() === 'director'),
+    staleTime: 15_000,
+    refetchInterval: 15_000,
+    refetchOnWindowFocus: true,
+    retry: 1,
+  });
 
   useEffect(() => {
     if (!user?.id) return;
@@ -356,12 +393,9 @@ const Sidebar = ({
       isGlobalPosition ||
       isProcurement;
     const canApproveMaterialInSidebar =
-      !isHrUser && (hasSystemWideMode || isGlobalPosition || isManagerOrSupervisor);
+      hasSystemWideMode || isGlobalPosition || !!user?.permissions?.realm_material_approver;
     const canApproveCashInSidebar =
-      hasSystemWideMode ||
-      isGlobalPosition ||
-      isFinanceApprover ||
-      (isManagerOrSupervisor && isProjectUser);
+      hasSystemWideMode || isGlobalPosition || !!user?.permissions?.realm_cash_approver;
 
     // Common items
     const requestForms     = { icon: ClipboardList,  label: 'Material Requests', path: '/request-forms' };
@@ -370,8 +404,8 @@ const Sidebar = ({
     const cashApprovals    = { icon: HandCoins,      label: 'Cash Approvals',    path: '/cash-approvals', notificationCount: cashApprovalCount };
     const issueItem        = { icon: CheckCircle,    label: 'Issue Item',        path: '/approved-forms', notificationCount: approvedCount };
     const approvalSubItems = [
-      ...(canApproveCashInSidebar ? [cashApprovals] : []),
       ...(canApproveMaterialInSidebar ? [materialApprovals] : []),
+      ...(canApproveCashInSidebar ? [cashApprovals] : []),
     ];
     const reportSubItems = [
       { icon: BarChart3, label: 'Reports Home', path: '/staff/reports' },
@@ -413,6 +447,7 @@ const Sidebar = ({
       isCollapsible: true,
       isOpen: true,
       onToggle: () => {},
+      notificationCount: pendingCount,
       subItems: approvalSubItems,
     };
     const requestApprovalsSection = {
@@ -423,12 +458,13 @@ const Sidebar = ({
       onToggle: () => {},
       badge: pendingCount > 0 ? String(pendingCount) : undefined,
       badgeColor: 'bg-red-100 text-red-800',
+      notificationCount: pendingCount,
       subItems: approvalSubItems,
     };
     const staffItem        = { icon: Users,         label: 'User Management',   path: '/users' };
     const items            = { icon: Package,        label: 'Items',             path: '/inventory' };
     const categories       = { icon: Tags,           label: 'Categories',        path: '/categories' };
-    const lowStock         = { icon: AlertTriangle,  label: 'Low Stock Alerts',  path: '/low-stock' };
+    const lowStock         = { icon: AlertTriangle,  label: 'Low Stock Alerts',  path: '/low-stock', notificationCount: lowStockCount };
     const itemsOut         = { icon: ArrowUpRight,   label: 'Request History',   path: '/items-out' };
     const inventoryReport  = { icon: FileText,       label: 'Inventory Report',  path: '/reports' };
     const inventorySection = (subItems: any[]) =>
@@ -439,6 +475,7 @@ const Sidebar = ({
             isCollapsible: true,
             isOpen: isInventoryOpen,
             onToggle: () => setIsInventoryOpen((prev) => !prev),
+            notificationCount: subItems.reduce((sum: number, item: any) => sum + (item.notificationCount || 0), 0),
             subItems,
           }
         : null;
@@ -456,6 +493,7 @@ const Sidebar = ({
         { icon: Network, label: 'Units Configuration', path: '/project-request/admin/units' },
         { icon: AuditIcon, label: 'Audit Logs', path: '/audit-logs' },
         { icon: Sliders, label: 'System Configuration', path: '/configuration' },
+        { icon: Landmark, label: 'Realm', path: '/realm' },
         { icon: Bell, label: 'System Messages', path: '/system-messages' },
         { icon: Settings, label: 'System Settings', path: '/settings' },
       ],
@@ -666,24 +704,32 @@ const Sidebar = ({
     };
     const profileItem = { icon: Settings, label: 'Profile & Security', path: '/profile' };
 
+    const hrPendingLeave = Number(hrStatsQ.data?.pendingLeaveRequests || 0);
+    const hrPendingForms = Number(hrStatsQ.data?.pendingFormRequests || 0);
+    const hrAttentionCount = hrPendingLeave + hrPendingForms;
+    const myPendingLeave = Number(linkedHrEmployee?.pending_leave_count || 0);
+    const myPendingForms = Number(linkedHrEmployee?.pending_form_count || 0);
+    const myHrAttentionCount = myPendingLeave + myPendingForms;
+
     const hrSection = {
       icon: Briefcase,
       label: 'Human Resources',
       isCollapsible: true,
       isOpen: isHrOpen,
       onToggle: () => setIsHrOpen((p) => !p),
-      badge: 'HR',
-      badgeColor: 'bg-sky-500/20 text-sky-300',
+      badge: hrAttentionCount > 0 ? String(hrAttentionCount) : undefined,
+      badgeColor: 'bg-red-100 text-red-800',
+      notificationCount: hrAttentionCount,
       subItems: [
         { icon: LayoutDashboard, label: 'HR Dashboard', path: '/hr/dashboard' },
         { icon: Users, label: 'Employees', path: '/hr/employees' },
-        { icon: CalendarDays, label: 'Leave Management', path: '/hr/leave' },
+        { icon: CalendarDays, label: 'Leave Management', path: '/hr/leave', notificationCount: hrPendingLeave },
         { icon: Wallet, label: 'Payroll', path: '/hr/payroll' },
         { icon: ClipboardCheck, label: 'Attendance', path: '/hr/attendance' },
         { icon: BarChart3, label: 'Analytics', path: '/hr/analytics' },
         { icon: BarChart2, label: 'Reports', path: '/hr/reports' },
         { icon: FolderOpen, label: 'Documents', path: '/hr/documents' },
-        { icon: FileText, label: 'Form Requests', path: '/hr/forms' },
+        { icon: FileText, label: 'Form Requests', path: '/hr/forms', notificationCount: hrPendingForms },
       ],
     };
     const myHrSection = {
@@ -692,13 +738,16 @@ const Sidebar = ({
       isCollapsible: true,
       isOpen: isMyHrOpen,
       onToggle: () => setIsMyHrOpen((p) => !p),
+      badge: myHrAttentionCount > 0 ? String(myHrAttentionCount) : undefined,
+      badgeColor: 'bg-red-100 text-red-800',
+      notificationCount: myHrAttentionCount,
       subItems: [
-        { icon: CalendarCheck, label: 'My Attendance', path: '/hr-self/attendance' },
-        { icon: CalendarOff, label: 'Leave Request', path: '/hr-self/leave', notificationCount: linkedHrEmployee?.pending_leave_count || 0 },
-        { icon: FileText, label: 'My Forms', path: '/hr-self/forms' },
+        { icon: CalendarCheck, label: 'Attendance', path: '/hr-self/attendance' },
+        { icon: CalendarOff, label: 'Leave Request', path: '/hr-self/leave', notificationCount: myPendingLeave },
+        { icon: FileText, label: 'Forms', path: '/hr-self/forms', notificationCount: myPendingForms },
       ],
     };
-    const showMyHr = !!linkedHrEmployee && !isHrUser && !userHasAnyRole(user, ['superadmin']) && !isGlobalPosition;
+    const showMyHr = role !== 'customer';
 
     const directorHrSection = {
       icon: Briefcase,
@@ -706,13 +755,15 @@ const Sidebar = ({
       isCollapsible: true,
       isOpen: isHrOpen,
       onToggle: () => setIsHrOpen((p) => !p),
-      badge: 'HR',
-      badgeColor: 'bg-sky-500/20 text-sky-300',
+      badge: hrAttentionCount > 0 ? String(hrAttentionCount) : undefined,
+      badgeColor: 'bg-red-100 text-red-800',
+      notificationCount: hrAttentionCount,
       subItems: [
         { icon: Users, label: 'Employees', path: '/hr/employees' },
-        { icon: CalendarDays, label: 'Leave Management', path: '/hr/leave' },
+        { icon: CalendarDays, label: 'Leave Management', path: '/hr/leave', notificationCount: hrPendingLeave },
         { icon: ClipboardCheck, label: 'Attendance', path: '/hr/attendance' },
         { icon: BarChart2, label: 'Reports', path: '/hr/reports' },
+        { icon: FileText, label: 'Form Requests', path: '/hr/forms', notificationCount: hrPendingForms },
       ],
     };
 
@@ -834,13 +885,15 @@ const Sidebar = ({
     }
     else {
       if (isProcurement) {
+        const procurementItems: any[] = [assetsManager];
+        if (approvalSubItems.length) procurementItems.push(requestApprovalsSection);
         baseItems = composeItems(
-          [assetsManager],
+          procurementItems,
           [dashboard, items, categories, lowStock, itemsOut, requestForms, itemReturns, issueItem, inventoryReport]
         );
       } else if (isProjectDeptOnly) {
         const unitItems: any[] = [requestForms];
-        if (isManagerOrSupervisor && approvalSubItems.length) {
+        if (approvalSubItems.length) {
           unitItems.push(requestApprovalsSection);
         }
         baseItems = prependProjectRequest(unitItems);
@@ -864,10 +917,8 @@ const Sidebar = ({
           inventoryItems.push(requestForms, itemReturns);
         }
 
-        if (isManagerOrSupervisor) {
-          if (approvalSubItems.length) unitItems.push(requestApprovalsSection);
-          if (reportSystemSection) unitItems.push(reportSystemSection);
-        }
+        if (approvalSubItems.length) unitItems.push(requestApprovalsSection);
+        if (isManagerOrSupervisor && reportSystemSection) unitItems.push(reportSystemSection);
 
         if (isNocUser) unitItems.push(nocSection);
         if (hasPosition('noc manager')) unitItems.push(nocManagerSection);
@@ -893,10 +944,27 @@ const Sidebar = ({
       baseItems = [...baseItems, systemSettingsSection];
     }
 
+    const menuHasApproveRequest = (items: any[]): boolean =>
+      (items || []).some(
+        (item) =>
+          item?.label === 'Approve Request' ||
+          (Array.isArray(item?.subItems) && menuHasApproveRequest(item.subItems))
+      );
+    if (approvalSubItems.length && !menuHasApproveRequest(baseItems)) {
+      baseItems = [requestApprovalsSection, ...baseItems];
+    }
+
     return [myWorkspace, chatItem, ...baseItems, profileItem];
   };
 
   const menuItems = getMenuItems();
+  const visibleMenuItems = filterSidebarMenu(menuItems, menuQuery);
+  const isSearching = menuQuery.trim().length > 0;
+
+  const goToMenuPath = () => {
+    setMenuQuery('');
+    if (window.matchMedia('(max-width: 1023px)').matches) closeMobile();
+  };
 
   const renderBadge = (label: string) => {
     let count = 0, color = '';
@@ -954,18 +1022,18 @@ const Sidebar = ({
         <div className="flex h-full min-h-0 flex-col">
           <div
             className={`relative flex h-14 shrink-0 items-center border-b border-[var(--sidebar-border)] pt-[max(0.25rem,env(safe-area-inset-top))] ${
-              isCollapsed ? 'justify-center px-2' : 'gap-2.5 px-4'
+              isCollapsed ? 'justify-center px-2' : 'justify-between gap-2.5 px-4'
             }`}
           >
             <img
               src="/vobiss-logo.png"
               alt="Vobiss Logo"
-              className={`shrink-0 object-contain ${isCollapsed ? 'h-6 w-6' : 'h-6 w-6'}`}
+              className={`shrink-0 object-contain ${isCollapsed ? 'h-7 w-7' : 'h-7 w-7'}`}
             />
             {!isCollapsed && (
               <div className="min-w-0 flex-1">
-                <span className="block text-[14px] font-semibold text-[var(--sidebar-text-active)]">Vobiss ERP</span>
-                <span className="block truncate text-[10px] text-[var(--sidebar-section-label)]">Enterprise Platform</span>
+                <span className="block truncate text-[14px] font-semibold leading-tight text-[var(--sidebar-text-active)]">Vobiss ERP</span>
+                <span className="mt-0.5 block truncate text-[10px] leading-tight text-[var(--sidebar-section-label)]">Enterprise Platform</span>
               </div>
             )}
             <button
@@ -986,38 +1054,68 @@ const Sidebar = ({
             </button>
           </div>
 
-          {user && !isCollapsed && (
-            <div className="mx-4 my-2">
-              <span className="inline-flex items-center rounded-full bg-[var(--sidebar-active-bg)] px-2.5 py-1 text-[10px] font-semibold uppercase tracking-widest text-[var(--sidebar-active-border)]">
-                {rolePill}
-              </span>
-              {canUseSystemMode && !isAdminSuper && (
-                <div className="mt-3 grid grid-cols-2 rounded-[var(--radius-sm)] bg-white/5 p-0.5 text-[11px] font-semibold">
-                  <button
-                    type="button"
-                    onClick={() => setAccessMode('work')}
-                    className={`rounded-md px-2 py-1.5 transition ${
-                      accessMode === 'work' ? 'bg-[var(--primary)] text-white' : 'text-[var(--sidebar-text)] hover:text-[var(--sidebar-text-active)]'
-                    }`}
-                  >
-                    Work
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setAccessMode('system')}
-                    className={`rounded-md px-2 py-1.5 transition ${
-                      accessMode === 'system' ? 'bg-[var(--primary)] text-white' : 'text-[var(--sidebar-text)] hover:text-[var(--sidebar-text-active)]'
-                    }`}
-                  >
-                    System
-                  </button>
-                </div>
+          {!isCollapsed && (
+            <div className="relative mx-4 mt-2.5 mb-1">
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[var(--sidebar-section-label)]" />
+              <input
+                ref={searchRef}
+                type="text"
+                value={menuQuery}
+                onChange={(e) => setMenuQuery(e.target.value)}
+                placeholder="Search menu..."
+                autoComplete="off"
+                spellCheck={false}
+                aria-label="Search sidebar"
+                className="sidebar-search-input h-8 w-full rounded-[var(--radius-sm)] border py-0 pl-8 pr-7 text-[12px] outline-none"
+              />
+              {isSearching && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMenuQuery('');
+                    searchRef.current?.focus();
+                  }}
+                  className="absolute right-1.5 top-1/2 flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded text-[var(--sidebar-section-label)] hover:text-[var(--sidebar-text-active)]"
+                  aria-label="Clear search"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
               )}
             </div>
           )}
 
+          {user && !isCollapsed && canUseSystemMode && !isAdminSuper && (
+            <div className="mx-4 my-2">
+              <div className="grid grid-cols-2 rounded-[var(--radius-sm)] bg-[var(--sidebar-hover-bg)] p-0.5 text-[11px] font-semibold">
+                <button
+                  type="button"
+                  onClick={() => setAccessMode('work')}
+                  className={`rounded-md px-2 py-1.5 transition ${
+                    accessMode === 'work' ? 'bg-[var(--primary)] text-white' : 'text-[var(--sidebar-text)] hover:text-[var(--sidebar-text-active)]'
+                  }`}
+                >
+                  Work
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAccessMode('system')}
+                  className={`rounded-md px-2 py-1.5 transition ${
+                    accessMode === 'system' ? 'bg-[var(--primary)] text-white' : 'text-[var(--sidebar-text)] hover:text-[var(--sidebar-text-active)]'
+                  }`}
+                >
+                  System
+                </button>
+              </div>
+            </div>
+          )}
+
           <nav className={`no-scrollbar flex-1 overflow-y-auto py-2 ${isCollapsed ? 'px-0' : 'px-0'}`}>
-            {menuItems.map((item: any, index) => {
+            {isSearching && visibleMenuItems.length === 0 && (
+              <p className="px-4 py-6 text-center text-[12px] text-[var(--sidebar-section-label)]">
+                No matching pages
+              </p>
+            )}
+            {visibleMenuItems.map((item: any, index) => {
               if (item.isCollapsible) {
                 const Icon = item.icon;
                 const active = item.subItems.some((sub: any) => location.pathname.startsWith(sub.path));
@@ -1058,13 +1156,20 @@ const Sidebar = ({
                       {!isCollapsed && (
                         <>
                           <span className="flex-1">{item.label}</span>
-                          {item.badge && (
+                          {(item.notificationCount ?? 0) > 0 ? (
+                            <span className="mr-1 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-sky-500 px-1 text-[10px] font-bold text-white">
+                              {item.notificationCount > 99 ? '99+' : item.notificationCount}
+                            </span>
+                          ) : item.badge ? (
                             <span className={`mr-1 rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${item.badgeColor || 'bg-white/10 text-[var(--sidebar-text)]'}`}>
                               {item.badge}
                             </span>
-                          )}
+                          ) : null}
                           <ChevronDown className={`h-3.5 w-3.5 shrink-0 text-[var(--sidebar-section-label)] transition-transform duration-200 ease-in-out ${item.isOpen ? 'rotate-180' : ''}`} />
                         </>
+                      )}
+                      {isCollapsed && (item.notificationCount ?? 0) > 0 && (
+                        <span className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-sky-400" />
                       )}
                     </div>
 
@@ -1083,9 +1188,7 @@ const Sidebar = ({
                                 key={sub.path}
                                 to={sub.path}
                                 className={navItemClass(subActive, 'h-[31px] pl-9 text-[12px]')}
-                                onClick={() => {
-                                  if (window.matchMedia('(max-width: 1023px)').matches) closeMobile();
-                                }}
+                                onClick={goToMenuPath}
                               >
                                 <SubIcon className={`mr-2.5 h-3.5 w-3.5 flex-shrink-0 ${subActive ? 'text-[var(--sidebar-active-border)]' : ''}`} />
                                 <span className="flex-1">{sub.label}</span>
@@ -1106,7 +1209,7 @@ const Sidebar = ({
 
               const Icon = item.icon;
               const isActive = location.pathname === item.path;
-              const prev = menuItems[index - 1];
+              const prev = visibleMenuItems[index - 1];
 
               return (
                 <Link
@@ -1114,9 +1217,7 @@ const Sidebar = ({
                   to={item.path}
                   title={isCollapsed ? item.label : undefined}
                   className={`${navItemClass(isActive)} ${prev?.isCollapsible ? 'mt-3.5' : ''}`}
-                  onClick={() => {
-                    if (window.matchMedia('(max-width: 1023px)').matches) closeMobile();
-                  }}
+                  onClick={goToMenuPath}
                 >
                   <Icon className={`h-[18px] w-[18px] flex-shrink-0 ${isActive ? 'text-[var(--sidebar-active-border)]' : ''} ${isCollapsed ? '' : 'mr-2.5'}`} />
                   {!isCollapsed && (

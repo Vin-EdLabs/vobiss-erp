@@ -10,6 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { userHasAnyRole } from '../config/roles';
 import { vobiAmbientStore } from '@/stores/vobiAmbientStore';
 
 interface Request {
@@ -78,7 +79,14 @@ const ItemReturns: React.FC = () => {
     try {
       setLoading(true);
       const data = await getRequests();
-      const returnRequests = data.filter(r => r.type === 'item_return');
+      const returnRequests = data.filter((r: any) => {
+        if (r.type !== 'item_return') return false;
+        const privileged =
+          userHasAnyRole(user, ['superadmin', 'director', 'cto']) ||
+          String(user?.position || '').trim().toLowerCase() === 'director';
+        if (privileged) return true;
+        return Number(r.created_by_id) === Number(user?.id);
+      });
       setAllRequests(returnRequests);
     } catch (error) {
       console.error('Error loading requests:', error);

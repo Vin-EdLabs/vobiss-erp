@@ -99,7 +99,7 @@ export function TableSkeleton({ rows = 6, cols = 6 }: { rows?: number; cols?: nu
   }, []);
   if (!ready) return null;
   return (
-    <div className="space-y-2 rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-4">
+    <div className="space-y-2 rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-4 shadow-[var(--shadow-md)]">
       {Array.from({ length: rows }).map((_, i) => (
         <div key={i} className="flex gap-3">
           {Array.from({ length: cols }).map((__, j) => (
@@ -114,14 +114,29 @@ export function TableSkeleton({ rows = 6, cols = 6 }: { rows?: number; cols?: nu
 export function Field({
   label,
   children,
+  required,
+  optional,
+  hint,
 }: {
   label: string;
   children: React.ReactNode;
+  required?: boolean;
+  optional?: boolean;
+  hint?: string;
 }) {
   return (
     <label className="block text-sm">
-      <span className="mb-1.5 block font-medium text-[var(--text-secondary)]">{label}</span>
+      <span className="mb-1.5 flex items-center gap-1.5 font-medium text-[var(--text-secondary)]">
+        {label}
+        {required && <span className="text-[var(--danger)]">*</span>}
+        {optional && (
+          <span className="rounded-full bg-[var(--surface-secondary)] px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">
+            Optional
+          </span>
+        )}
+      </span>
       {children}
+      {hint && <span className="mt-1 block text-xs font-normal text-[var(--text-muted)]">{hint}</span>}
     </label>
   );
 }

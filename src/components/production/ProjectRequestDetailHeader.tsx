@@ -31,7 +31,7 @@ export function ProjectRequestDetailHeader({ request }: { request: ProjectReques
 
   return (
     <div className="relative overflow-hidden rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow-md)]">
-      <div className="absolute inset-x-0 top-0 h-0.5 bg-gradient-to-r from-amber-400 via-orange-500 to-amber-600" />
+      <div className="absolute inset-x-0 top-0 h-0.5 bg-[var(--primary)]" />
 
       <div className="px-4 py-3 sm:px-5 sm:py-4">
         {/* Compact header row */}
@@ -41,7 +41,7 @@ export function ProjectRequestDetailHeader({ request }: { request: ProjectReques
               <img src="/vobiss-logo.png" alt="Vobiss" className="h-full w-full object-contain" />
             </div>
             <div className="min-w-0">
-              <p className="text-[10px] font-semibold uppercase tracking-wider text-indigo-600 dark:text-indigo-300">
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--primary)]">
                 Vobiss · Service Request
               </p>
               <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
@@ -55,7 +55,7 @@ export function ProjectRequestDetailHeader({ request }: { request: ProjectReques
                 <p className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-[var(--text-secondary)]">
                   {locationLine && (
                     <span className="inline-flex items-center gap-1">
-                      <Building2 className="h-3 w-3 text-indigo-500" aria-hidden />
+                      <Building2 className="h-3 w-3 text-[var(--primary)]" aria-hidden />
                       {locationLine}
                     </span>
                   )}

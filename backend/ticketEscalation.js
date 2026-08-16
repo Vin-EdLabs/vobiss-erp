@@ -6,6 +6,12 @@ import {
   normalizeTicketEscalationConfig,
 } from './ticketEscalationConfig.js';
 
+function touchVobiCache(userId) {
+  import('./services/vobiCache.js')
+    .then((mod) => mod.invalidateVobiData(userId))
+    .catch(() => {});
+}
+
 async function getPool() {
   const mod = await import('./db.js');
   return mod.default;
@@ -89,6 +95,7 @@ export async function applyNewTicketRouting(client, internalTicketId, ticketPubl
     [internalTicketId, msg, actorId || 0]
   );
 
+  touchVobiCache(actorId);
   return { stage: first.key, stageLabel: first.label, assigneeId: null, dueMinutes };
 }
 
@@ -134,6 +141,7 @@ export async function markTicketStageAccepted(ticketPublicId, userId) {
     ]
   );
 
+  touchVobiCache(userId);
   return { ok: true };
 }
 
@@ -284,5 +292,6 @@ export async function resyncOpenTicketEscalationTimers() {
     updated += 1;
   }
 
+  if (updated) touchVobiCache();
   return { updated, disabled: false };
 }

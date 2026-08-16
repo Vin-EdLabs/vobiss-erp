@@ -54,7 +54,7 @@ function buildUnreadOnly(channels: ChatChannel[], dms: ChatDm[]): ChatFeedItem[]
     items.push({
       id: ch.id,
       kind: 'channel',
-      title: isRecord ? ch.name : `# ${ch.name}`,
+      title: isRecord ? ch.name : `# ${ch.channel_type === 'general' || ch.name === 'general' ? 'General' : ch.channel_type === 'announcements' || ch.name === 'announcements' ? 'Announcements' : ch.name}`,
       senderName: lm?.sender_name || 'Someone',
       preview: lm ? formatChatPreview(lm.body) : 'New message',
       time: lm?.created_at || null,
@@ -138,7 +138,7 @@ export function WorkspaceChatSection() {
   const previewItems = unreadItems.slice(0, 4);
 
   return (
-    <section className="overflow-hidden rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow-sm)]">
+    <section className="overflow-hidden rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow-md)]">
       <div className="relative flex items-center justify-between border-b border-[var(--border)] bg-[var(--surface)] px-4 py-2.5">
         <div className="relative flex items-center gap-2.5">
           <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-[var(--primary)] text-white">

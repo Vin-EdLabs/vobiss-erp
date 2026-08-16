@@ -48,7 +48,7 @@ export function MobileWorkspaceNavDrawer({
   const { user } = useAuth();
   const location = useLocation();
   const role = resolvePrimaryRole(user?.main_role || user?.role);
-  const links = getWorkspaceQuickLinks(role);
+  const links = getWorkspaceQuickLinks(role, user?.permissions);
   const isDark = theme === 'dark';
 
   const workspaceLinks = [

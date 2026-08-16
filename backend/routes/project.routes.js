@@ -5,6 +5,7 @@ import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
 import { authenticateToken } from '../middleware/auth.js';
+import { invalidateOnMutation } from '../services/vobiCache.js';
 import {
   initProjectRequestTables,
   getProjectUnits,
@@ -30,7 +31,7 @@ import pool from '../db.js';
 import { getRealtimeIo } from '../realtime/channels.js';
 import { postProjectRequestSystemMessage } from '../services/chatSystemMessage.js';
 import { ensureProjectRequestThread } from '../services/chatRecordThreads.js';
-import { effectiveUnitsForUser, hasProjectUnitAccess, isSystemAdminAccount } from '../roles.js';
+import { effectiveUnitsForUser, hasProjectUnitAccess, isSystemAdminAccount, canonicalizeUnitSlug } from '../roles.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -98,6 +99,7 @@ async function loadFullUser(req) {
 }
 
 router.use(authenticateToken);
+router.use(invalidateOnMutation);
 
 // Init tables on first request (idempotent)
 let tablesReady = false;
@@ -176,7 +178,7 @@ router.get('/dashboard/:unitSlug', async (req, res) => {
   try {
     const user = await loadFullUser(req);
     const slugs = user.units || [];
-    const slug = req.params.unitSlug;
+    const slug = canonicalizeUnitSlug(req.params.unitSlug);
     if (!isSuperAdmin(user) && !isExecutive(user) && !slugs.includes(slug)) {
       return res.status(403).json({ error: 'Not assigned to this unit' });
     }
@@ -197,7 +199,7 @@ router.get('/dashboard/:unitSlug', async (req, res) => {
 router.get('/requests/:unitSlug', async (req, res) => {
   try {
     const user = await loadFullUser(req);
-    const slug = req.params.unitSlug;
+    const slug = canonicalizeUnitSlug(req.params.unitSlug);
     const unit = await getProjectUnitBySlug(slug);
     if (!unit) return res.status(404).json({ error: 'Unit not found' });
 

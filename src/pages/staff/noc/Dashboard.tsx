@@ -126,7 +126,7 @@ const NOCDashboard: React.FC = () => {
   if (error) {
     return (
       <div className="flex min-h-[60vh] items-center justify-center p-6">
-        <div className="max-w-md rounded-[var(--radius-lg)] border border-[var(--danger-light)] bg-[var(--surface)] p-8 text-center shadow-[var(--shadow)]">
+        <div className="max-w-md rounded-[var(--radius-lg)] border border-[var(--danger-light)] bg-[var(--surface)] p-8 text-center shadow-[var(--shadow-md)]">
           <AlertCircle className="mx-auto mb-4 h-12 w-12 text-[var(--danger)]" />
           <h2 className="text-xl font-bold text-[var(--text-primary)]">Something went wrong</h2>
           <p className="mt-2 text-[var(--text-secondary)]">{error}</p>
@@ -180,7 +180,7 @@ const NOCDashboard: React.FC = () => {
 
         <div className="grid gap-6 lg:grid-cols-3">
           {/* Queue */}
-          <section className="overflow-hidden rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow)] lg:col-span-2">
+          <section className="overflow-hidden rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow-md)] lg:col-span-2">
             <div className="flex items-center justify-between border-b border-[var(--border)] px-4 py-3 sm:px-5 sm:py-4">
               <h2 className="text-sm font-semibold text-[var(--text-primary)]">Ticket queue</h2>
               <Link
@@ -238,7 +238,7 @@ const NOCDashboard: React.FC = () => {
 
           {/* Quick links */}
           <aside className="space-y-4">
-            <div className="rounded-2xl border border-slate-200/90 bg-white p-5 shadow-[var(--shadow)]">
+            <div className="rounded-2xl border border-slate-200/90 bg-white p-5 shadow-[var(--shadow-md)]">
               <h3 className="text-sm font-semibold text-slate-900">Quick access</h3>
               <ul className="mt-4 space-y-2">
                 <QuickLink to="/staff/noc/tickets" icon={Ticket} label="NOC ticket queue" />

@@ -154,7 +154,7 @@ router.post('/:id/approve', async (req, res) => {
       return res.status(403).json({ error: 'Only a Finance Officer can release cash' });
     }
     if (stage !== 'finance' && !canApproveMaterialRequest(req.user) && !canApproveCashRequest(req.user)) {
-      return res.status(403).json({ error: 'Only Supervisor, Manager, or Director can approve requests' });
+      return res.status(403).json({ error: 'You do not have approval permission for this request' });
     }
 
     const result = await approveRequest(

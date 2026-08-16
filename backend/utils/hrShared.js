@@ -25,7 +25,7 @@ export const LETTER_FORM_TYPES = ['Reference Letter', 'Employment Confirmation L
 export const SYSTEM_ROLE_OPTIONS = [
   { label: 'NOC Engineer', value: 'noc' },
   { label: 'IP Engineer', value: 'ip' },
-  { label: 'TX Engineer', value: 'tx' },
+  { label: 'TS Engineer', value: 'ts' },
   { label: 'Finance Officer', value: 'finance' },
   { label: 'CX / Support', value: 'cx' },
   { label: 'Project Unit', value: 'project_unit' },
@@ -381,6 +381,36 @@ export async function generateHrLetterPdf(formRequest, employee) {
 export async function getEmployeeByUserId(userId) {
   const result = await pool.query(`SELECT * FROM hr_employees WHERE user_id = $1 LIMIT 1`, [userId]);
   return result.rows[0] || null;
+}
+
+export async function ensureEmployeeForUser(user) {
+  const userId = Number(user?.id);
+  if (!userId) return null;
+  const role = String(user?.role || user?.main_role || '').toLowerCase();
+  if (role === 'customer') return null;
+
+  const existing = await getEmployeeByUserId(userId);
+  if (existing) return existing;
+
+  const { rows } = await pool.query(
+    `SELECT id, first_name, last_name, username, email, unit, position
+     FROM users WHERE id = $1 AND deleted_at IS NULL`,
+    [userId]
+  );
+  const u = rows[0];
+  if (!u) return null;
+
+  const fullName = `${u.first_name || ''} ${u.last_name || ''}`.trim() || u.username || 'Staff';
+  const inserted = await pool.query(
+    `INSERT INTO hr_employees (user_id, full_name, email, department, position, employment_type, start_date, status)
+     SELECT $1, $2, $3, $4, $5, 'full-time', CURRENT_DATE, 'active'
+     WHERE NOT EXISTS (SELECT 1 FROM hr_employees WHERE user_id = $1)
+     RETURNING *`,
+    [u.id, fullName, u.email || null, u.unit || null, u.position || null]
+  );
+  const emp = inserted.rows[0] || (await getEmployeeByUserId(userId));
+  if (emp?.id) await ensureLeaveBalances(pool, emp.id);
+  return emp || null;
 }
 
 export { logHrActivity };

@@ -92,11 +92,7 @@ export default function ProjectUnitHub() {
   const awaitingCount = requests.filter(canProjectMarkComplete).length;
 
   return (
-    <ProductionPageShell
-      unitSlug="project"
-      backTo={isExecutive ? '/director/dashboard' : '/dashboard'}
-      backLabel={isExecutive ? 'Back to Directors Dashboard' : 'Back to Dashboard'}
-    >
+    <ProductionPageShell unitSlug="project">
       <div className="space-y-6">
         <UnitPageHero
           unitSlug="project"
@@ -184,7 +180,7 @@ export default function ProjectUnitHub() {
                     No service requests yet.{' '}
                     <button
                       type="button"
-                      className="font-medium text-indigo-600 hover:underline"
+                      className="font-medium text-[var(--primary)] hover:underline"
                       onClick={() => navigate('/project-request/create')}
                     >
                       Create one

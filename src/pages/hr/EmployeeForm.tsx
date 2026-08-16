@@ -21,7 +21,7 @@ export const DEPARTMENT_OPTIONS = [
 ];
 
 export const POSITION_OPTIONS = [
-  { value: '', label: 'Select position' },
+  { value: 'Staff', label: 'Staff' },
   { value: 'Director', label: 'Director' },
   { value: 'NOC Manager', label: 'NOC Manager' },
   { value: 'IP Manager', label: 'IP Manager' },
@@ -45,6 +45,7 @@ const DEPT_BY_ROLE: Record<string, string> = {
   noc: 'NOC',
   ip: 'IP',
   tx: 'TS',
+  ts: 'TS',
   finance: 'Finance',
   cx: 'CX',
   project_unit: 'Project Unit',
@@ -69,8 +70,9 @@ export const emptyEmployeeForm = {
   email: '',
   phone: '',
   department: '',
-  position: '',
+  position: 'Staff',
   location: '',
+  gender: '',
   employment_type: 'full-time',
   start_date: '',
   contract_end_date: '',
@@ -116,7 +118,7 @@ export function EmployeeForm({
     <form className="space-y-4" onSubmit={onSubmit}>
       <div className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-4 space-y-4">
         <p className="text-sm font-semibold text-[var(--text-primary)]">Profile</p>
-        <Field label="Full name"><input className={inputClass} required value={form.full_name} onChange={(e) => update({ full_name: e.target.value })} /></Field>
+        <Field label="Full name" required><input className={inputClass} required value={form.full_name} onChange={(e) => update({ full_name: e.target.value })} /></Field>
         <Field label="Photo">
           <input type="file" accept="image/*" onChange={(e) => setPhoto(e.target.files?.[0] || null)} />
           {photo && <p className="mt-1 text-xs text-[var(--text-muted)]">{photo.name}</p>}
@@ -126,24 +128,33 @@ export function EmployeeForm({
           <Field label="Phone"><input className={inputClass} value={form.phone} onChange={(e) => update({ phone: e.target.value })} /></Field>
         </div>
         <div className="grid gap-3 sm:grid-cols-2">
-          <Field label="Department">
+          <Field label="Gender" required>
+            <select className={inputClass} required value={form.gender} onChange={(e) => update({ gender: e.target.value })}>
+              <option value="">Select gender</option>
+              <option value="male">Male</option>
+              <option value="female">Female</option>
+            </select>
+          </Field>
+          <Field label="Location">
+            <input className={inputClass} placeholder="Office, site, or city" value={form.location} onChange={(e) => update({ location: e.target.value })} />
+          </Field>
+        </div>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Field label="Department" required>
             <select className={inputClass} required value={form.department} onChange={(e) => update({ department: e.target.value })}>
               {optionsWithCurrent(DEPARTMENT_OPTIONS, form.department).map((opt) => (
                 <option key={opt.value || 'none'} value={opt.value}>{opt.label}</option>
               ))}
             </select>
           </Field>
-          <Field label="Position">
-            <select className={inputClass} required value={form.position} onChange={(e) => update({ position: e.target.value })}>
+          <Field label="Position" optional hint="Choose Staff if they have no specific title.">
+            <select className={inputClass} value={form.position} onChange={(e) => update({ position: e.target.value })}>
               {optionsWithCurrent(POSITION_OPTIONS, form.position).map((opt) => (
                 <option key={opt.value || 'none'} value={opt.value}>{opt.label}</option>
               ))}
             </select>
           </Field>
         </div>
-        <Field label="Location">
-          <input className={inputClass} placeholder="Office, site, or city" value={form.location} onChange={(e) => update({ location: e.target.value })} />
-        </Field>
         <Field label="Line manager">
           {managerNames.length > 0 ? (
             <select className={inputClass} value={form.line_manager} onChange={(e) => update({ line_manager: e.target.value })}>
@@ -170,8 +181,41 @@ export function EmployeeForm({
           </Field>
         </div>
         <div className="grid gap-3 sm:grid-cols-2">
-          <Field label="Start date"><input className={inputClass} type="date" value={form.start_date} onChange={(e) => update({ start_date: e.target.value })} /></Field>
-          <Field label="Contract end"><input className={inputClass} type="date" value={form.contract_end_date} onChange={(e) => update({ contract_end_date: e.target.value })} /></Field>
+          <Field label="Start date" required hint="The day this person joined Vobiss.">
+            <input
+              className={inputClass}
+              type="date"
+              required
+              value={form.start_date}
+              onChange={(e) => update({ start_date: e.target.value })}
+            />
+          </Field>
+          <Field
+            label="End date"
+            optional
+            hint={
+              form.employment_type === 'contract'
+                ? 'Leave blank if the contract end is not known yet.'
+                : 'Leave blank for permanent or open-ended roles.'
+            }
+          >
+            <input
+              className={inputClass}
+              type="date"
+              min={form.start_date || undefined}
+              value={form.contract_end_date}
+              onChange={(e) => update({ contract_end_date: e.target.value })}
+            />
+            {form.contract_end_date && (
+              <button
+                type="button"
+                className="mt-1 text-xs font-medium text-[var(--text-muted)] underline-offset-2 hover:text-[var(--text-primary)] hover:underline"
+                onClick={() => update({ contract_end_date: '' })}
+              >
+                Clear end date
+              </button>
+            )}
+          </Field>
         </div>
         <div className="grid gap-3 sm:grid-cols-2">
           <Field label="Basic salary (GHS)"><input className={inputClass} type="number" value={form.basic_salary} onChange={(e) => update({ basic_salary: e.target.value })} /></Field>

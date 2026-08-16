@@ -1,6 +1,7 @@
 import pool from '../db.js';
 import { getUserWorkspace } from '../db.js';
-import { matchVobiIntent, vobiReplyTone } from './vobiIntents.js';
+import { matchVobiIntent } from './vobiIntents.js';
+import { askVobi } from './geminiService.js';
 
 const TEAL = '#1D9E75';
 
@@ -287,19 +288,10 @@ export async function getVobiOverview(userId) {
 
   const pendingCount =
     needsAction.length + mentions.length + overdue.length;
-  const actionPart = needsAction.length + overdue.length;
-  const mentionPart = mentions.length;
-  let statusLine = 'You are all caught up';
-  if (pendingCount > 0) {
-    const bits = [];
-    if (actionPart > 0) bits.push(`${actionPart} pending action${actionPart === 1 ? '' : 's'}`);
-    if (mentionPart > 0) bits.push(`${mentionPart} mention${mentionPart === 1 ? '' : 's'}`);
-    statusLine = `You have ${bits.join(' and ')}`;
-  }
 
   return {
     greeting: { period: g.key, label: g.label, firstName },
-    statusLine,
+    statusLine: '',
     pendingCount,
     groups: {
       needsAction,
@@ -790,18 +782,17 @@ export async function ensureVobiThread(userId) {
   );
 
   const firstName = await getUserFirstName(uid);
-  const greeting =
-    new Date().getHours() < 12
-      ? 'Good morning'
-      : new Date().getHours() < 17
-        ? 'Good afternoon'
-        : 'Good evening';
   try {
-    await insertVobiMessage(
-      channelId,
-      `I'm Vobi, your personal work assistant inside Vobiss.\n\nI watch approvals, tickets, requests, projects, chat mentions, and urgent updates so you can quickly see what needs attention.\n\nMy future ambition is to become a calm operations layer for every staff member: predicting urgent work early, preparing handovers and reports, and guiding you to the next best action.\n\n${greeting}, ${firstName}. Ask me things like "what did I miss today?", "show my approvals", or "my mentions" anytime.`,
-      { cardType: 'welcome', firstName }
+    const welcome = await askVobi(
+      `Greet ${firstName} warmly in one sentence, introduce yourself as Vobi, then give one useful operational insight from the live data.`,
+      uid,
+      null,
+      null,
+      []
     );
+    if (welcome) {
+      await insertVobiMessage(channelId, welcome, { cardType: 'welcome', firstName });
+    }
   } catch (e) {
     console.warn('[vobi] welcome message:', e.message);
   }
@@ -838,216 +829,61 @@ function extractThreadName(text) {
     .trim();
 }
 
-function formatThreadSummaryReply(summary) {
-  return summary.messageCount > 0
-    ? `Caught you up on ${summary.channelName} — here's the recap.`
-    : `You're all caught up in ${summary.channelName} — nothing new in this window.`;
-}
-
-function formatDigestReply(digest, mentionsOnly = false) {
-  if (mentionsOnly) {
-    return digest.mentionedIn.length
-      ? `You were mentioned in ${digest.mentionedIn.length} thread${digest.mentionedIn.length === 1 ? '' : 's'}. Here's where:`
-      : 'No new chat mentions right now.';
-  }
-  const threadCount = digest.mentionedIn.length + digest.activeThreads.length + digest.systemEvents.length;
-  if (!threadCount) return "You're all caught up — nothing new since your last login.";
-  return `${threadCount} thread${threadCount === 1 ? '' : 's'} had activity since you were away.`;
-}
-
 export async function runVobiCommand(userId, text) {
   const uid = parseUserId(userId);
   const intent = matchVobiIntent(text);
-
-  if (intent === 'summarise_thread') {
-    const channelName = extractThreadName(text);
-    const channel = await resolveUserChannel(uid, channelName);
-    if (!channel) {
-      return {
-        intent,
-        reply: `I couldn't find a chat thread named "${channelName || 'that'}" that you belong to.`,
-        cards: [],
-        meta: { cardType: 'text', intent },
-      };
-    }
-    const threadSummary = await getThreadSummary(uid, channel.id, {});
-    return {
-      intent,
-      reply: formatThreadSummaryReply(threadSummary),
-      cards: [],
-      meta: { cardType: 'thread_summary', threadSummary },
-    };
-  }
-
-  if (intent === 'personal_digest' || intent === 'missed') {
-    const digest = await getPersonalDigest(uid);
-    return {
-      intent: 'personal_digest',
-      reply: formatDigestReply(digest),
-      cards: [],
-      meta: { cardType: 'personal_digest', digest },
-    };
-  }
-
-  if (intent === 'chat_mentions') {
-    const digest = await getPersonalDigest(uid);
-    return {
-      intent,
-      reply: formatDigestReply(digest, true),
-      cards: [],
-      meta: { cardType: 'personal_digest', digest: { ...digest, activeThreads: [], systemEvents: [] } },
-    };
-  }
-
-  const overview = await getVobiOverview(uid);
-  const actions = await getVobiActions(uid, 'all');
-  let summary = await getVobiSummary(uid, 'since_login');
-
-  const openTickets = summary.sections.tickets.open?.length ?? 0;
-  const g = overview.greeting;
-
+  let prompt = String(text || '').trim();
   let cards = [];
+  let meta = { cardType: 'text', intent };
   let filter = null;
 
-  switch (intent) {
-    case 'greeting':
-      break;
-    case 'tasks':
-      cards = actions.items.slice(0, 8);
-      filter = 'all';
-      break;
-    case 'approvals':
-      cards = (await getVobiActions(uid, 'all', 'approval')).items;
-      filter = 'approvals';
-      return {
-        intent,
-        reply: `${cards.length} approval${cards.length === 1 ? '' : 's'} waiting.`,
-        cards,
-        filter,
-        meta: { cardType: 'action_list', intent },
-      };
-    case 'tickets_summary': {
-      summary = await getVobiSummary(uid, 'today', 'tickets');
-      const s = summary.sections.tickets;
-      const lines = [];
-      if (s.resolved?.length) lines.push(`Resolved: ${s.resolved.join(', ')}`);
-      if (s.open?.length) lines.push(`Open: ${s.open.join(', ')}`);
-      if (s.overdue?.length) lines.push(`Overdue: ${s.overdue.join(', ')}`);
-      return {
-        intent,
-        reply: vobiReplyTone(intent, {
-          summaryText: lines.length ? lines.join('\n') : 'No ticket activity in this period.',
-        }),
-        cards: [],
-        meta: { cardType: 'text', sections: summary.sections.tickets },
-      };
+  if (intent === 'summarise_thread') {
+    const channel = await resolveUserChannel(uid, extractThreadName(text));
+    if (channel?.id) {
+      const threadSummary = await getThreadSummary(uid, channel.id, {});
+      prompt = `${text}\n\nThread data:\n${JSON.stringify(threadSummary)}`;
+      meta = { cardType: 'thread_summary', threadSummary };
     }
-    case 'overdue':
-      cards = overview.groups.overdue;
-      return {
-        intent,
-        reply: cards.length
-          ? `${cards.length} overdue item${cards.length === 1 ? '' : 's'}.`
-          : 'Nothing overdue right now.',
-        cards,
-        filter: 'overdue',
-        meta: { cardType: 'action_list', intent },
-      };
-    case 'mentions':
-      cards = overview.groups.mentions;
-      return {
-        intent,
-        reply: cards.length
-          ? `${cards.length} mention${cards.length === 1 ? '' : 's'} found.`
-          : 'No new mentions.',
-        cards,
-        filter: 'mentions',
-        meta: { cardType: 'action_list', intent },
-      };
-    case 'open_tickets_count':
-      return {
-        intent,
-        reply: vobiReplyTone(intent, { openTickets }),
-        cards: [],
-        meta: { cardType: 'stat', openTickets },
-      };
-    case 'about':
-      return {
-        intent,
-        reply: vobiReplyTone(intent, {}),
-        cards: [],
-        meta: { cardType: 'text', intent },
-      };
-    case 'report':
-      summary = await getVobiSummary(uid, 'today');
-      return {
-        intent,
-        reply: formatVobiSummaryText(summary, 'Here is today’s report summary:'),
-        cards: [],
-        meta: { cardType: 'report_hint', period: 'today' },
-      };
-    default:
-      break;
+  } else if (intent === 'personal_digest' || intent === 'missed' || intent === 'chat_mentions') {
+    const digest = await getPersonalDigest(uid);
+    prompt = `${text}\n\nChat digest data:\n${JSON.stringify(digest)}`;
+    meta = {
+      cardType: 'personal_digest',
+      digest: intent === 'chat_mentions' ? { ...digest, activeThreads: [], systemEvents: [] } : digest,
+    };
+  } else if (intent === 'approvals') {
+    cards = (await getVobiActions(uid, 'all', 'approval')).items;
+    filter = 'approvals';
+    meta = { cardType: cards.length ? 'action_list' : 'text', intent };
+  } else if (intent === 'overdue') {
+    cards = (await getVobiOverview(uid)).groups.overdue;
+    filter = 'overdue';
+    meta = { cardType: cards.length ? 'action_list' : 'text', intent };
+  } else if (intent === 'mentions') {
+    cards = (await getVobiOverview(uid)).groups.mentions;
+    filter = 'mentions';
+    meta = { cardType: cards.length ? 'action_list' : 'text', intent };
+  } else if (intent === 'tasks') {
+    cards = (await getVobiActions(uid, 'all')).items.slice(0, 8);
+    filter = 'all';
+    meta = { cardType: cards.length ? 'action_list' : 'text', intent };
   }
 
-  const reply = vobiReplyTone(intent, {
-    greeting: `${g.label}, ${g.firstName}`,
-    statusLine: overview.statusLine,
-    actionCount: cards.length || actions.total,
-    total: cards.length,
-    openTickets,
-    summaryText: overview.statusLine,
-  });
-
-  return {
-    intent,
-    reply:
-      intent === 'tasks'
-        ? cards.length
-          ? 'Here are your open tasks:'
-          : "You're all clear — no open tasks right now."
-        : reply,
-    cards,
-    filter,
-    meta: { cardType: cards.length ? 'action_list' : 'text', intent },
-  };
-}
-
-function formatVobiSummaryText(summary, heading = 'Here is what changed:') {
-  const t = summary.sections.tickets;
-  const r = summary.sections.requests;
-  const c = summary.sections.chat;
-  return [
-    heading,
-    `Tickets: ${t.open.length} open, ${t.overdue.length} overdue, ${t.resolved.length} resolved.`,
-    `Requests: ${r.pending} pending, ${r.approved} approved, ${r.rejected} rejected.`,
-    `Chat: ${c.mentioned} mentions, ${c.unread_threads} unread threads.`,
-  ].join('\n');
+  const reply = await askVobi(prompt, uid, null, null, []);
+  return { intent, reply, cards, filter, meta };
 }
 
 export async function generateVobiReport(userId, period = 'today') {
-  const summary = await getVobiSummary(userId, period === 'week' ? 'week' : 'today');
-  const overview = await getVobiOverview(userId);
-  const lines = [];
-  lines.push(`Vobiss — Vobi ${period} report`);
-  lines.push(`${overview.greeting.label}, ${overview.greeting.firstName}`);
-  lines.push(overview.statusLine);
-  lines.push('');
-  lines.push('TICKETS');
-  const t = summary.sections.tickets;
-  if (t.resolved?.length) lines.push(`• Resolved: ${t.resolved.join(', ')}`);
-  if (t.open?.length) lines.push(`• Open: ${t.open.join(', ')}`);
-  if (t.overdue?.length) lines.push(`• Overdue: ${t.overdue.join(', ')}`);
-  lines.push('');
-  lines.push('REQUESTS');
-  lines.push(`• Approved: ${summary.sections.requests.approved}`);
-  lines.push(`• Pending: ${summary.sections.requests.pending}`);
-  lines.push('');
-  lines.push('CHAT');
-  lines.push(`• Mentions: ${summary.sections.chat.mentioned}`);
-  lines.push(`• Unread threads: ${summary.sections.chat.unread_threads}`);
-
-  const body = lines.join('\n');
+  const uid = parseUserId(userId);
+  const body = await askVobi(
+    period === 'week'
+      ? 'Write a plain-text weekly operations report for me using the live data. Include tickets, requests, finance, HR, and my work.'
+      : 'Write a plain-text daily operations report for me using the live data. Include tickets, requests, finance, HR, and my work.',
+    uid,
+    null,
+    null,
+    []
+  );
   return {
     period,
     filename: `vobi-report-${period}-${new Date().toISOString().slice(0, 10)}.txt`,

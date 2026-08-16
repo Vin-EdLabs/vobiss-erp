@@ -51,6 +51,7 @@ export type HrEmployee = {
   full_name: string;
   email?: string | null;
   phone?: string | null;
+  gender?: string | null;
   photo_url?: string | null;
   department?: string | null;
   position?: string | null;

@@ -54,7 +54,7 @@ export function WorkspaceAttentionSection({
 }) {
   if (loading) {
     return (
-      <section className="overflow-hidden rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)]">
+      <section className="overflow-hidden rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow-md)]">
         <div className="border-b border-[var(--border)] px-4 py-3">
           <div className="h-4 w-36 animate-pulse rounded bg-[var(--surface-secondary)]" />
         </div>
@@ -75,12 +75,12 @@ export function WorkspaceAttentionSection({
 
   if (!items.length) {
     return (
-      <section className="overflow-hidden rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow-sm)]">
+      <section className="overflow-hidden rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow-md)]">
         <div className="border-b border-[var(--border)] px-4 py-3">
           <h2 className="text-sm font-semibold text-[var(--text-primary)]">Needs your attention</h2>
         </div>
         <EmptyState
-          title="You're all caught up"
+          title="No items"
           description="No pending approvals or assigned tickets right now."
           icon={CheckCircle2}
         />
@@ -89,7 +89,7 @@ export function WorkspaceAttentionSection({
   }
 
   return (
-    <section className="overflow-hidden rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow-sm)]">
+    <section className="overflow-hidden rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow-md)]">
       <div className="flex items-center justify-between border-b border-[var(--border)] px-4 py-3">
         <h2 className="text-sm font-semibold text-[var(--text-primary)]">Needs your attention</h2>
         <StatusPill tone="warning">{items.length}</StatusPill>

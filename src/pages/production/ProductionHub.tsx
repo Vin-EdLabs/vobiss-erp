@@ -47,7 +47,8 @@ function belongsInActiveQueue(request: ProjectRequest, unitSlug: string) {
 }
 
 export default function ProductionHub() {
-  const { unitSlug = 'ts' } = useParams<{ unitSlug: string }>();
+  const { unitSlug: rawSlug = 'ts' } = useParams<{ unitSlug: string }>();
+  const unitSlug = rawSlug === 'tx' ? 'ts' : rawSlug;
   const { toast } = useToast();
   const { refreshUser } = useAuth();
   const theme = getUnitTheme(unitSlug);
@@ -118,15 +119,8 @@ export default function ProductionHub() {
         : 'No IP submissions to review yet.';
   const emptyHistory = 'No history yet.';
 
-  const backTo =
-    unitSlug === 'noc' ? '/staff/noc/dashboard' : '/dashboard';
-
   return (
-    <ProductionPageShell
-      unitSlug={unitSlug}
-      backTo={backTo}
-      backLabel={unitSlug === 'noc' ? 'Back to NOC Dashboard' : 'Back to Dashboard'}
-    >
+    <ProductionPageShell unitSlug={unitSlug}>
       <div className="space-y-6">
         <UnitPageHero
           unitSlug={unitSlug}
@@ -202,11 +196,7 @@ export default function ProductionHub() {
                     </SelectContent>
                   </Select>
                 )}
-                <Button
-                  variant="outline"
-                  className={`border-[var(--border)] ${unitSlug === 'noc' ? 'hover:bg-amber-50 hover:text-amber-900 dark:hover:bg-amber-500/15 dark:hover:text-amber-200' : ''}`}
-                  onClick={() => void load()}
-                >
+                <Button variant="outline" className="border-[var(--border)]" onClick={() => void load()}>
                   Apply
                 </Button>
               </div>

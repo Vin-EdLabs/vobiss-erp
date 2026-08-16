@@ -513,7 +513,7 @@ const DirectorsDashboard: React.FC = () => {
 
         {/* Director approval required banner */}
         {pendingDirectorCount > 0 && (
-          <div className="rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border border-amber-200 bg-amber-50">
+          <div className="rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border border-amber-200 bg-amber-50 shadow-[var(--shadow-md)]">
             <div className="flex items-center gap-3">
               <div className="flex h-10 w-10 items-center justify-center rounded-full border bg-amber-100 border-amber-300">
                 <Bell className="h-5 w-5 text-amber-600" />
@@ -586,7 +586,7 @@ const DirectorsDashboard: React.FC = () => {
         </div>
 
         <div className="grid grid-cols-1 gap-5 lg:grid-cols-5">
-          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-[var(--shadow)] lg:col-span-2">
+          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-[var(--shadow-md)] lg:col-span-2">
             <div className="mb-4 flex items-center justify-between">
               <div>
                 <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-amber-600">Graph</p>
@@ -610,7 +610,7 @@ const DirectorsDashboard: React.FC = () => {
             </div>
           </div>
 
-          <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[var(--shadow)] lg:col-span-3">
+          <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[var(--shadow-md)] lg:col-span-3">
           <div className="border-b border-slate-100 bg-gradient-to-r from-slate-950 via-blue-950 to-slate-900 px-5 py-4 text-white">
             <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-amber-300">Daily operations flow</p>
             <h2 className="mt-1 text-xl font-bold">How work moves today</h2>
@@ -624,7 +624,7 @@ const DirectorsDashboard: React.FC = () => {
                 key={step.label}
                 type="button"
                 onClick={() => navigate(step.path)}
-                className="group relative rounded-2xl border border-slate-200 bg-slate-50 p-4 text-left transition hover:-translate-y-0.5 hover:border-amber-300 hover:bg-white hover:shadow-lg focus:outline-none focus:ring-2 focus:ring-amber-400/50"
+                className="group relative rounded-2xl border border-slate-200 bg-slate-50 p-4 text-left shadow-[var(--shadow-md)] transition hover:-translate-y-0.5 hover:border-amber-300 hover:bg-white hover:shadow-lg focus:outline-none focus:ring-2 focus:ring-amber-400/50"
               >
                 {index < dailyFlow.length - 1 && (
                   <span className="pointer-events-none absolute right-[-1.15rem] top-1/2 z-10 hidden h-0.5 w-8 bg-gradient-to-r from-slate-300 to-amber-300 md:block" />
@@ -643,7 +643,7 @@ const DirectorsDashboard: React.FC = () => {
 
         {/* Financial Overview */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <div className="lg:col-span-2 bg-white rounded-2xl border border-gray-200 shadow-[var(--shadow)] p-5">
+          <div className="lg:col-span-2 bg-white rounded-2xl border border-gray-200 shadow-[var(--shadow-md)] p-5">
             <div className="flex justify-between items-center mb-4">
               <button
                 type="button"
@@ -713,7 +713,7 @@ const DirectorsDashboard: React.FC = () => {
             </div>
           </div>
 
-          <div className="bg-white rounded-2xl border border-gray-200 shadow-[var(--shadow)] p-5">
+          <div className="bg-white rounded-2xl border border-gray-200 shadow-[var(--shadow-md)] p-5">
             <button
               type="button"
               onClick={() => navigate('/staff/reports/cash')}
@@ -736,7 +736,7 @@ const DirectorsDashboard: React.FC = () => {
 
         {/* Inventory Activity & Low Stock */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <div className="lg:col-span-2 bg-white rounded-2xl border border-gray-200 shadow-[var(--shadow)] p-5">
+          <div className="lg:col-span-2 bg-white rounded-2xl border border-gray-200 shadow-[var(--shadow-md)] p-5">
             <div className="flex justify-between items-center mb-4">
               <button
                 type="button"
@@ -790,7 +790,7 @@ const DirectorsDashboard: React.FC = () => {
             </div>
           </div>
 
-          <div className="bg-white rounded-2xl border border-gray-200 shadow-[var(--shadow)] p-5">
+          <div className="bg-white rounded-2xl border border-gray-200 shadow-[var(--shadow-md)] p-5">
             <button
               type="button"
               onClick={() => navigate('/low-stock')}
@@ -827,7 +827,7 @@ const DirectorsDashboard: React.FC = () => {
         </div>
 
         {/* Read-only full inventory view for directors */}
-        <div className="bg-white rounded-2xl border border-gray-200 shadow-[var(--shadow)] p-5">
+        <div className="bg-white rounded-2xl border border-gray-200 shadow-[var(--shadow-md)] p-5">
           <div className="flex justify-between items-center mb-4">
             <button
               type="button"
@@ -888,7 +888,7 @@ const DirectorsDashboard: React.FC = () => {
 
         {/* Approvals Snapshot, Recent Activity & Requests Overview — expanded */}
         <div className="space-y-6">
-          <div className="bg-white rounded-2xl border border-gray-200 shadow-[var(--shadow)] p-6">
+          <div className="bg-white rounded-2xl border border-gray-200 shadow-[var(--shadow-md)] p-6">
             <button
               type="button"
               onClick={() => navigate('/material-approvals')}
@@ -935,7 +935,7 @@ const DirectorsDashboard: React.FC = () => {
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <div className="bg-white rounded-2xl border border-gray-200 shadow-[var(--shadow)] p-6">
+            <div className="bg-white rounded-2xl border border-gray-200 shadow-[var(--shadow-md)] p-6">
               <button
                 type="button"
                 onClick={() => navigate('/workspace')}
@@ -970,7 +970,7 @@ const DirectorsDashboard: React.FC = () => {
               )}
             </div>
 
-            <div className="bg-white rounded-2xl border border-gray-200 shadow-[var(--shadow)] p-6">
+            <div className="bg-white rounded-2xl border border-gray-200 shadow-[var(--shadow-md)] p-6">
               <button
                 type="button"
                 onClick={() => navigate('/material-approvals')}

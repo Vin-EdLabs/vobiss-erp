@@ -880,7 +880,7 @@ const CashDetails: React.FC = () => {
                       </tr>
                     ))
                   )}
-                  <tr className="bg-green-50 font-bold">
+                  <tr className="bg-[var(--accent-green-light)] font-bold text-[var(--success-text)]">
                     <td colSpan={3} className="px-4 py-3 text-right">Total Amount</td>
                     <td className="px-4 py-3">{formatAmount(request.total_amount)}</td>
                   </tr>

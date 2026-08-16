@@ -9,11 +9,7 @@ import {
   Pin,
   Paperclip,
   Smile,
-  AtSign,
-  Link2,
   Send,
-  Bold,
-  Italic,
   X,
   Plus,
   UserMinus,
@@ -29,6 +25,7 @@ import {
   Forward,
   Bookmark,
   Menu,
+  Globe,
 } from 'lucide-react';
 import '@/styles/chat-theme.css';
 import '@/styles/chat-mobile.css';
@@ -247,13 +244,36 @@ function normalizeSearchText(text: string) {
     .trim();
 }
 
+function channelDisplayName(ch: { name?: string; channel_type?: string } | null | undefined) {
+  const name = String(ch?.name || '').toLowerCase();
+  const type = String(ch?.channel_type || '').toLowerCase();
+  if (type === 'general' || name === 'general') return 'General';
+  if (type === 'announcements' || name === 'announcements') return 'Announcements';
+  return ch?.name || '';
+}
+
+function isCompanyGeneral(ch: { name?: string; channel_type?: string } | null | undefined) {
+  const name = String(ch?.name || '').toLowerCase();
+  const type = String(ch?.channel_type || '').toLowerCase();
+  return type === 'general' || name === 'general';
+}
+
 function channelMatchesSearch(
   query: string,
   ch: ChatChannel
 ) {
   if (!query) return true;
   const haystack = normalizeSearchText(
-    [ch.name, `#${ch.name}`, ch.description || '', ch.last_message?.body || '', ch.last_message?.sender_name || ''].join(' ')
+    [
+      ch.name,
+      `#${ch.name}`,
+      channelDisplayName(ch),
+      `# ${channelDisplayName(ch)}`,
+      ch.description || '',
+      isCompanyGeneral(ch) ? 'company-wide everyone general' : '',
+      ch.last_message?.body || '',
+      ch.last_message?.sender_name || '',
+    ].join(' ')
   );
   return haystack.includes(query);
 }
@@ -540,9 +560,6 @@ const Chat: React.FC<{
   const [highlightMessageId, setHighlightMessageId] = useState<string | null>(null);
   const [activeMobileActionsMessageId, setActiveMobileActionsMessageId] = useState<string | null>(null);
   const [showEmoji, setShowEmoji] = useState(false);
-  const [showLinkPopover, setShowLinkPopover] = useState(false);
-  const [linkText, setLinkText] = useState('');
-  const [linkUrl, setLinkUrl] = useState('https://');
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState('');
   const [pendingDelete, setPendingDelete] = useState<{
@@ -566,8 +583,6 @@ const Chat: React.FC<{
   const inputAreaRef = useRef<HTMLDivElement>(null);
   const messageSearchRef = useRef<HTMLInputElement>(null);
   const emojiPickerRef = useRef<HTMLDivElement>(null);
-  const linkPopoverRef = useRef<HTMLDivElement>(null);
-  const toolbarRef = useRef<HTMLDivElement>(null);
   const lastDeepLinkMessageRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -1380,78 +1395,10 @@ const Chat: React.FC<{
   }, [showEmoji]);
 
   useEffect(() => {
-    if (!showLinkPopover) return;
-    const onDocClick = (e: MouseEvent) => {
-      if (linkPopoverRef.current && !linkPopoverRef.current.contains(e.target as Node)) {
-        setShowLinkPopover(false);
-      }
-    };
-    document.addEventListener('mousedown', onDocClick);
-    return () => document.removeEventListener('mousedown', onDocClick);
-  }, [showLinkPopover]);
-
-  useEffect(() => {
     if (showPinned && (activeChannelId || activeDmId)) {
       refetchPins();
     }
   }, [showPinned, activeChannelId, activeDmId, refetchPins]);
-
-  const applyTextWrap = (before: string, after: string, defaultText: string) => {
-    const el = inputRef.current;
-    if (!el) return;
-    const start = el.selectionStart;
-    const end = el.selectionEnd;
-    const selected = input.slice(start, end) || defaultText;
-    const newVal = input.slice(0, start) + before + selected + after + input.slice(end);
-    setInput(newVal);
-    requestAnimationFrame(() => {
-      el.focus();
-      const selStart = start + before.length;
-      const selEnd = selStart + selected.length;
-      el.setSelectionRange(selStart, selEnd);
-    });
-  };
-
-  const handleBold = () => applyTextWrap('**', '**', 'bold text');
-
-  const handleItalic = () => applyTextWrap('_', '_', 'italic text');
-
-  const handleInsertLink = () => {
-    const el = inputRef.current;
-    const selected = el ? input.slice(el.selectionStart, el.selectionEnd) : '';
-    setLinkText(selected || '');
-    setLinkUrl('https://');
-    setShowLinkPopover(true);
-    setShowEmoji(false);
-  };
-
-  const confirmInsertLink = () => {
-    const el = inputRef.current;
-    const url = linkUrl.trim();
-    const label = linkText.trim() || url;
-    if (!url) return;
-
-    const normalizedUrl = /^https?:\/\//i.test(url) ? url : `https://${url}`;
-    const link = `[${label}](${normalizedUrl})`;
-
-    if (!el) {
-      setInput((v) => v + link);
-    } else {
-      const start = el.selectionStart;
-      const end = el.selectionEnd;
-      const newVal = input.slice(0, start) + link + input.slice(end);
-      setInput(newVal);
-      requestAnimationFrame(() => {
-        el.focus();
-        const pos = start + link.length;
-        el.setSelectionRange(pos, pos);
-      });
-    }
-
-    setShowLinkPopover(false);
-    setLinkText('');
-    setLinkUrl('https://');
-  };
 
   const canEditMessage = (msg: ChatMessage) => {
     if (msg.sender_id !== user?.id) return false;
@@ -1577,7 +1524,11 @@ const Chat: React.FC<{
     () =>
       channels
         .filter((c) => c.channel_type === 'general' || c.channel_type === 'announcements')
-        .filter((c) => channelMatchesSearch(searchQuery, c)),
+        .filter((c) => channelMatchesSearch(searchQuery, c))
+        .sort((a, b) => {
+          const rank = (c: ChatChannel) => (isCompanyGeneral(c) ? 0 : c.channel_type === 'announcements' ? 1 : 2);
+          return rank(a) - rank(b);
+        }),
     [channels, searchQuery]
   );
 
@@ -2002,16 +1953,22 @@ const Chat: React.FC<{
     ? 'Vobi · your work assistant'
     : activeChannel
       ? isCategoryHubView
-        ? `# ${activeChannel.name}`
+        ? `# ${channelDisplayName(activeChannel)}`
         : activeChannel.record_type
           ? activeChannel.name
-          : `# ${activeChannel.name}`
+          : `# ${channelDisplayName(activeChannel)}`
       : activeDm?.other_user?.name || 'Direct Message';
+  const headerSubtitle = isCompanyGeneral(activeChannel)
+    ? 'Company-wide — everyone in Vobiss can see and post here'
+    : activeChannel?.channel_type === 'announcements'
+      ? 'Official updates for the whole company'
+      : null;
 
   const renderChannelButton = (ch: ChatChannel) => {
     const active = ch.id === activeChannelId;
     const isAnnounce = ch.channel_type === 'announcements';
     const isUnit = ch.channel_type === 'unit';
+    const isGeneral = isCompanyGeneral(ch);
 
     return (
       <button
@@ -2024,12 +1981,19 @@ const Chat: React.FC<{
       >
         {isAnnounce ? (
           <Megaphone className="h-3.5 w-3.5 shrink-0 text-amber-400" />
+        ) : isGeneral ? (
+          <Globe className="h-3.5 w-3.5 shrink-0 text-sky-400" />
         ) : isUnit ? (
           <Users className="h-3.5 w-3.5 shrink-0 text-violet-400" />
         ) : (
           <Hash className="h-3.5 w-3.5 shrink-0 text-gray-500" />
         )}
-        <span className="flex-1 truncate">{ch.name}</span>
+        <span className="flex-1 truncate">{channelDisplayName(ch)}</span>
+        {isGeneral && (
+          <span className="chat-general-pill rounded-full bg-sky-500/15 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-sky-300">
+            All
+          </span>
+        )}
         {ch.unread_count > 0 && (
           <span className="rounded-full bg-red-500 px-1.5 py-0.5 text-[10px] font-semibold text-white">
             {ch.unread_count > 99 ? '99+' : ch.unread_count}
@@ -2482,7 +2446,19 @@ const Chat: React.FC<{
             {isRecordThread && activeChannel?.record_type && (
               <RecordTypeBadge type={activeChannel.record_type} />
             )}
-            <h2 className="chat-topbar-title min-w-0 truncate text-white">{headerTitle}</h2>
+            {isCompanyGeneral(activeChannel) && (
+              <span className="chat-general-icon flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-sky-500/15">
+                <Globe className="h-4 w-4 text-sky-400" />
+              </span>
+            )}
+            <div className="min-w-0 flex-1">
+              <h2 className="chat-topbar-title min-w-0 truncate text-white">{headerTitle}</h2>
+              {headerSubtitle && (
+                <p className="chat-topbar-sub hidden min-w-0 truncate text-[11px] text-gray-500 sm:block">
+                  {headerSubtitle}
+                </p>
+              )}
+            </div>
           </div>
           <div className="chat-topbar-actions--compact flex shrink-0 items-center gap-0.5">
             {isRecordThread && threadsForActiveCategory.length > 1 && (
@@ -2680,7 +2656,7 @@ const Chat: React.FC<{
         )}
 
         {isCategoryHubView && activeChannel && (
-          <CategoryHubFlowBanner hubLabel={`#${activeChannel.name}`} />
+          <CategoryHubFlowBanner hubLabel={`#${channelDisplayName(activeChannel)}`} />
         )}
 
         {isVobiChannel && vobiChannelId ? (
@@ -2697,6 +2673,17 @@ const Chat: React.FC<{
             <p className="py-8 text-center text-sm text-gray-500">
               No activity yet. Updates from tickets and requests will show here.
             </p>
+          )}
+          {!isCategoryHubView && !loadingOlder && messages.length === 0 && isCompanyGeneral(activeChannel) && (
+            <div className="chat-general-welcome mx-auto mt-8 max-w-md rounded-2xl border border-sky-500/20 bg-sky-500/5 px-6 py-8 text-center">
+              <span className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-sky-500/15">
+                <Globe className="h-6 w-6 text-sky-400" />
+              </span>
+              <h3 className="chat-general-welcome-title mt-4 text-base font-semibold text-white">Welcome to General</h3>
+              <p className="chat-general-welcome-copy mt-2 text-sm leading-relaxed text-gray-400">
+                This is the company-wide channel. Everyone in Vobiss can see it and post here — say hello, share an update, or ask the team.
+              </p>
+            </div>
           )}
 
           {(() => {
@@ -3003,39 +2990,47 @@ const Chat: React.FC<{
           {voiceRecording && (
             <p className="mb-2 text-xs text-red-300">Recording voice message…</p>
           )}
-          <div className="chat-composer-box border border-gray-700/80">
-            <div ref={toolbarRef} className="chat-toolbar chat-composer-toolbar flex items-center gap-0.5 px-2 py-1.5">
-              <button
-                type="button"
-                onClick={handleBold}
-                className="chat-toolbar-btn rounded-md p-1.5"
-                title="Bold (**text**)"
-              >
-                <Bold className="h-3.5 w-3.5" />
-              </button>
-              <button
-                type="button"
-                onClick={handleItalic}
-                className="chat-toolbar-btn rounded-md p-1.5"
-                title="Italic (_text_)"
-              >
-                <Italic className="h-3.5 w-3.5" />
-              </button>
-              <span className="chat-toolbar-divider mx-0.5 h-4 w-px bg-gray-700/60" />
+          <div className="chat-composer-box">
+            <div className="chat-composer-input-row relative flex items-end gap-1.5 px-2.5 py-2 sm:px-3">
               <button
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
-                className="chat-toolbar-btn chat-attach-toolbar-btn rounded-md p-1.5"
+                className="chat-mobile-plus-btn hidden shrink-0 items-center justify-center"
+                title="Upload image or take photo"
+                aria-label="Upload image or take photo"
+              >
+                <Plus className="h-5 w-5" />
+              </button>
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                className="chat-toolbar-btn chat-attach-toolbar-btn mb-0.5 shrink-0 rounded-md p-1.5"
                 title="Attach"
               >
-                <Paperclip className="h-3.5 w-3.5" />
+                <Paperclip className="h-4 w-4" />
               </button>
-              <ChatVoiceRecorder
+              <textarea
+                ref={inputRef}
+                value={input}
+                onChange={handleInputChange}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    handleSend();
+                  }
+                }}
+                rows={1}
+                placeholder={
+                  activeChannel
+                    ? `Message ${isCompanyGeneral(activeChannel) || activeChannel.channel_type === 'announcements' ? channelDisplayName(activeChannel) : `#${activeChannel.name}`}…`
+                    : activeDm
+                      ? `Message ${activeDm.other_user?.name || ''}…`
+                      : 'Select a conversation…'
+                }
                 disabled={!canCompose}
-                onRecorded={handleVoiceRecorded}
-                onRecordingChange={setVoiceRecording}
+                className="max-h-32 min-h-[40px] flex-1 resize-none bg-transparent py-2 text-sm leading-relaxed text-gray-200 placeholder:text-gray-500 focus:outline-none"
               />
-              <div ref={emojiPickerRef} className="relative">
+              <div ref={emojiPickerRef} className="relative mb-0.5 shrink-0">
                 <button
                   type="button"
                   onClick={() => setShowEmoji((v) => !v)}
@@ -3044,10 +3039,10 @@ const Chat: React.FC<{
                   }`}
                   title="Emoji"
                 >
-                  <Smile className="h-3.5 w-3.5" />
+                  <Smile className="h-4 w-4" />
                 </button>
                 {showEmoji && (
-                  <div className="chat-popover absolute bottom-full left-0 z-30 mb-2 w-72 overflow-hidden rounded-xl border border-gray-600 bg-[#1a1d27] shadow-xl">
+                  <div className="chat-popover absolute bottom-full right-0 z-30 mb-2 w-72 overflow-hidden rounded-xl border border-gray-600 bg-[#1a1d27] shadow-xl">
                     <div className="border-b border-gray-700 px-3 py-2">
                       <p className="text-xs font-medium text-gray-300">Emoji</p>
                     </div>
@@ -3067,101 +3062,13 @@ const Chat: React.FC<{
                   </div>
                 )}
               </div>
-              <button
-                type="button"
-                onClick={() => {
-                  setInput((v) => `${v}${v && !/\s$/.test(v) ? ' ' : ''}@`);
-                  setMentionQuery('');
-                  setMentionIndex(0);
-                  inputRef.current?.focus();
-                }}
-                className="chat-toolbar-btn rounded-md p-1.5"
-                title="Mention"
-              >
-                <AtSign className="h-3.5 w-3.5" />
-              </button>
-              <div ref={linkPopoverRef} className="relative">
-                <button
-                  type="button"
-                  onClick={() => {
-                    handleInsertLink();
-                    setShowEmoji(false);
-                  }}
-                  className={`chat-toolbar-btn rounded-md p-1.5 ${
-                    showLinkPopover ? 'chat-toolbar-btn--active' : ''
-                  }`}
-                  title="Insert link"
-                >
-                  <Link2 className="h-3.5 w-3.5" />
-                </button>
-                {showLinkPopover && (
-                  <div className="chat-popover absolute bottom-full left-0 z-30 mb-2 w-72 rounded-xl border border-gray-600 bg-[#1a1d27] p-3 shadow-xl">
-                    <p className="mb-2 text-xs font-medium text-gray-300">Insert link</p>
-                    <label className="mb-1 block text-[10px] text-gray-500">Display text</label>
-                    <input
-                      value={linkText}
-                      onChange={(e) => setLinkText(e.target.value)}
-                      placeholder="Link text"
-                      className="mb-2 w-full rounded-md border border-gray-700 bg-[#0f1117] px-2.5 py-1.5 text-xs text-gray-200 focus:border-blue-500 focus:outline-none"
-                    />
-                    <label className="mb-1 block text-[10px] text-gray-500">URL</label>
-                    <input
-                      value={linkUrl}
-                      onChange={(e) => setLinkUrl(e.target.value)}
-                      placeholder="https://example.com"
-                      className="mb-3 w-full rounded-md border border-gray-700 bg-[#0f1117] px-2.5 py-1.5 text-xs text-gray-200 focus:border-blue-500 focus:outline-none"
-                    />
-                    <div className="flex justify-end gap-2">
-                      <button
-                        type="button"
-                        onClick={() => setShowLinkPopover(false)}
-                        className="rounded-md px-3 py-1 text-xs text-gray-400 hover:bg-gray-800"
-                      >
-                        Cancel
-                      </button>
-                      <button
-                        type="button"
-                        onClick={confirmInsertLink}
-                        className="rounded-md bg-blue-600 px-3 py-1 text-xs text-white hover:bg-blue-500"
-                      >
-                        Insert
-                      </button>
-                    </div>
-                  </div>
-                )}
+              <div className="mb-0.5 shrink-0">
+                <ChatVoiceRecorder
+                  disabled={!canCompose}
+                  onRecorded={handleVoiceRecorded}
+                  onRecordingChange={setVoiceRecording}
+                />
               </div>
-            </div>
-            <div className="chat-composer-input-row relative flex items-end gap-2 px-3 pb-2.5 pt-1">
-              <button
-                type="button"
-                onClick={() => fileInputRef.current?.click()}
-                className="chat-mobile-plus-btn hidden shrink-0 items-center justify-center"
-                title="Upload image or take photo"
-                aria-label="Upload image or take photo"
-              >
-                <Plus className="h-5 w-5" />
-              </button>
-              <textarea
-                ref={inputRef}
-                value={input}
-                onChange={handleInputChange}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && !e.shiftKey) {
-                    e.preventDefault();
-                    handleSend();
-                  }
-                }}
-                rows={2}
-                placeholder={
-                  activeChannel
-                    ? `Message #${activeChannel.name}…`
-                    : activeDm
-                      ? `Message ${activeDm.other_user?.name || ''}…`
-                      : 'Select a conversation…'
-                }
-                disabled={!canCompose}
-                className="max-h-32 min-h-[40px] flex-1 resize-none bg-transparent text-sm leading-relaxed text-gray-200 placeholder:text-gray-500 focus:outline-none"
-              />
               <button
                 type="button"
                 onClick={handleSend}

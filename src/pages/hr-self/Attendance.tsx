@@ -105,7 +105,7 @@ const HrSelfAttendance = () => {
     <div>
       <HrPageHeader title="My Attendance" description="Clock in at the office with GPS, then review your month." />
 
-      <div className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-5 sm:p-6">
+      <div className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-5 sm:p-6 shadow-[var(--shadow-md)]">
         <p className="text-xs font-medium uppercase tracking-widest text-[var(--text-muted)]">{dateLabel}</p>
         <p className="mt-2 text-4xl font-bold tracking-tight text-[var(--text-primary)] sm:text-5xl">{timeLabel}</p>
         <p className="mt-3 text-sm text-[var(--text-secondary)]">
@@ -213,7 +213,7 @@ const HrSelfAttendance = () => {
           records.length === 0 ? (
             <EmptyState title="No attendance records this month" />
           ) : (
-            <div className="overflow-x-auto rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)]">
+            <div className="overflow-x-auto rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow-md)]">
               <table className="vobiss-table w-full text-sm">
                 <thead>
                   <tr className="border-b text-left text-xs uppercase text-[var(--text-secondary)]">

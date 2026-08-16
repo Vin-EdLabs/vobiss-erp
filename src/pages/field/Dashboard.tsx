@@ -183,7 +183,7 @@ const FieldDashboard: React.FC = () => {
         
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
           <div className="lg:col-span-2">
-            <div className="overflow-hidden rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow)]">
+            <div className="overflow-hidden rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow-md)]">
               <div className="border-b border-[var(--border)] px-5 py-4">
                 <h2 className="flex items-center gap-2 text-sm font-semibold text-[var(--text-primary)]">
                   <Activity className="h-4 w-4 text-[var(--primary)]" />
@@ -233,7 +233,7 @@ const FieldDashboard: React.FC = () => {
           </div>
 
           <div className="space-y-6">
-            <div className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-5 shadow-[var(--shadow)]">
+            <div className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-5 shadow-[var(--shadow-md)]">
               <h3 className="mb-4 text-sm font-semibold text-[var(--text-primary)]">Quick Actions</h3>
               <div className="space-y-3">
                 <Link to="/field/add" className="flex w-full items-center justify-center gap-2 rounded-[var(--radius-sm)] bg-[var(--primary)] px-5 py-3 font-semibold text-white hover:bg-[var(--primary-hover)]">

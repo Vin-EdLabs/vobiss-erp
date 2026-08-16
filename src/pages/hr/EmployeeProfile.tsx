@@ -138,8 +138,9 @@ const HrEmployeeProfile = () => {
       full_name: emp.full_name || '',
       email: emp.email || '',
       phone: emp.phone || '',
+      gender: emp.gender || '',
       department: emp.department || '',
-      position: emp.position || '',
+      position: emp.position || 'Staff',
       location: emp.location || '',
       employment_type: emp.employment_type || 'full-time',
       start_date: emp.start_date ? String(emp.start_date).slice(0, 10) : '',
@@ -158,8 +159,20 @@ const HrEmployeeProfile = () => {
 
   const save = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!form.start_date) {
+      toast.error('Start date is required');
+      return;
+    }
+    if (!form.gender) {
+      toast.error('Please select Male or Female');
+      return;
+    }
+    if (form.contract_end_date && form.contract_end_date < form.start_date) {
+      toast.error('End date cannot be before start date');
+      return;
+    }
     const fd = new FormData();
-    Object.entries(form).forEach(([k, v]) => {
+    Object.entries({ ...form, position: form.position.trim() || 'Staff' }).forEach(([k, v]) => {
       if (k === 'status') return;
       fd.append(k, v);
     });
@@ -202,7 +215,8 @@ const HrEmployeeProfile = () => {
             <div>
               <h1 className="text-2xl font-semibold tracking-tight">{emp.full_name}</h1>
               <p className="text-sm text-slate-500">
-                {emp.position} · {emp.department}{emp.location ? ` · ${emp.location}` : ''}
+                {emp.position || 'Staff'} · {emp.department}{emp.location ? ` · ${emp.location}` : ''}
+                {emp.gender === 'male' ? ' · Male' : emp.gender === 'female' ? ' · Female' : ''}
               </p>
               <div className="mt-2 flex flex-wrap gap-2">
                 <StatusBadge status={emp.status} />

@@ -282,25 +282,20 @@ const PendingApprovals: React.FC<PendingApprovalsProps> = ({ mode = 'all' }) => 
 
   const canApproveRequest = (request: Request) => {
     const role = String(user?.main_role || user?.role || '').toLowerCase();
-    const position = String(user?.position || '').trim().toLowerCase();
-    const isMgr =
-      position.includes('manager') ||
-      position.includes('supervisor') ||
-      position === 'director';
-    const supervisorApproverRoles = ['approver', 'director', 'superadmin', 'admin', 'project', 'noc_manager', 'noc_supervisor', 'ip_manager', 'ip_supervisor', 'ts_manager', 'ts_supervisor', 'finance_manager'];
+    const isDirector = role === 'director' || role === 'cto' || String(user?.position || '').trim().toLowerCase() === 'director';
+    const isAdmin = role === 'superadmin' || role === 'admin';
     if (isMaterialMode && request.type === 'cash_request') return false;
     if (isCashMode && request.type !== 'cash_request') return false;
     if (request.status === 'supervisor_approved') {
-      // Finance release stays on the dedicated Finance Approvals page.
       return false;
     }
     if (request.status !== 'pending') return false;
     if (request._approvedByMe) return false;
     if (request.type === 'cash_request' && request.requires_director_approval) {
-      return role === 'director' || role === 'superadmin';
+      return isDirector || isAdmin;
     }
-    if (!['director', 'superadmin'].includes(role) && !request._assignedToMe) return false;
-    return supervisorApproverRoles.includes(role) || isMgr;
+    if (isDirector || isAdmin) return true;
+    return !!request._assignedToMe;
   };
 
   const getApproveButtonText = (request: Request) => {

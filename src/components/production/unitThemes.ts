@@ -19,18 +19,19 @@ export type UnitTheme = {
   Icon: LucideIcon;
 };
 
-/** Shared Service Request look — same as the NOC card. */
+/** Shared Service Request look — follows app theme (brown in light, green in dark). */
 const NOC_LOOK = {
   pageGradient: '',
-  heroGradient: 'from-slate-800 via-slate-900 to-amber-950',
-  accentBar: 'from-amber-400 via-orange-500 to-amber-600',
-  accentText: 'text-amber-800 dark:text-amber-300',
-  accentBg: 'bg-amber-50 dark:bg-amber-500/15',
-  accentBorder: 'border-amber-200/80 dark:border-amber-500/30',
-  iconBg: 'bg-amber-500/20',
-  buttonClass: 'bg-amber-500 text-slate-900 hover:bg-amber-400 shadow-lg shadow-amber-950/30 font-semibold',
-  ringFocus: 'focus:ring-amber-500/30 focus:border-amber-400',
-  statAccent: 'amber',
+  heroGradient: '',
+  accentBar: 'from-[var(--primary)] to-[var(--primary-hover)]',
+  accentText: 'text-[var(--primary)]',
+  accentBg: 'bg-[var(--accent-green-light)]',
+  accentBorder: 'border-[var(--border)]',
+  iconBg: 'bg-[var(--accent-green-light)]',
+  buttonClass:
+    'bg-[var(--primary)] text-[var(--primary-text)] hover:bg-[var(--primary-hover)] shadow-[var(--shadow-md)] font-semibold',
+  ringFocus: 'focus:ring-[var(--accent-green-light)] focus:border-[var(--primary)]',
+  statAccent: 'primary',
 };
 
 export const UNIT_THEMES: Record<string, UnitTheme> = {
@@ -61,5 +62,6 @@ export const UNIT_THEMES: Record<string, UnitTheme> = {
 };
 
 export function getUnitTheme(slug?: string): UnitTheme {
-  return UNIT_THEMES[slug || 'project'] || UNIT_THEMES.project;
+  const key = slug === 'tx' ? 'ts' : slug || 'project';
+  return UNIT_THEMES[key] || UNIT_THEMES.project;
 }

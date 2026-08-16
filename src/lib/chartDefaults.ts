@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Chart as ChartJS, type ChartOptions } from 'chart.js';
 import { cssVar } from '@/lib/theme';
 
-export const PIE_COLORS = ['#059669', '#7C3AED', '#D97706', '#2563EB', '#DC2626'];
+export const PIE_COLORS = ['var(--accent-green)', '#7C3AED', '#D97706', '#2563EB', '#DC2626'];
 
 export type ChartTheme = {
   accent: string;
@@ -15,7 +15,7 @@ export type ChartTheme = {
 
 export function readChartTheme(): ChartTheme {
   return {
-    accent: cssVar('--primary', '#059669'),
+    accent: cssVar('--primary', '#8b5a2b'),
     border: cssVar('--border', '#E5E7EB'),
     muted: cssVar('--text-muted', '#9CA3AF'),
     text: cssVar('--text-primary', '#111827'),

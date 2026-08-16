@@ -1,8 +1,10 @@
 // routes/field.js — FINAL FIXED VERSION (Works 100% with import)
 import express from 'express';
 import pool from '../db.js';
+import { invalidateOnMutation } from '../services/vobiCache.js';
 
 const router = express.Router();
+router.use(invalidateOnMutation);
 
 // GET all latest projects
 router.get('/', async (req, res) => {

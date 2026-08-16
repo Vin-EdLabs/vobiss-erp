@@ -99,7 +99,7 @@ export function formatTenure(startDate?: string | null) {
 export const SYSTEM_ROLE_OPTIONS = [
   { label: 'NOC Engineer', value: 'noc' },
   { label: 'IP Engineer', value: 'ip' },
-  { label: 'TX Engineer', value: 'tx' },
+  { label: 'TS Engineer', value: 'ts' },
   { label: 'Finance Officer', value: 'finance' },
   { label: 'CX / Support', value: 'cx' },
   { label: 'Project Unit', value: 'project_unit' },

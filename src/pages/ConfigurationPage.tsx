@@ -6,7 +6,6 @@ import {
   Save,
   Package,
   DollarSign,
-  UserCheck,
   Plus,
   Trash2,
   AlertCircle,
@@ -16,20 +15,6 @@ import {
 import { getWorkflowConfig, updateWorkflowConfig, type WorkflowConfig, type TicketEscalationStage } from '../api';
 import { useAuth } from '../context/AuthContext';
 import { useVobiSection } from '@/hooks/useVobiSection';
-
-const ELIGIBLE_ROLES = [
-  { value: 'noc_supervisor', label: 'NOC Supervisor' },
-  { value: 'ts_supervisor', label: 'TS Supervisor' },
-  { value: 'ip_supervisor', label: 'IP Supervisor' },
-  { value: 'noc_manager', label: 'NOC Manager' },
-  { value: 'ts_manager', label: 'TS Manager' },
-  { value: 'ip_manager', label: 'IP Manager' },
-  { value: 'finance_manager', label: 'Finance Manager' },
-  { value: 'approver', label: 'Approver (legacy)' },
-  { value: 'director', label: 'CTO / Director' },
-  { value: 'finance', label: 'Finance' },
-  { value: 'superadmin', label: 'System Admin' },
-];
 
 export default function ConfigurationPage() {
   const { user, isAdminSuper } = useAuth();
@@ -114,7 +99,7 @@ export default function ConfigurationPage() {
     }
   };
 
-  const updateMaterial = (field: 'required_approvers_count' | 'eligible_approver_roles', value: number | string[]) => {
+  const updateMaterial = (field: 'required_approvers_count', value: number) => {
     setConfig((prev) =>
       prev
         ? {
@@ -126,16 +111,6 @@ export default function ConfigurationPage() {
           }
         : null
     );
-  };
-
-  const toggleEligibleRole = (role: string) => {
-    if (!config) return;
-    const current = config.material.eligible_approver_roles || [];
-    const next = current.includes(role)
-      ? current.filter((r) => r !== role)
-      : [...current, role];
-    if (next.length === 0) return;
-    updateMaterial('eligible_approver_roles', next);
   };
 
   const updateFinanceThresholds = (thresholds: WorkflowConfig['finance']['amount_thresholds']) => {
@@ -246,26 +221,7 @@ export default function ConfigurationPage() {
                 }
                 className="w-20 rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
               />
-              <span className="text-xs text-gray-500">e.g. 2, 3, or 5</span>
-            </div>
-            <div className="flex flex-row flex-wrap items-center gap-4">
-              <span className="text-sm font-medium text-gray-700 shrink-0 flex items-center gap-2">
-                <UserCheck className="h-4 w-4" />
-                Eligible roles
-              </span>
-              <div className="flex flex-wrap gap-3">
-                {ELIGIBLE_ROLES.map(({ value, label }) => (
-                  <label key={value} className="flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={config.material.eligible_approver_roles.includes(value)}
-                      onChange={() => toggleEligibleRole(value)}
-                      className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                    />
-                    <span className="text-sm font-medium text-gray-700">{label}</span>
-                  </label>
-                ))}
-              </div>
+              <span className="text-xs text-gray-500">e.g. 2, 3, or 5. Approvers are chosen in Realm.</span>
             </div>
           </div>
         </section>

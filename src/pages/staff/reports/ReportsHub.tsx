@@ -41,7 +41,7 @@ const ALL_REPORTS: ReportCard[] = [
   {
     title: 'Service Request Report',
     description:
-      'Project, TX, IP, and NOC service requests with stage, status, customer, site, and value summaries.',
+      'Project, TS, IP, and NOC service requests with stage, status, customer, site, and value summaries.',
     path: '/staff/reports/service-requests',
     icon: Network,
     accent: 'from-cyan-500 to-blue-700',
@@ -63,8 +63,13 @@ export default function ReportsHub() {
   const userRoles = useMemo(() => getUserRoles(user), [user]);
   const unit = String(user?.unit || '').trim().toLowerCase();
   const units = [
-    unit,
-    ...(Array.isArray(user?.units) ? user.units.map((u) => String(u || '').trim().toLowerCase()) : []),
+    unit === 'tx' ? 'ts' : unit,
+    ...(Array.isArray(user?.units)
+      ? user.units.map((u) => {
+          const slug = String(u || '').trim().toLowerCase();
+          return slug === 'tx' ? 'ts' : slug;
+        })
+      : []),
   ].filter(Boolean);
   const position = String(user?.position || '').trim().toLowerCase();
   const isGlobal = userRoles.includes('superadmin') || position === 'director' || userRoles.includes('director') || userRoles.includes('cto');
@@ -77,7 +82,7 @@ export default function ReportsHub() {
         if (card.roles.some((r) => userRoles.includes(r))) return true;
         if (isGlobal) return true;
         if (card.path === '/staff/reports/tickets') {
-          return isManagerOrSupervisor && hasAnyUnit('noc', 'ip', 'tx', 'cx');
+          return isManagerOrSupervisor && hasAnyUnit('noc', 'ip', 'ts', 'tx', 'cx');
         }
         if (card.path === '/staff/reports/cash') {
           return isManagerOrSupervisor && hasAnyUnit('finance');

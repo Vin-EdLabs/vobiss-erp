@@ -295,7 +295,7 @@ const Dashboard = () => {
       </div>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <div className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow)] p-5">
+        <div className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow-md)] p-5">
           <div className="mb-4 flex items-center justify-between">
             <h2 className="text-sm font-semibold text-[var(--text-primary)]">Stock Overview</h2>
             <span className="text-[13px] text-[var(--primary)]">Top items</span>
@@ -309,7 +309,7 @@ const Dashboard = () => {
           </div>
         </div>
 
-        <div className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow)] p-5">
+        <div className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow-md)] p-5">
           <h2 className="mb-4 text-sm font-semibold text-[var(--text-primary)]">Recent Activity</h2>
           <div className="max-h-80 space-y-0.5 overflow-y-auto">
             {recentActivity.length > 0 ? (
@@ -333,7 +333,7 @@ const Dashboard = () => {
         </div>
       </div>
 
-      <div className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow)] p-5">
+      <div className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow-md)] p-5">
         <h2 className="mb-4 text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">Quick Actions</h2>
         <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
           <Button className="h-11 w-full" onClick={() => navigate('/inventory')}>

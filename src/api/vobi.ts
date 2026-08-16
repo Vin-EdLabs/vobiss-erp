@@ -46,6 +46,7 @@ export interface VobiSummaryResponse {
 export interface VobiCommandResult {
   intent: string;
   reply: string;
+  response?: string;
   cards: VobiItem[];
   filter?: string | null;
   meta?: VobiCommandMeta;
@@ -160,12 +161,28 @@ export function getVobiChatInsight() {
   }>;
 }
 
-export function postVobiCommand(text: string, options?: { persist?: boolean }) {
+export function postVobiCommand(text: string, options?: { persist?: boolean; command?: string }) {
   return vobiFetch('/command', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ text, persist: Boolean(options?.persist) }),
+    body: JSON.stringify({
+      text,
+      command: options?.command,
+      persist: Boolean(options?.persist),
+    }),
   }) as Promise<VobiCommandResult>;
+}
+
+export function getVobiBriefing() {
+  return vobiFetch('/briefing') as Promise<{ response: string; timestamp: string }>;
+}
+
+export function postVobiChat(message: string, history: Array<{ role: string; content: string }> = []) {
+  return vobiFetch('/chat', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ message, history }),
+  }) as Promise<{ response: string; timestamp: string }>;
 }
 
 export function generateVobiReport(period: 'today' | 'week' = 'today') {

@@ -8,20 +8,6 @@ const GLOBAL_DASHBOARD_POSITIONS = new Set([
   'general manager',
 ]);
 
-const APPROVAL_POSITIONS = new Set([
-  'director',
-  'noc manager',
-  'ip manager',
-  'tx manager',
-  'project manager',
-  'account manager',
-  'ip supervisor',
-  'noc supervisor',
-  'tx supervisor',
-  'project supervisor',
-  'manager',
-  'supervisor',
-]);
 const MATERIAL_EXECUTION_POSITIONS = new Set(['procurement', 'procurement officer', 'store keeper', 'stock controller']);
 const CASH_RELEASE_POSITIONS = new Set(['finance', 'finance officer', 'finance manager']);
 
@@ -166,14 +152,30 @@ export function canCreateCashRequest() {
   return true;
 }
 
+let realmMaterialIds = new Set();
+let realmCashIds = new Set();
+
+export function setRealmApproverIds({ material_user_ids = [], cash_user_ids = [] } = {}) {
+  realmMaterialIds = new Set((material_user_ids || []).map(Number).filter(Boolean));
+  realmCashIds = new Set((cash_user_ids || []).map(Number).filter(Boolean));
+}
+
+export function isRealmMaterialApprover(user) {
+  return realmMaterialIds.has(Number(user?.id));
+}
+
+export function isRealmCashApprover(user) {
+  return realmCashIds.has(Number(user?.id));
+}
+
 export function canApproveMaterialRequest(user) {
   if (canBypassApprovalRestrictions(user)) return true;
-  return normalizedPositions(user).some((position) => APPROVAL_POSITIONS.has(position));
+  return isRealmMaterialApprover(user);
 }
 
 export function canApproveCashRequest(user) {
   if (canBypassApprovalRestrictions(user)) return true;
-  if (normalizedPositions(user).some((position) => APPROVAL_POSITIONS.has(position))) return true;
+  if (isRealmCashApprover(user)) return true;
   return normalizedUnits(user).includes('finance') && normalizedPositions(user).some((position) => CASH_RELEASE_POSITIONS.has(position));
 }
 

@@ -5,6 +5,7 @@ import fs from 'fs';
 import { fileURLToPath } from 'url';
 import pool from '../db.js';
 import { authenticateToken } from '../middleware/auth.js';
+import { invalidateOnMutation } from '../services/vobiCache.js';
 import { notifyChatMentions } from '../services/chatMentionNotify.js';
 import { getRealtimeIo } from '../realtime/channels.js';
 import {
@@ -24,7 +25,7 @@ import {
   assertMessageAccess,
 } from '../services/chatHelpers.js';
 import { slugifyUnit } from '../services/chatInit.js';
-import { canManageUnitGroups, isSuperAdmin } from '../roles.js';
+import { canManageUnitGroups, isSuperAdmin, parseUserUnitsArray } from '../roles.js';
 import { getSystemRole } from '../permissions.js';
 import { logChatAudit, previewChatText } from '../services/chatAudit.js';
 import {
@@ -60,6 +61,7 @@ const upload = multer({
 
 const router = express.Router();
 router.use(authenticateToken);
+router.use(invalidateOnMutation);
 
 async function ensurePinTableReady() {
   await pool.query(`
@@ -294,6 +296,7 @@ async function loadDbUser(userId) {
     ...user,
     main_role: user.main_role || user.role,
     roles: Array.isArray(roles) && roles.length ? roles : [user.role],
+    units: parseUserUnitsArray(user.units),
   };
 }
 
@@ -1561,7 +1564,7 @@ router.post('/groups', async (req, res) => {
     const actor = (await loadDbUser(userId)) || req.user;
     if (!actorCanManageGroups(actor)) {
       return res.status(403).json({
-        error: 'Only Admin and manager roles can create unit groups',
+        error: 'Only Admin, HR, and manager roles can create unit groups',
       });
     }
     const { name, description, memberIds = [] } = req.body;

@@ -6,6 +6,7 @@ import { fileURLToPath } from 'url';
 import { dirname } from 'path';
 import pool from '../db.js';
 import { authenticateToken, requireHR } from '../middleware/auth.js';
+import { invalidateOnMutation } from '../services/vobiCache.js';
 import {
   LEAVE_TYPES,
   DEFAULT_LEAVE_BALANCES,
@@ -93,6 +94,7 @@ const upload = multer({
 
 router.use(authenticateToken);
 router.use(requireHR);
+router.use(invalidateOnMutation);
 
 const actorId = (req) => req.user?.id || null;
 
@@ -348,26 +350,37 @@ router.post('/employees', upload.single('photo'), async (req, res) => {
   try {
     const b = req.body || {};
     if (!b.full_name?.trim()) return res.status(400).json({ error: 'Full name is required' });
+    if (!String(b.start_date || '').trim()) return res.status(400).json({ error: 'Start date is required' });
+    const gender = String(b.gender || '').trim().toLowerCase();
+    if (gender !== 'male' && gender !== 'female') {
+      return res.status(400).json({ error: 'Please select Male or Female' });
+    }
+    const startDate = b.start_date;
+    const endDate = b.contract_end_date || null;
+    if (startDate && endDate && String(endDate) < String(startDate)) {
+      return res.status(400).json({ error: 'End date cannot be before start date' });
+    }
     const photoUrl = req.file ? publicFileUrl(req.file.filename) : b.photo_url || null;
     const result = await pool.query(
       `INSERT INTO hr_employees (
-        user_id, full_name, email, phone, photo_url, department, position, location, employment_type,
+        user_id, full_name, email, phone, gender, photo_url, department, position, location, employment_type,
         start_date, contract_end_date, basic_salary, allowances, emergency_contact_name,
         emergency_contact_phone, line_manager, status
-      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
       RETURNING *`,
       [
         b.user_id || null,
         b.full_name.trim(),
         b.email || null,
         b.phone || null,
+        gender || null,
         photoUrl,
         b.department || null,
-        b.position || null,
+        b.position?.trim() || 'Staff',
         b.location || null,
         b.employment_type || 'full-time',
-        b.start_date || null,
-        b.contract_end_date || null,
+        startDate,
+        endDate,
         toNum(b.basic_salary),
         toNum(b.allowances),
         b.emergency_contact_name || null,
@@ -609,6 +622,18 @@ router.put('/employees/:id', upload.single('photo'), async (req, res) => {
     const emp = await getEmployeeOr404(req.params.id, res);
     if (!emp) return;
     const b = req.body || {};
+    if (b.start_date !== undefined && !String(b.start_date || '').trim()) {
+      return res.status(400).json({ error: 'Start date is required' });
+    }
+    const genderRaw = b.gender === undefined ? emp.gender : String(b.gender || '').trim().toLowerCase();
+    if (genderRaw && genderRaw !== 'male' && genderRaw !== 'female') {
+      return res.status(400).json({ error: 'Gender must be Male or Female' });
+    }
+    const startDate = b.start_date ?? emp.start_date;
+    const endDate = b.contract_end_date === undefined ? emp.contract_end_date : b.contract_end_date || null;
+    if (startDate && endDate && String(endDate).slice(0, 10) < String(startDate).slice(0, 10)) {
+      return res.status(400).json({ error: 'End date cannot be before start date' });
+    }
     const photoUrl = req.file ? publicFileUrl(req.file.filename) : b.photo_url ?? emp.photo_url;
     const result = await pool.query(
       `UPDATE hr_employees SET
@@ -616,32 +641,34 @@ router.put('/employees/:id', upload.single('photo'), async (req, res) => {
         full_name = COALESCE($2, full_name),
         email = COALESCE($3, email),
         phone = COALESCE($4, phone),
-        photo_url = $5,
-        department = COALESCE($6, department),
-        position = COALESCE($7, position),
-        location = COALESCE($8, location),
-        employment_type = COALESCE($9, employment_type),
-        start_date = COALESCE($10, start_date),
-        contract_end_date = $11,
-        basic_salary = COALESCE($12, basic_salary),
-        allowances = COALESCE($13, allowances),
-        emergency_contact_name = COALESCE($14, emergency_contact_name),
-        emergency_contact_phone = COALESCE($15, emergency_contact_phone),
-        line_manager = COALESCE($16, line_manager),
-        status = COALESCE($17, status)
-       WHERE id = $18 RETURNING *`,
+        gender = $5,
+        photo_url = $6,
+        department = COALESCE($7, department),
+        position = COALESCE($8, position),
+        location = COALESCE($9, location),
+        employment_type = COALESCE($10, employment_type),
+        start_date = COALESCE($11, start_date),
+        contract_end_date = $12,
+        basic_salary = COALESCE($13, basic_salary),
+        allowances = COALESCE($14, allowances),
+        emergency_contact_name = COALESCE($15, emergency_contact_name),
+        emergency_contact_phone = COALESCE($16, emergency_contact_phone),
+        line_manager = COALESCE($17, line_manager),
+        status = COALESCE($18, status)
+       WHERE id = $19 RETURNING *`,
       [
         b.user_id ?? emp.user_id,
         b.full_name?.trim() || emp.full_name,
         b.email ?? emp.email,
         b.phone ?? emp.phone,
+        genderRaw || null,
         photoUrl,
         b.department ?? emp.department,
-        b.position ?? emp.position,
+        b.position?.trim() || emp.position || 'Staff',
         b.location ?? emp.location,
         b.employment_type ?? emp.employment_type,
         b.start_date ?? emp.start_date,
-        b.contract_end_date === undefined ? emp.contract_end_date : b.contract_end_date || null,
+        endDate,
         b.basic_salary != null ? toNum(b.basic_salary) : emp.basic_salary,
         b.allowances != null ? toNum(b.allowances) : emp.allowances,
         b.emergency_contact_name ?? emp.emergency_contact_name,
