@@ -261,7 +261,7 @@ const TicketDetailView: React.FC<TicketDetailViewProps> = ({ ticket, timeline, m
                       {idx === 0 ? <FileText className="h-6 w-6" /> : <User className="h-6 w-6" />}
                     </div>
                     <div className={`flex-1 pb-8 ${entry.visibility === 'internal' ? 'opacity-75' : ''}`}>
-                      <div className="bg-white border rounded-xl p-6 shadow-sm">
+                      <div className="bg-white border rounded-xl p-6 shadow-[var(--shadow-md)]">
                         <div className="flex items-start justify-between mb-3">
                           <div>
                             <p className="font-semibold text-gray-900 capitalize">{entry.actor_role}</p>

@@ -736,7 +736,7 @@ const ActivitiesTable: React.FC = () => {
                       {v.description && (
                         <div className="mt-4">
                           <p className="text-gray-600 font-medium text-xs mb-1">Description</p>
-                          <div className="bg-white p-4 rounded-xl border border-gray-200 text-gray-800 text-sm leading-relaxed">
+                          <div className="bg-white p-4 rounded-xl border border-gray-200 text-gray-800 text-sm leading-relaxed shadow-[var(--shadow-md)]">
                             {v.description}
                           </div>
                         </div>

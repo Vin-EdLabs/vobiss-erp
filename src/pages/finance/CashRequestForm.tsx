@@ -359,7 +359,7 @@ const CashRequestForm: React.FC = () => {
         <p className="text-gray-600">Submit and track your personal cash requests</p>
       </div>
 
-      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 mb-6">
+      <div className="bg-white rounded-xl shadow-[var(--shadow-md)] border border-gray-200 p-6 mb-6">
         <div className="flex items-center gap-4 justify-between">
           <div className="flex items-center gap-4 flex-1">
             <Search className="h-5 w-5 text-gray-400" />
@@ -543,7 +543,7 @@ const CashRequestForm: React.FC = () => {
         </TabsList>
 
         <TabsContent value={activeTab}>
-          <div className="bg-white rounded-xl shadow overflow-hidden border border-gray-200">
+          <div className="bg-white rounded-xl shadow overflow-hidden border border-gray-200 shadow-[var(--shadow-md)]">
             {filtered.length === 0 ? (
               <div className="text-center py-16 px-6">
                 <FileText className="w-16 h-16 text-gray-300 mx-auto mb-4" />

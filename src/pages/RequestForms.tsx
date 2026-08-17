@@ -284,7 +284,7 @@ const RequestForms: React.FC = () => {
       )}
 
       {/* Search & Tabs */}
-      <div className="bg-[var(--surface)] rounded-2xl p-6 shadow-sm border border-[var(--border)] mb-6 relative overflow-hidden">
+      <div className="bg-[var(--surface)] rounded-2xl p-6 shadow-[var(--shadow-md)] border border-[var(--border)] mb-6 relative overflow-hidden">
         <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-green-500 to-teal-600"></div>
         <div className="flex flex-col md:flex-row md:items-center space-y-4 md:space-y-0 md:space-x-4">
           <div className="relative flex-1">
@@ -316,7 +316,7 @@ const RequestForms: React.FC = () => {
           </TabsTrigger>
         </TabsList>
         <TabsContent value={activeTab} className="mt-6">
-          <div className="bg-[var(--surface)] rounded-2xl shadow-sm border border-[var(--border)] overflow-hidden">
+          <div className="bg-[var(--surface)] rounded-2xl shadow-[var(--shadow-md)] border border-[var(--border)] overflow-hidden">
             <div className="overflow-x-auto">
               <table className="min-w-full divide-y divide-[var(--border)]">
                 <thead className="bg-gradient-to-r from-[var(--surface-secondary)] to-[var(--surface-hover)]">
@@ -905,7 +905,7 @@ const RequestForm: React.FC<RequestFormProps> = ({ onSave, onCancel, items, appr
         <label className="block text-sm font-semibold text-[var(--text-body)]">Type *</label>
         <div className="flex space-x-8 bg-gradient-to-r from-[var(--surface-secondary)] to-[var(--surface-hover)] p-4 rounded-xl shadow-sm">
           {['Deployment', 'Maintenance'].map((type, i) => (
-            <label key={type} className="flex items-center cursor-pointer space-x-3 bg-[var(--surface)] px-4 py-3 rounded-lg shadow-sm hover:shadow-md transition-all">
+            <label key={type} className="flex items-center cursor-pointer space-x-3 bg-[var(--surface)] px-4 py-3 rounded-lg shadow-[var(--shadow-md)] hover:shadow-md transition-all">
               <input
                 ref={el => deploymentRefs.current[i] = el}
                 type="radio"
@@ -924,7 +924,7 @@ const RequestForm: React.FC<RequestFormProps> = ({ onSave, onCancel, items, appr
 
       {/* Items Table */}
       <div className="space-y-4">
-        <div className="border border-[var(--border)] rounded-2xl overflow-hidden shadow-sm bg-gradient-to-b from-white to-gray-50">
+        <div className="border border-[var(--border)] rounded-2xl overflow-hidden shadow-[var(--shadow-md)] bg-gradient-to-b from-white to-gray-50">
           <table className="w-full">
             <thead>
               <tr className="bg-gradient-to-r from-blue-50 to-indigo-50">

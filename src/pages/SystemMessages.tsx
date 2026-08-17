@@ -174,7 +174,7 @@ const SystemMessages: React.FC = () => {
       </div>
 
       {/* Push diagnostics */}
-      <div className="mb-6 rounded-2xl border border-gray-100 bg-white p-5 shadow-sm">
+      <div className="mb-6 rounded-2xl border border-gray-100 bg-white p-5 shadow-[var(--shadow-md)]">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-3">
             <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-50 text-emerald-700">

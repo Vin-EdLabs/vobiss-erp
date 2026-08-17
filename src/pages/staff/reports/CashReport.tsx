@@ -222,7 +222,7 @@ export default function CashReport() {
           </div>
         )}
 
-        <div className="mb-6 flex flex-wrap items-end gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="mb-6 flex flex-wrap items-end gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-[var(--shadow-md)]">
           <div>
             <label className="mb-1 block text-xs font-medium text-slate-500">From</label>
             <input
@@ -333,7 +333,7 @@ export default function CashReport() {
           />
         </div>
 
-        <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-lg">
+        <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[var(--shadow-md)]">
           <table className="w-full min-w-[900px] text-sm">
             <thead className="bg-slate-50 text-left text-xs font-semibold uppercase text-slate-500">
               <tr>
@@ -513,7 +513,7 @@ function StatCard({
 
 function ChartCard({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-4">
+    <div className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-4 shadow-[var(--shadow-md)]">
       <h3 className="mb-3 text-sm font-semibold text-[var(--text-primary)]">{title}</h3>
       {children}
     </div>

@@ -72,7 +72,7 @@ const Login = () => {
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gray-50 px-4 py-12" style={{ colorScheme: 'light' }}>
+    <div className="flex min-h-dvh items-center justify-center bg-gray-50 px-4 py-12" style={{ colorScheme: 'light' }}>
       <div className="flex w-full max-w-5xl overflow-hidden rounded-3xl bg-white shadow-2xl" style={{ zoom: 0.8 }}>
         <div className="relative hidden flex-col justify-between overflow-hidden bg-gradient-to-br from-blue-600 via-blue-700 to-red-600 p-12 lg:flex lg:w-1/2">
           {/* Decorative lines */}
@@ -108,7 +108,7 @@ const Login = () => {
           </div>
 
           <div className="relative z-10">
-            <div className="rounded-xl border border-white/20 bg-white/10 p-4 backdrop-blur-sm">
+            <div className="rounded-xl border border-white/20 bg-white/10 p-4 backdrop-blur-sm shadow-[var(--shadow-md)]">
               <p className="text-sm text-white">
                 <span className="font-medium">Tip:</span> Your access is role-based. What you see depends on who you are.
               </p>

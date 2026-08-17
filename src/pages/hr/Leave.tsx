@@ -181,7 +181,7 @@ const HrLeave = () => {
         </TabsList>
 
         <TabsContent value="applications">
-          <div className="mb-4 grid gap-3 rounded-xl border bg-white p-3 shadow-card md:grid-cols-3">
+          <div className="mb-4 grid gap-3 rounded-xl border bg-white p-3 shadow-[var(--shadow-md)] md:grid-cols-3">
             <select className={inputClass} value={filters.employee_id} onChange={(e) => setFilters({ ...filters, employee_id: e.target.value })}>
               <option value="">All employees</option>
               {(employeesQ.data || []).map((e: any) => <option key={e.id} value={e.id}>{e.full_name}</option>)}
@@ -200,7 +200,7 @@ const HrLeave = () => {
           {(reqQ.isLoading || leaveQ.isLoading) && !reqQ.data && !leaveQ.data ? <TableSkeleton /> : allRows.length === 0 ? (
             <EmptyState title="No leave records" action={<Button onClick={() => setOpen(true)}>Add Leave Record</Button>} />
           ) : (
-            <div className="overflow-x-auto rounded-xl border bg-white shadow-card">
+            <div className="overflow-x-auto rounded-xl border bg-white shadow-[var(--shadow-md)]">
               <table className="vobiss-table w-full text-sm">
                 <thead>
                   <tr className="border-b text-left text-xs uppercase text-slate-500">
@@ -257,7 +257,7 @@ const HrLeave = () => {
         </TabsContent>
 
         <TabsContent value="balances">
-          <div className="overflow-x-auto rounded-xl border bg-white shadow-card">
+          <div className="overflow-x-auto rounded-xl border bg-white shadow-[var(--shadow-md)]">
             <table className="vobiss-table w-full text-sm">
               <thead>
                 <tr className="border-b text-left text-xs uppercase text-slate-500">
@@ -291,7 +291,7 @@ const HrLeave = () => {
             </select>
             <YearSelect value={year} onChange={setYear} />
           </div>
-          <div className="grid grid-cols-7 gap-2 rounded-xl border bg-white p-4 shadow-card">
+          <div className="grid grid-cols-7 gap-2 rounded-xl border bg-white p-4 shadow-[var(--shadow-md)]">
             {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((d) => (
               <div key={d} className="text-center text-xs font-semibold text-slate-500">{d}</div>
             ))}
@@ -314,7 +314,7 @@ const HrLeave = () => {
             })}
           </div>
           {dayDetail && (
-            <div className="mt-4 rounded-xl border bg-white p-4">
+            <div className="mt-4 rounded-xl border bg-white p-4 shadow-[var(--shadow-md)]">
               <p className="text-sm font-semibold">On leave {dayDetail}</p>
               <div className="mt-2 space-y-2">
                 {leavesOnDay(Number(dayDetail.slice(-2))).length === 0 && <p className="text-sm text-slate-500">Nobody on leave.</p>}

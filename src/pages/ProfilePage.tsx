@@ -119,7 +119,7 @@ const ProfilePage = () => {
       </div>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-        <div className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-6">
+        <div className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-6 shadow-[var(--shadow-md)]">
           <div className="text-center">
             <div className="relative mx-auto h-20 w-20">
               <UserAvatar
@@ -169,7 +169,7 @@ const ProfilePage = () => {
           </div>
         </div>
 
-        <div className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-6 lg:col-span-2">
+        <div className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-6 lg:col-span-2 shadow-[var(--shadow-md)]">
           <form onSubmit={handleSubmit} className="space-y-8">
             <div>
               <label className="mb-2 flex items-center gap-2 text-sm font-medium text-[var(--text-body)]">

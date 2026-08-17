@@ -98,7 +98,7 @@ export function AttendanceMonthGrid({
   ];
 
   return (
-    <div className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-4">
+    <div className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-4 shadow-[var(--shadow-md)]">
       <div className="mb-2 grid grid-cols-7 gap-2 text-center text-xs font-semibold text-[var(--text-secondary)]">
         {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((d) => (
           <div key={d}>{d}</div>

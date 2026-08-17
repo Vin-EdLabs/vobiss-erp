@@ -166,8 +166,12 @@ router.post('/attendance/clock-in', async (req, res) => {
     if (distance > radius) {
       return res.status(400).json({
         error: 'You are not within the office location',
-        distance,
+        code: 'OUT_OF_RANGE',
+        distance: Math.round(distance),
         required: radius,
+        office_name: settings.office_name,
+        office_lat: officeLat,
+        office_lng: officeLng,
         office: { latitude: officeLat, longitude: officeLng, name: settings.office_name },
         current: coords,
       });

@@ -358,7 +358,7 @@ export default function TicketReport() {
           </div>
         )}
 
-        <div className="mb-6 flex flex-wrap items-end gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="mb-6 flex flex-wrap items-end gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-[var(--shadow-md)]">
           <div>
             <label className="mb-1 block text-xs font-medium text-slate-500">From</label>
             <input
@@ -560,7 +560,7 @@ export default function TicketReport() {
           </p>
         </div>
 
-        <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-lg">
+        <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[var(--shadow-md)]">
           <div className="overflow-x-auto">
             <table className="w-full min-w-[960px] text-sm">
               <thead className="border-b border-slate-100 bg-slate-50/90 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
@@ -806,7 +806,7 @@ function ChartCard({
 }) {
   return (
     <div
-      className={`rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-4 ${className}`}
+      className={`rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-4 ${className} shadow-[var(--shadow-md)]`}
     >
       <h3 className="mb-3 text-sm font-semibold text-[var(--text-primary)]">{title}</h3>
       {children}

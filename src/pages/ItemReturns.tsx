@@ -250,7 +250,7 @@ const ItemReturns: React.FC = () => {
         </div>
       )}
 
-      <div className="bg-[var(--surface)] rounded-2xl p-6 shadow-sm border border-[var(--border)] mb-6 relative overflow-hidden">
+      <div className="bg-[var(--surface)] rounded-2xl p-6 shadow-[var(--shadow-md)] border border-[var(--border)] mb-6 relative overflow-hidden">
         <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-green-500 to-teal-600"></div>
         <div className="flex flex-col md:flex-row md:items-center space-y-4 md:space-y-0 md:space-x-4">
           <div className="relative flex-1">
@@ -274,7 +274,7 @@ const ItemReturns: React.FC = () => {
           <TabsTrigger value="rejected" className="data-[state=active]:bg-[var(--surface)] data-[state=active]:shadow-sm rounded-lg">Rejected ({allRequests.filter(r => r.status === 'rejected').length})</TabsTrigger>
         </TabsList>
         <TabsContent value={activeTab} className="mt-6">
-          <div className="bg-[var(--surface)] rounded-2xl shadow-sm border border-[var(--border)] overflow-hidden">
+          <div className="bg-[var(--surface)] rounded-2xl shadow-[var(--shadow-md)] border border-[var(--border)] overflow-hidden">
             <div className="overflow-x-auto">
               <table className="min-w-full divide-y divide-[var(--border)]">
                 <thead className="bg-gradient-to-r from-[var(--surface-secondary)] to-[var(--surface-hover)]">

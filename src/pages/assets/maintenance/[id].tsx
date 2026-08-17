@@ -171,7 +171,7 @@ export default function MaintenanceDetailPage() {
           {/* Left Side */}
           <div className="lg:col-span-2 space-y-6">
             {/* Hero Image + Status */}
-            <div className="bg-white rounded-2xl shadow-md border border-gray-200 overflow-hidden">
+            <div className="bg-white rounded-2xl shadow-md border border-gray-200 overflow-hidden shadow-[var(--shadow-md)]">
               {mainPhoto ? (
                 <img src={mainPhoto} alt="Issue" className="w-full h-64 object-cover" />
               ) : (
@@ -196,7 +196,7 @@ export default function MaintenanceDetailPage() {
             </div>
 
             {/* Timeline */}
-            <div className="bg-white rounded-2xl shadow-md border border-gray-200 p-6">
+            <div className="bg-white rounded-2xl shadow-md border border-gray-200 p-6 shadow-[var(--shadow-md)]">
               <h3 className="text-lg font-bold text-gray-900 mb-4">Timeline</h3>
               <div className="space-y-4">
                 <div className="flex gap-3">
@@ -241,7 +241,7 @@ export default function MaintenanceDetailPage() {
 
             {/* Photos */}
             {hasPhotos && (
-              <div className="bg-white rounded-2xl shadow-md border border-gray-200 p-6">
+              <div className="bg-white rounded-2xl shadow-md border border-gray-200 p-6 shadow-[var(--shadow-md)]">
                 <div className="flex justify-between items-center mb-4">
                   <h3 className="text-lg font-bold text-gray-900">Photos ({current.photos.length})</h3>
                   {isEditing && (
@@ -269,7 +269,7 @@ export default function MaintenanceDetailPage() {
 
           {/* Right Side */}
           <div className="space-y-6">
-            <div className="bg-white rounded-2xl shadow-md border border-gray-200 p-6">
+            <div className="bg-white rounded-2xl shadow-md border border-gray-200 p-6 shadow-[var(--shadow-md)]">
               <h3 className="text-lg font-bold text-gray-900 mb-4">Asset</h3>
               <Link to={`/assets/${maintenance.asset_id}`} className="block hover:bg-gray-50 -m-2 p-2 rounded-lg transition">
                 <div className="flex items-center gap-3">
@@ -284,7 +284,7 @@ export default function MaintenanceDetailPage() {
               </Link>
             </div>
 
-            <div className="bg-white rounded-2xl shadow-md border border-gray-200 p-6">
+            <div className="bg-white rounded-2xl shadow-md border border-gray-200 p-6 shadow-[var(--shadow-md)]">
               <h3 className="text-lg font-bold text-gray-900 mb-4">Details</h3>
 
               <div className="space-y-4">

@@ -65,6 +65,7 @@ export type HrEmployee = {
   emergency_contact_phone?: string | null;
   line_manager?: string | null;
   system_role?: string | null;
+  hr_review_status?: string | null;
   status: string;
   suspension_reason?: string | null;
   suspended_at?: string | null;
@@ -88,6 +89,11 @@ export const hrApi = {
     const q = params ? '?' + new URLSearchParams(params).toString() : '';
     return hrFetch(`/employees${q}`);
   },
+  pendingEmployees: () => hrFetch('/employees/pending'),
+  acceptEmployee: (id: number | string) =>
+    hrFetch(`/employees/${id}/accept`, { method: 'POST' }),
+  ignoreEmployee: (id: number | string) =>
+    hrFetch(`/employees/${id}/ignore`, { method: 'POST' }),
   employee: (id: number | string) => hrFetch(`/employees/${id}`),
   createEmployee: (form: FormData) => hrFetch('/employees', { method: 'POST', body: form }),
   updateEmployee: (id: number | string, form: FormData) =>

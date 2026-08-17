@@ -198,7 +198,7 @@ const HrAttendance = () => {
         </TabsList>
 
         <TabsContent value="live" className="mt-4 space-y-4">
-          <div className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] px-4 py-3 text-sm">
+          <div className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] px-4 py-3 text-sm shadow-[var(--shadow-md)]">
             <span className="font-semibold">{live?.clocked_in_count ?? 0}/{live?.total_employees ?? 0}</span> employees in today
             <span className="mx-2 text-[var(--text-muted)]">·</span>
             {live?.late_count ?? 0} late
@@ -207,7 +207,7 @@ const HrAttendance = () => {
           </div>
           {liveQ.isLoading && !liveQ.data ? <TableSkeleton /> : (
             <div className="grid gap-4 lg:grid-cols-2">
-              <div className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-4">
+              <div className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-4 shadow-[var(--shadow-md)]">
                 <h2 className="text-sm font-semibold">In Office</h2>
                 <div className="mt-3 space-y-2">
                   {(liveQ.data?.in_office || []).length === 0 && <EmptyState title="Nobody is clocked in" />}
@@ -236,7 +236,7 @@ const HrAttendance = () => {
                   })}
                 </div>
               </div>
-              <div className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-4">
+              <div className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-4 shadow-[var(--shadow-md)]">
                 <h2 className="text-sm font-semibold">Not In</h2>
                 <div className="mt-3 space-y-2">
                   {(liveQ.data?.not_in || []).length === 0 && <EmptyState title="Everyone is in" />}
@@ -264,7 +264,7 @@ const HrAttendance = () => {
             <YearSelect value={year} onChange={setYear} />
           </div>
           {heatmapQ.isLoading && !heatmapQ.data ? <TableSkeleton /> : (
-            <div className="overflow-x-auto rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-4">
+            <div className="overflow-x-auto rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-4 shadow-[var(--shadow-md)]">
               <div className="min-w-max">
                 <div className="mb-2 flex gap-[3px] pl-40">
                   {Array.from({ length: daysInMonth }, (_, i) => (
@@ -308,7 +308,7 @@ const HrAttendance = () => {
               </div>
             </div>
           )}
-          <div className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-4">
+          <div className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-4 shadow-[var(--shadow-md)]">
             <h2 className="text-sm font-semibold">Department attendance %</h2>
             <div className="mt-4 h-64">
               <ResponsiveContainer width="100%" height="100%">
@@ -369,7 +369,7 @@ const HrAttendance = () => {
         </TabsContent>
 
         <TabsContent value="settings" className="mt-4">
-          <div className="max-w-3xl space-y-4 rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-5">
+          <div className="max-w-3xl space-y-4 rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-5 shadow-[var(--shadow-md)]">
             <Field label="Office name">
               <input className={inputClass} value={settingsForm.office_name} onChange={(e) => setSettingsForm({ ...settingsForm, office_name: e.target.value })} />
             </Field>

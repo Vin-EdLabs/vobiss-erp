@@ -9,8 +9,8 @@ const AccountSuspended = () => {
   const reason = String(user?.suspension_reason || '').trim();
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-[var(--page-bg)] px-4 py-12">
-      <div className="w-full max-w-lg rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-8 shadow-[var(--shadow)]">
+    <div className="flex min-h-dvh items-center justify-center bg-[var(--page-bg)] px-4 py-12">
+      <div className="w-full max-w-lg rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-8 shadow-[var(--shadow-md)]">
         <img src="/vobiss-logo.png" alt="Vobiss" className="mb-6 h-12 w-auto object-contain" />
         <p className="text-xs font-semibold uppercase tracking-wide text-[var(--danger-text)]">Account suspended</p>
         <h1 className="mt-2 text-2xl font-semibold tracking-tight text-[var(--text-primary)]">

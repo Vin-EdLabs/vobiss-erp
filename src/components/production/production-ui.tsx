@@ -27,7 +27,7 @@ export function DetailCard({
 
   return (
     <section
-      className={`relative overflow-hidden rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-5 shadow-[var(--shadow-sm)] sm:p-6 ${className}`}
+      className={`vobiss-card relative overflow-hidden rounded-[var(--card-radius)] border bg-[var(--surface)] p-5 sm:p-6 ${className}`}
     >
       <div className={`absolute inset-x-0 top-0 h-0.5 bg-gradient-to-r ${a.bar}`} />
       <h2 className="mb-4 flex items-center gap-2 text-lg font-bold text-[var(--text-primary)]">

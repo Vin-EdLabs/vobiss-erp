@@ -14,7 +14,7 @@ export function ReportShell({
   children: React.ReactNode;
 }) {
   return (
-    <div className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-6 sm:p-8">
+    <div className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-6 sm:p-8 shadow-[var(--shadow-md)]">
       <p className="text-base font-bold tracking-tight">VOBISS SOLUTIONS LIMITED</p>
       <p className="text-[13px] text-[var(--text-muted)]">Human Resources Department</p>
       <h2 className="mt-3 text-lg font-bold">{title}</h2>

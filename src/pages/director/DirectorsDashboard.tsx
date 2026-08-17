@@ -624,7 +624,7 @@ const DirectorsDashboard: React.FC = () => {
                 key={step.label}
                 type="button"
                 onClick={() => navigate(step.path)}
-                className="group relative rounded-2xl border border-slate-200 bg-slate-50 p-4 text-left shadow-[var(--shadow-md)] transition hover:-translate-y-0.5 hover:border-amber-300 hover:bg-white hover:shadow-lg focus:outline-none focus:ring-2 focus:ring-amber-400/50"
+                className="group relative rounded-2xl border border-slate-200 bg-slate-50 p-4 text-left shadow-[var(--shadow-md)] transition hover:-translate-y-0.5 hover:border-amber-300 hover:bg-white hover:shadow-[var(--shadow-md)] focus:outline-none focus:ring-2 focus:ring-amber-400/50"
               >
                 {index < dailyFlow.length - 1 && (
                   <span className="pointer-events-none absolute right-[-1.15rem] top-1/2 z-10 hidden h-0.5 w-8 bg-gradient-to-r from-slate-300 to-amber-300 md:block" />

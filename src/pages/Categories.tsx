@@ -406,7 +406,7 @@ const Categories: React.FC = () => {
             return (
               <div
                 key={category.id}
-                className="bg-[var(--surface)] rounded-xl p-6 shadow-sm border border-[var(--border)] hover:shadow-md transition-shadow"
+                className="bg-[var(--surface)] rounded-xl p-6 shadow-[var(--shadow-md)] border border-[var(--border)] hover:shadow-md transition-shadow"
               >
                 <div className="flex items-start justify-between mb-4">
                   <div className="flex items-center flex-1">
@@ -585,7 +585,7 @@ const Categories: React.FC = () => {
 
       {/* Categories List */}
       {layout === 'list' && (
-        <div className="bg-[var(--surface)] rounded-xl border border-[var(--border)] overflow-hidden">
+        <div className="bg-[var(--surface)] rounded-xl border border-[var(--border)] overflow-hidden shadow-[var(--shadow-md)]">
           <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-[var(--border)]">
               <thead className="bg-[var(--surface-secondary)]">

@@ -621,7 +621,7 @@ const Inventory = () => {
 
       {/* Add Item Form */}
       {!readOnly && showAddForm && (
-        <div className="bg-[var(--surface)] rounded-xl p-6 shadow-sm border border-[var(--border)] mb-6 animate-slideDown">
+        <div className="bg-[var(--surface)] rounded-xl p-6 shadow-[var(--shadow-md)] border border-[var(--border)] mb-6 animate-slideDown">
           <div className="flex justify-between items-center mb-4">
             <h2 className="text-xl font-bold">Add New Item</h2>
             <button onClick={() => setShowAddForm(false)} className="text-[var(--text-muted)] hover:text-[var(--text-body)]">
@@ -638,7 +638,7 @@ const Inventory = () => {
       )}
 
       {/* Filters */}
-      <div className="bg-[var(--surface)] rounded-xl p-6 shadow-sm border border-[var(--border)] mb-6">
+      <div className="bg-[var(--surface)] rounded-xl p-6 shadow-[var(--shadow-md)] border border-[var(--border)] mb-6">
         <div className="flex flex-col md:flex-row gap-4">
           <div className="flex-1">
             <div className="relative">
@@ -690,7 +690,7 @@ const Inventory = () => {
       ) : layout === 'grid' ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
           {currentItems.map(item => (
-            <div key={item.id} className="bg-[var(--surface)] rounded-xl p-6 shadow-sm border border-[var(--border)] hover:shadow-md transition-shadow">
+            <div key={item.id} className="bg-[var(--surface)] rounded-xl p-6 shadow-[var(--shadow-md)] border border-[var(--border)] hover:shadow-md transition-shadow">
               <div className="flex items-start justify-between mb-4">
                 <Package className="h-8 w-8 text-blue-600" />
                 <div className="flex space-x-2">
@@ -788,7 +788,7 @@ const Inventory = () => {
         </div>
       ) : (
         <>
-          <div className="bg-[var(--surface)] rounded-xl border border-[var(--border)] overflow-hidden">
+          <div className="bg-[var(--surface)] rounded-xl border border-[var(--border)] overflow-hidden shadow-[var(--shadow-md)]">
             <div className="overflow-x-auto">
               <table className="min-w-full divide-y divide-[var(--border)]">
                 <thead className="bg-[var(--surface-secondary)]">

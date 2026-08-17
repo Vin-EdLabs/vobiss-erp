@@ -438,7 +438,7 @@ function VobiDailySummaryCard({
 
   return (
     <div className="min-w-0">
-      <div className="rounded-xl border border-white/70 bg-white/90 p-3 text-slate-900 shadow-sm">
+      <div className="rounded-xl border border-white/70 bg-white/90 p-3 text-slate-900 shadow-[var(--shadow-md)]">
         <div className="flex items-start justify-between gap-3">
           <div>
             <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-[#1D9E75]">

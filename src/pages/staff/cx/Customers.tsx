@@ -210,7 +210,7 @@ const CustomersPage: React.FC = () => {
         )}
 
         {/* Add Customer Form */}
-        <div className="bg-white rounded-2xl shadow border border-gray-200 p-6 lg:p-8 mb-12">
+        <div className="bg-white rounded-2xl shadow border border-gray-200 p-6 lg:p-8 mb-12 shadow-[var(--shadow-md)]">
           <h2 className="text-2xl font-semibold text-gray-900 mb-6">New Customer Organization</h2>
 
           <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -299,7 +299,7 @@ const CustomersPage: React.FC = () => {
         </div>
 
         {/* Customers Table */}
-        <div className="bg-white rounded-2xl shadow border border-gray-200 overflow-hidden">
+        <div className="bg-white rounded-2xl shadow border border-gray-200 overflow-hidden shadow-[var(--shadow-md)]">
           <div className="px-6 py-5 border-b border-gray-200 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <h2 className="text-xl font-semibold text-gray-900">
               Customers {selectedProjectName && <span className="text-gray-600">— {selectedProjectName}</span>}

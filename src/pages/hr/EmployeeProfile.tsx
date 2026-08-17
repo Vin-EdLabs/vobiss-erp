@@ -208,7 +208,7 @@ const HrEmployeeProfile = () => {
 
   return (
     <div>
-      <div className="mb-6 rounded-xl border border-slate-200 bg-white p-6 shadow-card">
+      <div className="mb-6 rounded-xl border border-slate-200 bg-white p-6 shadow-[var(--shadow-md)]">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-4">
             <Avatar name={emp.full_name} src={emp.photo_url} size="lg" />
@@ -242,7 +242,7 @@ const HrEmployeeProfile = () => {
       </div>
 
       {editOpen ? (
-        <div className="mb-6 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-5 shadow-[var(--shadow)]">
+        <div className="mb-6 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-5 shadow-[var(--shadow-md)]">
           <h2 className="mb-4 text-base font-semibold text-[var(--text-primary)]">Edit employee</h2>
           <EmployeeForm
             mode="edit"
@@ -289,7 +289,7 @@ const HrEmployeeProfile = () => {
             documents={docs}
             heading="Employment Record"
           />
-          <div className="mt-4 rounded-xl border border-slate-200 bg-white p-6 shadow-card employment-print-hide">
+          <div className="mt-4 rounded-xl border border-slate-200 bg-white p-6 shadow-[var(--shadow-md)] employment-print-hide">
             <p className="mb-3 text-sm font-semibold">Document status</p>
             <div className="grid gap-2 sm:grid-cols-2">
               <CheckRow ok={hasId} label="National ID" />
@@ -306,7 +306,7 @@ const HrEmployeeProfile = () => {
               const total = Number(b.total_days || 0);
               const pct = total > 0 ? Math.min((used / total) * 100, 100) : 0;
               return (
-                <div key={b.id} className="rounded-xl border border-slate-200 bg-white p-4">
+                <div key={b.id} className="rounded-xl border border-slate-200 bg-white p-4 shadow-[var(--shadow-md)]">
                   <p className="text-xs font-semibold text-slate-500">{b.leave_type}</p>
                   <p className="mt-1 text-lg font-semibold">{Math.max(total - used, 0)} remaining</p>
                   <p className="mb-2 text-xs text-slate-400">{used} used of {total}</p>
@@ -315,7 +315,7 @@ const HrEmployeeProfile = () => {
               );
             })}
           </div>
-          <div className="overflow-x-auto rounded-xl border bg-white">
+          <div className="overflow-x-auto rounded-xl border bg-white shadow-[var(--shadow-md)]">
             <table className="vobiss-table w-full text-sm">
               <thead>
                 <tr className="border-b text-left text-xs uppercase text-slate-500">
@@ -341,7 +341,7 @@ const HrEmployeeProfile = () => {
           </div>
         </TabsContent>
         <TabsContent value="payroll">
-          <div className="mb-4 rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-5">
+          <div className="mb-4 rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-5 shadow-[var(--shadow-md)]">
             <h3 className="text-sm font-semibold">Allowances</h3>
             <p className="mt-0.5 text-xs text-[var(--text-muted)]">These are included automatically when payroll is generated.</p>
             <table className="vobiss-table mt-3 w-full text-sm">
@@ -379,7 +379,7 @@ const HrEmployeeProfile = () => {
               action={<Button onClick={() => navigate('/hr/payroll')}>Generate Payroll</Button>}
             />
           ) : (
-            <div className="overflow-x-auto rounded-xl border bg-white">
+            <div className="overflow-x-auto rounded-xl border bg-white shadow-[var(--shadow-md)]">
               <table className="vobiss-table w-full text-sm">
                 <thead>
                   <tr className="border-b text-left text-xs uppercase text-slate-500">
@@ -434,7 +434,7 @@ const HrEmployeeProfile = () => {
           {docs.length === 0 ? (
             <EmptyState title="No documents" action={<Button onClick={() => setDocOpen(true)}>Upload document</Button>} />
           ) : (
-            <div className="rounded-xl border bg-white">
+            <div className="rounded-xl border bg-white shadow-[var(--shadow-md)]">
               <Accordion type="single" collapsible>
                 {docs.map((d: any) => (
                   <AccordionItem key={d.id} value={String(d.id)} className="px-4">

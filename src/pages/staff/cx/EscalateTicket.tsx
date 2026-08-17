@@ -280,7 +280,7 @@ const EscalateTicket: React.FC = () => {
             Back
           </button>
 
-          <div className="bg-white rounded-xl border shadow-sm p-5">
+          <div className="bg-white rounded-xl border shadow-[var(--shadow-md)] p-5">
             <div className="flex items-center justify-between flex-wrap gap-4">
               <div className="flex items-center gap-3">
                 <Ticket className="w-8 h-8 text-indigo-600" />
@@ -321,7 +321,7 @@ const EscalateTicket: React.FC = () => {
 
         {/* Ticket list view */}
         {!paramTicketId && !selectedTicket && (
-          <div className="bg-white rounded-xl border shadow-sm overflow-hidden">
+          <div className="bg-white rounded-xl border shadow-[var(--shadow-md)] overflow-hidden">
             <div className="p-5 border-b bg-gray-50">
               <div className="relative">
                 <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
@@ -388,7 +388,7 @@ const EscalateTicket: React.FC = () => {
           <div className="grid lg:grid-cols-3 gap-6">
             {/* Sidebar */}
             <div className="lg:col-span-1">
-              <div className="bg-white rounded-xl border shadow-sm p-6 sticky top-6">
+              <div className="bg-white rounded-xl border shadow-[var(--shadow-md)] p-6 sticky top-6">
                 <h2 className="font-bold text-gray-900 mb-5 flex items-center gap-2 text-lg">
                   <Ticket className="w-6 h-6 text-indigo-600" />
                   Ticket #{selectedTicket.ticket_id}
@@ -432,7 +432,7 @@ const EscalateTicket: React.FC = () => {
 
             {/* Form */}
             <div className="lg:col-span-2">
-              <div className="bg-white rounded-xl border shadow-sm p-6">
+              <div className="bg-white rounded-xl border shadow-[var(--shadow-md)] p-6">
                 <h2 className="text-xl font-bold text-gray-900 mb-6">Ticket Escalation</h2>
 
                 <form onSubmit={handleSubmit} className="space-y-6">

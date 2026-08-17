@@ -150,7 +150,7 @@ const ItemForm: React.FC<ItemFormProps> = ({
 
   const inputClass = isInline 
     ? "w-full p-2 border rounded focus:ring-2 focus:ring-blue-500 focus:border-transparent" 
-    : "w-full p-3 border border-[var(--border-strong)] rounded-lg bg-[var(--surface)] text-[var(--text-primary)] focus:ring-2 focus:ring-[var(--primary)] focus:border-transparent";
+    : "w-full p-3 border border-[var(--border-strong)] rounded-lg bg-[var(--surface)] text-[var(--text-primary)] focus:ring-2 focus:ring-[var(--primary)] focus:border-transparent shadow-[var(--shadow-md)]";
 
   return (
     <form onSubmit={handleSubmit} className={isInline ? "space-y-4 p-4 bg-[var(--surface-secondary)] rounded-lg" : "space-y-6"}>
@@ -166,7 +166,7 @@ const ItemForm: React.FC<ItemFormProps> = ({
       )}
 
       {/* Basic Information Section */}
-      <div className="bg-[var(--surface)] p-4 rounded-lg border border-[var(--border)]">
+      <div className="bg-[var(--surface)] p-4 rounded-lg border border-[var(--border)] shadow-[var(--shadow-md)]">
         <h3 className="font-semibold text-[var(--text-primary)] mb-4 flex items-center">
           <Package className="h-5 w-5 mr-2 text-blue-600" />
           Basic Information
@@ -269,7 +269,7 @@ const ItemForm: React.FC<ItemFormProps> = ({
       </div>
 
       {/* Additional Information Section */}
-      <div className="bg-[var(--surface)] p-4 rounded-lg border border-[var(--border)]">
+      <div className="bg-[var(--surface)] p-4 rounded-lg border border-[var(--border)] shadow-[var(--shadow-md)]">
         <h3 className="font-semibold text-[var(--text-primary)] mb-4 flex items-center">
           <Image className="h-5 w-5 mr-2 text-purple-600" />
           Additional Information
@@ -301,7 +301,7 @@ const ItemForm: React.FC<ItemFormProps> = ({
 
       {/* Edit Specific Section */}
       {isEdit && (
-        <div className="bg-[var(--surface)] p-4 rounded-lg border border-[var(--border)]">
+        <div className="bg-[var(--surface)] p-4 rounded-lg border border-[var(--border)] shadow-[var(--shadow-md)]">
           <h3 className="font-semibold text-[var(--text-primary)] mb-4 flex items-center">
             <Edit className="h-5 w-5 mr-2 text-green-600" />
             Update Details

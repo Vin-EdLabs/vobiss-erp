@@ -45,7 +45,7 @@ const AssignUser: React.FC = () => {
 
             <div className="space-y-2">
               <label className="text-[11px] font-black uppercase tracking-widest text-slate-400 ml-1">Select Staff Member</label>
-              <select className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl outline-none focus:ring-4 focus:ring-blue-500/10 focus:bg-white transition-all font-semibold text-slate-700">
+              <select className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl outline-none focus:ring-4 focus:ring-blue-500/10 focus:bg-white transition-all font-semibold text-slate-700 shadow-[var(--shadow-md)]">
                 <option>Choose CX Agent...</option>
                 <option>Sarah Jenkins (Lead)</option>
                 <option>Michael Chen (Agent)</option>
@@ -54,7 +54,7 @@ const AssignUser: React.FC = () => {
 
             <div className="space-y-2">
               <label className="text-[11px] font-black uppercase tracking-widest text-slate-400 ml-1">Assign to Project/Site</label>
-              <select className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl outline-none focus:ring-4 focus:ring-blue-500/10 focus:bg-white transition-all font-semibold text-slate-700">
+              <select className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl outline-none focus:ring-4 focus:ring-blue-500/10 focus:bg-white transition-all font-semibold text-slate-700 shadow-[var(--shadow-md)]">
                 <option>Choose Site...</option>
                 <option>MTN Data Center (VOB-992)</option>
                 <option>Airtel HQ (VOB-112)</option>

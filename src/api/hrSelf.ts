@@ -18,8 +18,7 @@ async function selfFetch(path: string, options: RequestInit = {}) {
   }
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    const error = new Error(err.error || `Request failed (${res.status})`);
-    Object.assign(error, err);
+    const error = Object.assign(new Error(err.error || `Request failed (${res.status})`), err);
     throw error;
   }
   if (res.status === 204) return null;

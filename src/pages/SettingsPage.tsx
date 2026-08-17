@@ -307,7 +307,7 @@ const SettingsPage: React.FC = () => {
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         {/* Email Configuration */}
-        <div className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-6">
+        <div className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-6 shadow-[var(--shadow-md)]">
           <div className="mb-6 flex items-center">
             <Mail className="mr-3 h-6 w-6 text-[var(--primary)]" />
             <h2 className="text-lg font-semibold text-[var(--text-primary)]">Email Configuration</h2>
@@ -404,7 +404,7 @@ const SettingsPage: React.FC = () => {
         </div>
 
         {/* Database Management */}
-        <div className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-6">
+        <div className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-6 shadow-[var(--shadow-md)]">
           <div className="mb-4 flex items-center">
             <Database className="mr-2 h-5 w-5 text-[var(--primary)]" />
             <h2 className="text-lg font-semibold text-[var(--text-primary)]">Database Management</h2>

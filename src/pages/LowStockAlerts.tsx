@@ -193,7 +193,7 @@ const LowStockAlerts: React.FC = () => {
       </div>
 
       {/* Filters */}
-      <div className="bg-[var(--surface)] rounded-xl p-6 shadow-sm border border-[var(--border)] mb-6">
+      <div className="bg-[var(--surface)] rounded-xl p-6 shadow-[var(--shadow-md)] border border-[var(--border)] mb-6">
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           {/* Search */}
           <div className="relative">
@@ -271,7 +271,7 @@ const LowStockAlerts: React.FC = () => {
             const stockLevel = getStockLevel(item.quantity, item.low_stock_threshold);
             
             return (
-              <div key={item.id} className="bg-[var(--surface)] rounded-xl p-6 shadow-sm border border-[var(--border)] hover:shadow-md transition-shadow">
+              <div key={item.id} className="bg-[var(--surface)] rounded-xl p-6 shadow-[var(--shadow-md)] border border-[var(--border)] hover:shadow-md transition-shadow">
                 <div className="flex flex-col md:flex-row md:items-center justify-between">
                   <div className="flex items-center space-x-4">
                     <div className={`p-3 rounded-lg ${stockLevel.bgColor}`}>
@@ -324,7 +324,7 @@ const LowStockAlerts: React.FC = () => {
             const stockLevel = getStockLevel(item.quantity, item.low_stock_threshold);
             
             return (
-              <div key={item.id} className="bg-[var(--surface)] rounded-xl p-6 shadow-sm border border-[var(--border)] hover:shadow-md transition-shadow">
+              <div key={item.id} className="bg-[var(--surface)] rounded-xl p-6 shadow-[var(--shadow-md)] border border-[var(--border)] hover:shadow-md transition-shadow">
                 <div className="flex items-center justify-between mb-4">
                   <div className={`p-3 rounded-lg ${stockLevel.bgColor}`}>
                     <Package className={`h-5 w-5 ${stockLevel.textColor}`} />

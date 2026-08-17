@@ -104,7 +104,7 @@ const sections: Section[] = [
             ['Director / CTO', 'Executive dashboard, global search, all tickets, Community Chat'],
             ['Superadmin', 'Users, Configuration, system messages, backups'],
           ].map(([role, desc]) => (
-            <div key={role} className="rounded-lg border border-slate-200 bg-white p-3 text-sm shadow-sm">
+            <div key={role} className="rounded-lg border border-slate-200 bg-white p-3 text-sm shadow-[var(--shadow-md)]">
               <p className="font-semibold text-slate-900">{role}</p>
               <p className="mt-1 text-slate-600">{desc}</p>
             </div>
@@ -125,7 +125,7 @@ const sections: Section[] = [
           threads linked to live records.
         </p>
         <div className="space-y-4">
-          <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+          <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-[var(--shadow-md)]">
             <h4 className="flex items-center gap-2 font-semibold text-slate-900">
               <Hash className="h-4 w-4 text-indigo-500" />
               Channels & activity feeds
@@ -153,7 +153,7 @@ const sections: Section[] = [
               card to jump to the live form.
             </p>
           </div>
-          <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+          <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-[var(--shadow-md)]">
             <h4 className="flex items-center gap-2 font-semibold text-slate-900">
               <AtSign className="h-4 w-4 text-blue-500" />
               Mentions & alerts
@@ -167,7 +167,7 @@ const sections: Section[] = [
               ]}
             />
           </div>
-          <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+          <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-[var(--shadow-md)]">
             <h4 className="flex items-center gap-2 font-semibold text-slate-900">
               <Layers className="h-4 w-4" />
               Open chat from a record
@@ -623,7 +623,7 @@ const SystemGuide = () => {
             <Link
               key={path}
               to={path}
-              className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition hover:border-indigo-200 hover:shadow-md"
+              className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-[var(--shadow-md)] transition hover:border-indigo-200 hover:shadow-md"
             >
               <Icon className={`h-8 w-8 ${color}`} />
               <span className="text-sm font-semibold text-slate-800">{label}</span>
@@ -650,7 +650,7 @@ const SystemGuide = () => {
             return (
               <div
                 key={section.id}
-                className="overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-sm transition hover:shadow-md"
+                className="overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-[var(--shadow-md)] transition hover:shadow-md"
               >
                 <button
                   type="button"

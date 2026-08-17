@@ -53,7 +53,7 @@ export function StatCard({
   return (
     <div
       className={cn(
-        'rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] px-3.5 py-3.5 shadow-[var(--shadow-md)] sm:py-[18px] sm:pl-5 sm:pr-5',
+        'vobiss-card rounded-[var(--card-radius)] border bg-[var(--surface)] px-3.5 py-3.5 sm:py-[18px] sm:pl-5 sm:pr-5',
         className
       )}
       style={{ borderLeftWidth: 3, borderLeftColor: accent.border }}

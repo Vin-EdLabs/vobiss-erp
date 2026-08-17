@@ -39,7 +39,7 @@ const Login: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 py-12 px-4 sm:px-6 lg:px-8" style={{ colorScheme: 'light' }}>
+    <div className="min-h-dvh flex items-center justify-center bg-gray-50 py-12 px-4 sm:px-6 lg:px-8" style={{ colorScheme: 'light' }}>
       <div className="w-full max-w-5xl bg-white rounded-3xl shadow-2xl overflow-hidden flex flex-col lg:flex-row">
         
         {/* Left Side - Brand Section (desktop only) */}
@@ -73,7 +73,7 @@ const Login: React.FC = () => {
               </div>
             </div>
 
-            <div className="bg-white/10 backdrop-blur-sm rounded-xl p-4 border border-white/20">
+            <div className="bg-white/10 backdrop-blur-sm rounded-xl p-4 border border-white/20 shadow-[var(--shadow-md)]">
               <p className="text-sm text-white/90">
                 🔒 End-to-end encrypted • Access restricted to verified customers only
               </p>

@@ -219,7 +219,7 @@ export default function SettingsChatAdmin({ token, onError, onSuccess }: Props) 
   };
 
   return (
-    <div className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-6 lg:col-span-2">
+    <div className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-6 lg:col-span-2 shadow-[var(--shadow-md)]">
       <div className="mb-4 flex items-center">
         <MessageCircle className="mr-2 h-5 w-5 text-[var(--primary)]" />
         <h2 className="text-lg font-semibold text-[var(--text-primary)]">Community Chat</h2>

@@ -540,7 +540,7 @@ const FieldAllTickets: React.FC = () => {
           </div>
 
           {/* Filters */}
-          <div className="bg-white rounded-lg border border-slate-200 p-3 mb-3 shadow-sm">
+          <div className="bg-white rounded-lg border border-slate-200 p-3 mb-3 shadow-[var(--shadow-md)]">
             <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
               <div className="md:col-span-2">
                 <div className="relative">
@@ -581,7 +581,7 @@ const FieldAllTickets: React.FC = () => {
           </div>
 
           {/* Table - Clean names only */}
-          <div className="bg-white rounded-lg shadow-sm border border-slate-200 overflow-hidden">
+          <div className="bg-white rounded-lg shadow-[var(--shadow-md)] border border-slate-200 overflow-hidden">
             <div className="overflow-x-auto">
               <table className="w-full">
                 <thead className="bg-gradient-to-r from-purple-800 to-indigo-800 text-white text-xs uppercase tracking-wider">
@@ -732,7 +732,7 @@ const FieldAllTickets: React.FC = () => {
 
                   {/* Info Grid */}
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-                    <div className="bg-white rounded-xl p-5 shadow border">
+                    <div className="bg-white rounded-xl p-5 shadow border shadow-[var(--shadow-md)]">
                       <h4 className="font-semibold mb-3 flex items-center gap-2 text-sm">
                         <User className="w-4 h-4 text-purple-600" /> Customer
                       </h4>
@@ -741,14 +741,14 @@ const FieldAllTickets: React.FC = () => {
                       {selectedTicket.customer_phone && <p className="text-xs text-gray-600">{selectedTicket.customer_phone}</p>}
                     </div>
 
-                    <div className="bg-white rounded-xl p-5 shadow border">
+                    <div className="bg-white rounded-xl p-5 shadow border shadow-[var(--shadow-md)]">
                       <h4 className="font-semibold mb-3 flex items-center gap-2 text-sm">
                         <Building className="w-4 h-4 text-purple-600" /> Project
                       </h4>
                       <p className="text-xs">{selectedTicket.project_name}</p>
                     </div>
 
-                    <div className="bg-white rounded-xl p-5 shadow border">
+                    <div className="bg-white rounded-xl p-5 shadow border shadow-[var(--shadow-md)]">
                       <h4 className="font-semibold mb-3 flex items-center gap-2 text-sm">
                         <Clock className="w-4 h-4 text-purple-600" /> Status & Priority
                       </h4>
@@ -802,7 +802,7 @@ const FieldAllTickets: React.FC = () => {
                   </div>
 
                   {/* Description */}
-                  <div className="bg-white rounded-xl p-5 shadow border">
+                  <div className="bg-white rounded-xl p-5 shadow border shadow-[var(--shadow-md)]">
                     <h4 className="font-bold mb-3 flex items-center gap-2 text-sm">
                       <MessageCircle className="w-4 h-4 text-purple-600" />
                       Description
@@ -811,7 +811,7 @@ const FieldAllTickets: React.FC = () => {
                   </div>
 
                   {/* Timeline */}
-                  <div className="bg-white rounded-xl p-5 shadow border">
+                  <div className="bg-white rounded-xl p-5 shadow border shadow-[var(--shadow-md)]">
                     <h4 className="font-bold mb-4 flex items-center gap-2 text-sm">
                       <Calendar className="w-4 h-4 text-purple-600" />
                       Timeline

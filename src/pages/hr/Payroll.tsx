@@ -219,7 +219,7 @@ const HrPayroll = () => {
         </TabsList>
 
         <TabsContent value="overview" className="mt-4 space-y-4">
-          <div className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-5">
+          <div className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-5 shadow-[var(--shadow-md)]">
             <Stepper status={payroll?.status} />
             {!payroll && (
               <div className="mt-4">
@@ -266,7 +266,7 @@ const HrPayroll = () => {
           {monthQ.isLoading && !monthQ.data ? <TableSkeleton /> : items.length === 0 ? (
             <EmptyState title="No payroll rows" description="Generate payroll to see employee calculations." />
           ) : (
-            <div className="overflow-x-auto rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)]">
+            <div className="overflow-x-auto rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow-md)]">
               <table className="vobiss-table w-full text-sm">
                 <thead>
                   <tr className="border-b text-left text-xs uppercase text-[var(--text-secondary)]">
@@ -305,7 +305,7 @@ const HrPayroll = () => {
         </TabsContent>
 
         <TabsContent value="generate" className="mt-4 space-y-4">
-          <div className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-5">
+          <div className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-5 shadow-[var(--shadow-md)]">
             <h2 className="text-sm font-semibold">Step 1 — Employee Review</h2>
             <p className="mt-1 text-xs text-[var(--text-muted)]">Toggle who to include. Expand a row to add a one-off allowance or bonus for this run.</p>
             {previewQ.isLoading && !previewQ.data ? <TableSkeleton /> : (
@@ -353,11 +353,11 @@ const HrPayroll = () => {
               </div>
             )}
           </div>
-          <div className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-5">
+          <div className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-5 shadow-[var(--shadow-md)]">
             <h2 className="text-sm font-semibold">Step 2 — Calculation Preview</h2>
             <p className="mt-1 text-sm text-[var(--text-secondary)]">{includedPreview.length} employees · Gross {formatGhs(previewQ.data?.totals?.gross)} · Net {formatGhs(previewQ.data?.totals?.net)}</p>
           </div>
-          <div className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-5">
+          <div className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-5 shadow-[var(--shadow-md)]">
             <h2 className="text-sm font-semibold">Step 3 — Generate</h2>
             <Button className="mt-3" onClick={() => setConfirmOpen(true)} disabled={!includedPreview.length}>Generate Payroll</Button>
           </div>
@@ -366,7 +366,7 @@ const HrPayroll = () => {
         <TabsContent value="payslips" className="mt-4 space-y-4">
           <input className={`${inputClass} max-w-sm`} placeholder="Search employee…" value={search} onChange={(e) => setSearch(e.target.value)} />
           {slips.length === 0 ? <EmptyState title="No payslips for this month" /> : (
-            <div className="overflow-x-auto rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)]">
+            <div className="overflow-x-auto rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow-md)]">
               <table className="vobiss-table w-full text-sm">
                 <thead>
                   <tr className="border-b text-left text-xs uppercase text-[var(--text-secondary)]">
@@ -393,7 +393,7 @@ const HrPayroll = () => {
         <TabsContent value="settings" className="mt-4 space-y-4">
           {!settings ? <TableSkeleton /> : (
             <>
-              <div className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-5">
+              <div className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-5 shadow-[var(--shadow-md)]">
                 <h2 className="text-sm font-semibold">SSNIT Configuration</h2>
                 <div className="mt-3 grid gap-3 sm:grid-cols-2">
                   <Field label="Employee Contribution Rate (%)">
@@ -405,7 +405,7 @@ const HrPayroll = () => {
                 </div>
                 <p className="mt-2 text-xs text-[var(--text-muted)]">Standard rates: Employee 5.5%, Employer 13%. Total 18.5% of basic salary. Remit to SSNIT monthly.</p>
               </div>
-              <div className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-5">
+              <div className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-5 shadow-[var(--shadow-md)]">
                 <div className="flex items-center justify-between gap-2">
                   <h2 className="text-sm font-semibold">Ghana PAYE Tax Bands</h2>
                   <Button variant="outline" size="sm" onClick={() => setSettingsForm({ ...settings, tax_bands: DEFAULT_BANDS })}>Reset to Ghana Defaults</Button>
@@ -437,7 +437,7 @@ const HrPayroll = () => {
                 </div>
                 <Button className="mt-3" variant="outline" size="sm" onClick={() => setSettingsForm({ ...settings, tax_bands: [...bands, { from: bands[bands.length - 1]?.to || 0, to: null, rate: 0 }] })}>Add Band</Button>
               </div>
-              <div className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-5">
+              <div className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-5 shadow-[var(--shadow-md)]">
                 <h2 className="text-sm font-semibold">Allowance Types</h2>
                 <table className="mt-3 vobiss-table w-full text-sm">
                   <thead>

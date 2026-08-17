@@ -68,7 +68,7 @@ const ProjectsPage: React.FC = () => {
       )}
 
       {/* Create Project Form */}
-      <div className="bg-white rounded-xl shadow border border-gray-200 p-6 mb-10">
+      <div className="bg-white rounded-xl shadow border border-gray-200 p-6 mb-10 shadow-[var(--shadow-md)]">
         <h2 className="text-2xl font-semibold text-gray-800 mb-5">Create New Project</h2>
         <form onSubmit={handleSubmit} className="space-y-5">
           <div>
@@ -122,7 +122,7 @@ const ProjectsPage: React.FC = () => {
             <p className="text-gray-500">No projects yet. Create one above!</p>
           </div>
         ) : (
-          <div className="overflow-x-auto bg-white border border-gray-200 rounded-xl shadow-sm">
+          <div className="overflow-x-auto bg-white border border-gray-200 rounded-xl shadow-[var(--shadow-md)]">
             <table className="min-w-full divide-y divide-gray-200">
               <thead className="bg-gray-50">
                 <tr>

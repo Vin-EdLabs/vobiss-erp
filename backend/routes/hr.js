@@ -27,6 +27,7 @@ import {
   LETTER_FORM_TYPES,
   deductLeaveDays,
   isoDateOnly,
+  syncPendingEmployeesFromUsers,
 } from '../utils/hrShared.js';
 import {
   leaveEmployeeIdsOn,
@@ -315,8 +316,9 @@ router.get('/leave-requests', async (req, res) => {
 
 router.get('/employees', async (req, res) => {
   try {
+    await syncPendingEmployeesFromUsers();
     const { department, employment_type, status, q } = req.query;
-    const clauses = [];
+    const clauses = [`COALESCE(hr_review_status, 'accepted') = 'accepted'`];
     const params = [];
     if (department) {
       params.push(department);
@@ -334,7 +336,7 @@ router.get('/employees', async (req, res) => {
       params.push(`%${String(q).toLowerCase()}%`);
       clauses.push(`(LOWER(full_name) LIKE $${params.length} OR LOWER(COALESCE(email,'')) LIKE $${params.length} OR LOWER(COALESCE(position,'')) LIKE $${params.length})`);
     }
-    const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
+    const where = `WHERE ${clauses.join(' AND ')}`;
     const result = await pool.query(
       `SELECT * FROM hr_employees ${where} ORDER BY full_name ASC`,
       params
@@ -343,6 +345,72 @@ router.get('/employees', async (req, res) => {
   } catch (err) {
     console.error('HR list employees:', err);
     res.status(500).json({ error: 'Failed to load employees' });
+  }
+});
+
+router.get('/employees/pending', async (_req, res) => {
+  try {
+    await syncPendingEmployeesFromUsers();
+    const result = await pool.query(
+      `SELECT e.*, u.username, u.role AS system_role, u.unit
+         FROM hr_employees e
+         LEFT JOIN users u ON u.id = e.user_id
+        WHERE COALESCE(e.hr_review_status, '') = 'pending'
+        ORDER BY e.created_at DESC, e.full_name ASC`
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error('HR pending employees:', err);
+    res.status(500).json({ error: 'Failed to load pending staff' });
+  }
+});
+
+router.post('/employees/:id/accept', async (req, res) => {
+  try {
+    const emp = await getEmployeeOr404(req.params.id, res);
+    if (!emp) return;
+    if (String(emp.hr_review_status || '') !== 'pending') {
+      return res.status(400).json({ error: 'This person is not waiting for HR review' });
+    }
+    const result = await pool.query(
+      `UPDATE hr_employees
+          SET hr_review_status = 'accepted', status = 'active'
+        WHERE id = $1
+        RETURNING *`,
+      [emp.id]
+    );
+    const updated = result.rows[0];
+    await ensureLeaveBalances(pool, updated.id);
+    await logHrActivity(pool, {
+      kind: 'employee_accepted',
+      message: `HR accepted ${updated.full_name} as an employee`,
+      employeeId: updated.id,
+    });
+    res.json(updated);
+  } catch (err) {
+    console.error('HR accept employee:', err);
+    res.status(500).json({ error: 'Failed to accept staff' });
+  }
+});
+
+router.post('/employees/:id/ignore', async (req, res) => {
+  try {
+    const emp = await getEmployeeOr404(req.params.id, res);
+    if (!emp) return;
+    if (String(emp.hr_review_status || '') !== 'pending') {
+      return res.status(400).json({ error: 'This person is not waiting for HR review' });
+    }
+    const result = await pool.query(
+      `UPDATE hr_employees
+          SET hr_review_status = 'ignored', status = 'ignored'
+        WHERE id = $1
+        RETURNING *`,
+      [emp.id]
+    );
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('HR ignore employee:', err);
+    res.status(500).json({ error: 'Failed to ignore staff' });
   }
 });
 
@@ -365,8 +433,8 @@ router.post('/employees', upload.single('photo'), async (req, res) => {
       `INSERT INTO hr_employees (
         user_id, full_name, email, phone, gender, photo_url, department, position, location, employment_type,
         start_date, contract_end_date, basic_salary, allowances, emergency_contact_name,
-        emergency_contact_phone, line_manager, status
-      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
+        emergency_contact_phone, line_manager, status, hr_review_status
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,'accepted')
       RETURNING *`,
       [
         b.user_id || null,

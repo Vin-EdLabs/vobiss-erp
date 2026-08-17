@@ -256,7 +256,7 @@ const StaffHeader: React.FC<StaffHeaderProps> = ({
             align="end"
             side="bottom"
             sideOffset={8}
-            className="flex max-h-[min(75vh,32rem)] w-[min(22rem,calc(100vw-1.5rem))] flex-col overflow-hidden rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-0 text-[var(--text-primary)] shadow-[var(--shadow)]"
+            className="flex max-h-[min(75vh,32rem)] w-[min(22rem,calc(100vw-1.5rem))] flex-col overflow-hidden rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-0 text-[var(--text-primary)] shadow-[var(--shadow-md)]"
           >
             <div className="flex items-center justify-between border-b border-[var(--border)] bg-[var(--surface)] px-4 py-3">
               <h3 className="text-sm font-semibold">Notifications</h3>

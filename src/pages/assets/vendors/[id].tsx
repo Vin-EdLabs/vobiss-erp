@@ -151,7 +151,7 @@ export default function VendorDetailPage() {
               </div>
             </div>
 
-            <div className="bg-white rounded-3xl shadow-lg border border-gray-200 p-8 mb-8">
+            <div className="bg-white rounded-3xl shadow-[var(--shadow-md)] border border-gray-200 p-8 mb-8">
               <h3 className="text-xl font-bold text-gray-900 mb-6">Contact Information</h3>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6 text-lg">
                 {isEditing ? (
@@ -180,7 +180,7 @@ export default function VendorDetailPage() {
               </div>
             </div>
 
-            <div className="bg-white rounded-3xl shadow-lg border border-gray-200 p-8">
+            <div className="bg-white rounded-3xl shadow-[var(--shadow-md)] border border-gray-200 p-8">
               <h3 className="text-2xl font-bold text-gray-900 mb-6">Assets Supplied ({assetsFromVendor.length})</h3>
               {assetsFromVendor.length === 0 ? (
                 <p className="text-gray-500 text-center py-12">No assets purchased from this vendor yet</p>
@@ -213,7 +213,7 @@ export default function VendorDetailPage() {
 
           <div className="space-y-8">
             {(current.services || isEditing) && (
-              <div className="bg-white rounded-3xl shadow-lg border border-gray-200 p-8">
+              <div className="bg-white rounded-3xl shadow-[var(--shadow-md)] border border-gray-200 p-8">
                 <h3 className="text-xl font-bold text-gray-900 mb-4">Services Provided</h3>
                 {isEditing ? (
                   <textarea value={current.services || ''} onChange={e => setEdited({ ...edited, services: e.target.value })} rows={5} className="w-full px-4 py-3 border rounded-xl resize-none" />
@@ -224,7 +224,7 @@ export default function VendorDetailPage() {
             )}
 
             {(current.notes || isEditing) && (
-              <div className="bg-white rounded-3xl shadow-lg border border-gray-200 p-8">
+              <div className="bg-white rounded-3xl shadow-[var(--shadow-md)] border border-gray-200 p-8">
                 <h3 className="text-xl font-bold text-gray-900 mb-4">Notes</h3>
                 {isEditing ? (
                   <textarea value={current.notes || ''} onChange={e => setEdited({ ...edited, notes: e.target.value })} rows={5} className="w-full px-4 py-3 border rounded-xl resize-none" />
@@ -234,7 +234,7 @@ export default function VendorDetailPage() {
               </div>
             )}
 
-            <div className="bg-white rounded-3xl shadow-lg border border-gray-200 p-8">
+            <div className="bg-white rounded-3xl shadow-[var(--shadow-md)] border border-gray-200 p-8">
               <h3 className="text-xl font-bold text-gray-900 mb-6">Vendor Since</h3>
               <div className="flex items-center gap-4">
                 <Calendar className="h-12 w-12 text-gray-500" />

@@ -72,7 +72,7 @@ export default function VendorsList() {
 
         {/* Stats */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-6 mb-10">
-          <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 text-center">
+          <div className="bg-white rounded-2xl shadow-[var(--shadow-md)] border border-gray-200 p-6 text-center">
             <Building2 className="h-10 w-10 text-gray-600 mx-auto mb-3" />
             <p className="text-3xl font-bold text-gray-900">{stats.total}</p>
             <p className="text-sm text-gray-600">Total Vendors</p>
@@ -95,7 +95,7 @@ export default function VendorsList() {
         </div>
 
         {/* Table */}
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
+        <div className="bg-white rounded-2xl shadow-[var(--shadow-md)] border border-gray-200 overflow-hidden">
           {loading ? (
             <div className="flex justify-center py-16">
               <Loader2 className="w-10 h-10 text-gray-400 animate-spin" />

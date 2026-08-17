@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
-import { MoreHorizontal, Plus, Search } from 'lucide-react';
+import { MoreHorizontal, Plus, Search, Check, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { hrApi, HR_QUERY, type HrEmployee } from '@/api/hr';
 import { Button } from '@/components/ui/button';
@@ -32,6 +32,7 @@ const HrEmployees = () => {
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
 
   const listQ = useQuery({ queryKey: ['hr', 'employees'], queryFn: () => hrApi.employees(), ...HR_QUERY });
+  const pendingQ = useQuery({ queryKey: ['hr', 'employees-pending'], queryFn: hrApi.pendingEmployees, ...HR_QUERY });
   const resetAddForm = () => {
     setOpen(false);
     setForm(emptyEmployeeForm);
@@ -88,6 +89,22 @@ const HrEmployees = () => {
       qc.invalidateQueries({ queryKey: ['hr'] });
       setUnsuspendOpen(false);
       setActionEmp(null);
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+  const acceptMut = useMutation({
+    mutationFn: (id: number) => hrApi.acceptEmployee(id),
+    onSuccess: (emp: HrEmployee) => {
+      toast.success(`${emp.full_name} is now an employee`);
+      qc.invalidateQueries({ queryKey: ['hr'] });
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+  const ignoreMut = useMutation({
+    mutationFn: (id: number) => hrApi.ignoreEmployee(id),
+    onSuccess: () => {
+      toast.success('Removed from the HR queue');
+      qc.invalidateQueries({ queryKey: ['hr'] });
     },
     onError: (e: Error) => toast.error(e.message),
   });
@@ -163,7 +180,7 @@ const HrEmployees = () => {
       />
 
       {open && (
-        <div className="mb-4 rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-5 shadow-[var(--shadow)]">
+        <div className="mb-4 rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-5 shadow-[var(--shadow-md)]">
           <h2 className="mb-4 text-base font-semibold text-[var(--text-primary)]">Add employee</h2>
           <EmployeeForm
             mode="add"
@@ -181,7 +198,48 @@ const HrEmployees = () => {
         </div>
       )}
 
-      <div className="mb-4 flex flex-col gap-3 rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-3 md:flex-row md:items-center">
+      {(pendingQ.data || []).length > 0 && (
+        <div className="mb-4 rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-5 shadow-[var(--shadow-md)]">
+          <p className="text-sm font-semibold text-[var(--text-primary)]">Waiting for HR</p>
+          <p className="mt-1 text-xs text-[var(--text-secondary)]">
+            New users from the Users page appear here. Accept to add them as employees, or ignore to keep them off the employee list.
+          </p>
+          <div className="mt-4 space-y-3">
+            {(pendingQ.data || []).map((e: HrEmployee) => (
+              <div key={e.id} className="vobiss-card flex flex-col gap-3 p-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex min-w-0 items-center gap-3">
+                  <Avatar name={e.full_name} src={e.photo_url} />
+                  <div className="min-w-0">
+                    <p className="font-medium text-[var(--text-primary)]">{e.full_name}</p>
+                    <p className="truncate text-xs text-[var(--text-muted)]">
+                      {[e.email, e.position || 'Staff', e.department].filter(Boolean).join(' · ')}
+                    </p>
+                  </div>
+                </div>
+                <div className="flex shrink-0 gap-2">
+                  <Button
+                    size="sm"
+                    disabled={acceptMut.isPending || ignoreMut.isPending}
+                    onClick={() => acceptMut.mutate(e.id)}
+                  >
+                    <Check className="h-4 w-4" /> Accept
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={acceptMut.isPending || ignoreMut.isPending}
+                    onClick={() => ignoreMut.mutate(e.id)}
+                  >
+                    <X className="h-4 w-4" /> Ignore
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="mb-4 flex flex-col gap-3 rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-3 md:flex-row md:items-center shadow-[var(--shadow-md)]">
         <div className="relative flex-1">
           <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
           <input className={`${inputClass} pl-9`} placeholder="Search name, email, role…" value={q} onChange={(e) => setQ(e.target.value)} />

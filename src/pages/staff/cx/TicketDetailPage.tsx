@@ -580,7 +580,7 @@ const TicketDetailPage: React.FC = () => {
             {backLabel}
           </button>
 
-          <div className="bg-white rounded-2xl shadow-lg border border-slate-200 p-6">
+          <div className="bg-white rounded-2xl shadow-[var(--shadow-md)] border border-slate-200 p-6">
             <div className="flex items-start justify-between flex-wrap gap-4">
               <div className="flex-1">
                 <div className="flex items-center gap-3 mb-3">
@@ -606,7 +606,7 @@ const TicketDetailPage: React.FC = () => {
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <div className="lg:col-span-2 space-y-6">
-            <div className="bg-white rounded-2xl shadow-lg border border-slate-200 p-6">
+            <div className="bg-white rounded-2xl shadow-[var(--shadow-md)] border border-slate-200 p-6">
               <h2 className="text-lg font-bold text-slate-900 mb-4 flex items-center gap-2">
                 <User className="w-5 h-5 text-indigo-600" />
                 Customer Information
@@ -651,7 +651,7 @@ const TicketDetailPage: React.FC = () => {
               </div>
             </div>
 
-            <div className="bg-white rounded-2xl shadow-lg border border-slate-200 p-6">
+            <div className="bg-white rounded-2xl shadow-[var(--shadow-md)] border border-slate-200 p-6">
               <h2 className="text-lg font-bold text-slate-900 mb-4 flex items-center gap-2">
                 <FileText className="w-5 h-5 text-indigo-600" />
                 Description
@@ -660,7 +660,7 @@ const TicketDetailPage: React.FC = () => {
             </div>
 
             {attachments.length > 0 && (
-              <div className="bg-white rounded-2xl shadow-lg border border-slate-200 p-6">
+              <div className="bg-white rounded-2xl shadow-[var(--shadow-md)] border border-slate-200 p-6">
                 <h2 className="text-lg font-bold text-slate-900 mb-4 flex items-center gap-2">
                   <ImageIcon className="w-5 h-5 text-indigo-600" />
                   Attachments
@@ -694,7 +694,7 @@ const TicketDetailPage: React.FC = () => {
             )}
 
             {linkedRequests.length > 0 && (
-              <div className="bg-white rounded-2xl shadow-lg border border-slate-200 p-6">
+              <div className="bg-white rounded-2xl shadow-[var(--shadow-md)] border border-slate-200 p-6">
                 <h2 className="text-lg font-bold text-slate-900 mb-4 flex items-center gap-2">
                   <FileText className="w-5 h-5 text-indigo-600" />
                   Linked Material Requests
@@ -764,7 +764,7 @@ const TicketDetailPage: React.FC = () => {
               )}
             </div>
 
-            <div className="bg-white rounded-2xl shadow-lg border border-slate-200 p-6">
+            <div className="bg-white rounded-2xl shadow-[var(--shadow-md)] border border-slate-200 p-6">
               <h2 className="text-lg font-bold text-slate-900 mb-4 flex items-center gap-2">
                 <Clock className="w-5 h-5 text-indigo-600" />
                 Timeline
@@ -800,7 +800,7 @@ const TicketDetailPage: React.FC = () => {
               </div>
             </div>
 
-            <div className="bg-white rounded-2xl shadow-lg border border-slate-200 p-6">
+            <div className="bg-white rounded-2xl shadow-[var(--shadow-md)] border border-slate-200 p-6">
               <h2 className="text-lg font-bold text-slate-900 mb-4 flex items-center gap-2">
                 <MessageSquare className="w-5 h-5 text-indigo-600" />
                 Add Comment
@@ -824,7 +824,7 @@ const TicketDetailPage: React.FC = () => {
           </div>
 
           <div className="space-y-6">
-            <div className="bg-white rounded-2xl shadow-lg border border-slate-200 p-6">
+            <div className="bg-white rounded-2xl shadow-[var(--shadow-md)] border border-slate-200 p-6">
               <h3 className="text-lg font-bold text-slate-900 mb-4">Quick Actions</h3>
               <div className="space-y-3">
                 <div>
@@ -875,7 +875,7 @@ const TicketDetailPage: React.FC = () => {
               </div>
             )}
 
-            <div className="bg-white rounded-2xl shadow-lg border border-slate-200 p-6">
+            <div className="bg-white rounded-2xl shadow-[var(--shadow-md)] border border-slate-200 p-6">
               <h3 className="text-lg font-bold text-slate-900 mb-4">Ticket Details</h3>
               <div className="space-y-3 text-sm">
                 <div>

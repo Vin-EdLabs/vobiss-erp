@@ -279,7 +279,7 @@ const RequestDetails: React.FC = () => {
             )}
           </div>
         </div>
-        <div className="bg-[var(--surface)] rounded-lg shadow-md border border-[var(--border)] p-8" id="screen-content">
+        <div className="bg-[var(--surface)] rounded-lg shadow-md border border-[var(--border)] p-8 shadow-[var(--shadow-md)]" id="screen-content">
           <div className="text-center mb-8 pb-8 border-b border-[var(--border)]">
             <img
               src="/vobiss-logo.png"

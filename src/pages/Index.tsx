@@ -234,7 +234,7 @@ const Index = () => {
     <RealtimeProvider>
       <VobiProvider>
       <div
-        className="app-shell min-h-screen bg-[var(--page-bg)] text-[var(--text-body)]"
+        className="app-shell min-h-dvh bg-[var(--page-bg)] text-[var(--text-body)]"
       >
         <PWAUpdateToast />
         <div

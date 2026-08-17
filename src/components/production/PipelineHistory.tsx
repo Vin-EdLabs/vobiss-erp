@@ -89,7 +89,7 @@ export function PipelineHistory({
             return (
               <article
                 key={r.id}
-                className="rounded-lg border border-[var(--border)] bg-[var(--surface)] p-3 shadow-[var(--shadow-sm)]"
+                className="rounded-lg border border-[var(--border)] bg-[var(--surface)] p-3 shadow-[var(--shadow-md)]"
               >
                 <div className="mb-2 flex flex-wrap items-center gap-2">
                   <span

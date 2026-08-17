@@ -59,7 +59,7 @@ export default function NewPersonPage() {
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="bg-white rounded-2xl shadow-lg border border-gray-200 p-6 space-y-4">
+        <form onSubmit={handleSubmit} className="bg-white rounded-2xl shadow-[var(--shadow-md)] border border-gray-200 p-6 space-y-4">
           <div className="bg-gradient-to-r from-blue-500 to-indigo-600 text-white rounded-xl p-4 text-center">
             <p className="text-sm opacity-90">Personnel Number (optional)</p>
             <input name="personnel_number" value={formData.personnel_number} onChange={handleChange} placeholder="e.g. PSN000001" className="mt-2 w-full max-w-xs mx-auto px-3 py-2 rounded font-mono text-gray-900 text-center" />

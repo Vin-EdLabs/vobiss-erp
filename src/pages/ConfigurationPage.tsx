@@ -200,7 +200,7 @@ export default function ConfigurationPage() {
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Material Requests — left column */}
-        <section className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden flex flex-col">
+        <section className="bg-white rounded-xl border border-gray-200 shadow-[var(--shadow-md)] overflow-hidden flex flex-col">
           <div className="px-6 py-4 bg-gray-50 border-b border-gray-200 flex items-center gap-2 shrink-0">
             <Package className="h-5 w-5 text-gray-600" />
             <h2 className="text-lg font-semibold text-gray-900">Material Requests</h2>
@@ -227,7 +227,7 @@ export default function ConfigurationPage() {
         </section>
 
         {/* Finance Requests — right column */}
-        <section className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden flex flex-col">
+        <section className="bg-white rounded-xl border border-gray-200 shadow-[var(--shadow-md)] overflow-hidden flex flex-col">
           <div className="px-6 py-4 bg-gray-50 border-b border-gray-200 flex items-center gap-2 shrink-0">
             <DollarSign className="h-5 w-5 text-gray-600" />
             <h2 className="text-lg font-semibold text-gray-900">Finance (Cash) Requests</h2>
@@ -343,7 +343,7 @@ export default function ConfigurationPage() {
         </section>
       </div>
 
-      <section className="mt-6 bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+      <section className="mt-6 bg-white rounded-xl border border-gray-200 shadow-[var(--shadow-md)] overflow-hidden">
         <div className="px-6 py-4 bg-indigo-50 border-b border-indigo-100 flex items-center gap-2">
           <Clock className="h-5 w-5 text-indigo-600" />
           <h2 className="text-lg font-semibold text-gray-900">Ticket Escalation Matrix</h2>

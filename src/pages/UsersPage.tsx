@@ -597,7 +597,7 @@ const UsersPage: React.FC = () => {
       />
 
       {success && (
-        <div className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-3 flex items-start gap-2">
+        <div className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-3 flex items-start gap-2 shadow-[var(--shadow-md)]">
           <CheckCircle className="w-4 h-4 text-[var(--primary)] mt-0.5 flex-shrink-0" />
           <p className="text-sm text-[var(--text-primary)]">{success}</p>
         </div>
@@ -610,7 +610,7 @@ const UsersPage: React.FC = () => {
         <StatCard icon={Search} label="Showing" value={filteredUsers.length} hint={searchQuery.trim() ? 'Matching search' : 'Full directory'} accentIndex={3} />
       </div>
 
-      <div className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] overflow-hidden">
+      <div className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] overflow-hidden shadow-[var(--shadow-md)]">
         <button
           type="button"
           onClick={() => setCreateOpen((open) => !open)}
@@ -819,7 +819,7 @@ const UsersPage: React.FC = () => {
         )}
       </div>
 
-      <div className="flex flex-col gap-3 rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-3 md:flex-row md:items-center">
+      <div className="flex flex-col gap-3 rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-3 md:flex-row md:items-center shadow-[var(--shadow-md)]">
         <div className="relative flex-1">
           <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-[var(--text-muted)]" />
           <input

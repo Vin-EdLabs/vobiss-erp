@@ -185,7 +185,7 @@ const UserWorkHistory: React.FC = () => {
         </div>
 
         {/* User Selection */}
-        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 mb-6">
+        <div className="bg-white rounded-xl shadow-[var(--shadow-md)] border border-slate-200 p-6 mb-6">
           <label className="block text-sm font-semibold text-slate-700 mb-3">
             Select User
           </label>
@@ -214,28 +214,28 @@ const UserWorkHistory: React.FC = () => {
           <>
             {/* Stats */}
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-              <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-5">
+              <div className="bg-white rounded-xl shadow-[var(--shadow-md)] border border-slate-200 p-5">
                 <div className="flex items-center justify-between mb-2">
                   <span className="text-sm font-medium text-slate-600">Total Tickets</span>
                   <FileText className="w-5 h-5 text-indigo-600" />
                 </div>
                 <div className="text-3xl font-black text-slate-900">{stats.total}</div>
               </div>
-              <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-5">
+              <div className="bg-white rounded-xl shadow-[var(--shadow-md)] border border-slate-200 p-5">
                 <div className="flex items-center justify-between mb-2">
                   <span className="text-sm font-medium text-slate-600">Resolved</span>
                   <CheckCircle2 className="w-5 h-5 text-green-600" />
                 </div>
                 <div className="text-3xl font-black text-green-700">{stats.resolved}</div>
               </div>
-              <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-5">
+              <div className="bg-white rounded-xl shadow-[var(--shadow-md)] border border-slate-200 p-5">
                 <div className="flex items-center justify-between mb-2">
                   <span className="text-sm font-medium text-slate-600">Active</span>
                   <AlertCircle className="w-5 h-5 text-yellow-600" />
                 </div>
                 <div className="text-3xl font-black text-yellow-700">{stats.active}</div>
               </div>
-              <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-5">
+              <div className="bg-white rounded-xl shadow-[var(--shadow-md)] border border-slate-200 p-5">
                 <div className="flex items-center justify-between mb-2">
                   <span className="text-sm font-medium text-slate-600">Avg Resolution</span>
                   <TrendingUp className="w-5 h-5 text-blue-600" />
@@ -261,7 +261,7 @@ const UserWorkHistory: React.FC = () => {
             </div>
 
             {/* Search */}
-            <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4 mb-6">
+            <div className="bg-white rounded-xl shadow-[var(--shadow-md)] border border-slate-200 p-4 mb-6">
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
                 <input
@@ -288,7 +288,7 @@ const UserWorkHistory: React.FC = () => {
                 </p>
               </div>
             ) : (
-              <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+              <div className="bg-white rounded-xl shadow-[var(--shadow-md)] border border-slate-200 overflow-hidden">
                 <div className="overflow-x-auto">
                   <table className="w-full">
                     <thead className="bg-gradient-to-r from-slate-800 to-indigo-800 text-white">

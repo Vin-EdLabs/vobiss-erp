@@ -56,7 +56,7 @@ const HrSelfForms = () => {
         {SELF_FORM_TYPES.map((item, i) => {
           const Icon = ICONS[i] || FileText;
           return (
-            <div key={item.type} className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4">
+            <div key={item.type} className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4 shadow-[var(--shadow-md)]">
               <div className="flex items-start gap-3">
                 <Icon className="mt-0.5 h-5 w-5 text-[var(--text-secondary)]" />
                 <div className="min-w-0 flex-1">
@@ -74,7 +74,7 @@ const HrSelfForms = () => {
       {reqQ.isLoading && !reqQ.data ? <TableSkeleton /> : (reqQ.data || []).length === 0 ? (
         <EmptyState title="No form requests yet" />
       ) : (
-        <div className="overflow-x-auto rounded-xl border bg-[var(--surface)]">
+        <div className="overflow-x-auto rounded-xl border bg-[var(--surface)] shadow-[var(--shadow-md)]">
           <table className="vobiss-table w-full text-sm">
             <thead>
               <tr className="border-b text-left text-xs uppercase text-[var(--text-secondary)]">

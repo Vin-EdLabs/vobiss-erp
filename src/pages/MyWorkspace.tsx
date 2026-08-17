@@ -275,7 +275,7 @@ const MyWorkspace: React.FC = () => {
             />
           );
           return m.link ? (
-            <Link key={m.label} to={m.link} className="block transition duration-150 hover:-translate-y-0.5">
+            <Link key={m.label} to={m.link} className="block">
               {card}
             </Link>
           ) : (
@@ -304,7 +304,7 @@ const MyWorkspace: React.FC = () => {
                 key={link.path}
                 to={link.path}
                 title={link.description}
-                className="group flex flex-col items-center gap-2 rounded-[var(--radius)] px-2 py-3 text-center transition duration-150 hover:-translate-y-0.5 hover:bg-[var(--surface-hover)]"
+                className="vobiss-card vobiss-card-interactive group flex flex-col items-center gap-2 px-2 py-3 text-center hover:bg-[var(--surface-hover)]"
               >
                 <span className="flex h-10 w-10 items-center justify-center rounded-full bg-[var(--primary)] text-white">
                   <Icon className="h-5 w-5" />

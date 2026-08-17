@@ -129,7 +129,7 @@ export default function PersonDetail() {
           <ArrowLeft className="h-5 w-5" /> Back to People
         </Link>
 
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden mb-8">
+        <div className="bg-white rounded-2xl shadow-[var(--shadow-md)] border border-gray-200 overflow-hidden mb-8">
           <div className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white p-8">
             <div className="flex items-center gap-6">
               <div className="w-20 h-20 bg-white/20 rounded-full flex items-center justify-center">
@@ -178,7 +178,7 @@ export default function PersonDetail() {
             </button>
           </div>
         ) : (
-          <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-8 mb-8">
+          <div className="bg-white rounded-2xl shadow-[var(--shadow-md)] border border-gray-200 p-8 mb-8">
             <h2 className="text-2xl font-bold text-gray-900 mb-6">Assign New Asset</h2>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div>
@@ -215,7 +215,7 @@ export default function PersonDetail() {
           </div>
         )}
 
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
+        <div className="bg-white rounded-2xl shadow-[var(--shadow-md)] border border-gray-200 overflow-hidden">
           <div className="p-6 border-b border-gray-200">
             <h2 className="text-2xl font-bold text-gray-900">Currently Assigned Assets</h2>
             <p className="text-gray-600 mt-1">{activeAssignments.length} asset{activeAssignments.length !== 1 ? 's' : ''} in possession</p>

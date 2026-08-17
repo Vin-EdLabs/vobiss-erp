@@ -645,7 +645,7 @@ const NOCAllTickets: React.FC = () => {
           </div>
 
           {/* Filters */}
-          <div className="bg-white rounded-lg border border-slate-200 p-3 mb-3 shadow-sm">
+          <div className="bg-white rounded-lg border border-slate-200 p-3 mb-3 shadow-[var(--shadow-md)]">
             <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
               <div className="md:col-span-2">
                 <label className="block text-xs font-semibold text-slate-500 mb-1">SEARCH</label>
@@ -708,7 +708,7 @@ const NOCAllTickets: React.FC = () => {
           </div>
 
           {/* Table */}
-          <div className="bg-white rounded-lg shadow-sm border border-slate-200 overflow-hidden">
+          <div className="bg-white rounded-lg shadow-[var(--shadow-md)] border border-slate-200 overflow-hidden">
             <div className="overflow-x-auto">
               <table className="w-full min-w-[1000px]">
                 <thead className="bg-gradient-to-r from-orange-800 to-red-800 text-white text-xs uppercase tracking-wider">
@@ -922,7 +922,7 @@ const NOCAllTickets: React.FC = () => {
 
                   {/* Info cards */}
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <div className="bg-white p-4 rounded-xl border border-slate-100 shadow-sm">
+                    <div className="bg-white p-4 rounded-xl border border-slate-100 shadow-[var(--shadow-md)]">
                       <h4 className="font-semibold text-slate-800 mb-3 flex items-center gap-2 text-sm">
                         <User className="w-4 h-4 text-orange-600" /> Customer Details
                       </h4>
@@ -934,7 +934,7 @@ const NOCAllTickets: React.FC = () => {
                       </div>
                     </div>
 
-                    <div className="bg-white p-4 rounded-xl border border-slate-100 shadow-sm">
+                    <div className="bg-white p-4 rounded-xl border border-slate-100 shadow-[var(--shadow-md)]">
                       <h4 className="font-semibold text-slate-800 mb-3 flex items-center gap-2 text-sm">
                         <Globe className="w-4 h-4 text-orange-600" /> Project / Source
                       </h4>
@@ -944,7 +944,7 @@ const NOCAllTickets: React.FC = () => {
                       </div>
                     </div>
 
-                    <div className="bg-white p-4 rounded-xl border border-slate-100 shadow-sm">
+                    <div className="bg-white p-4 rounded-xl border border-slate-100 shadow-[var(--shadow-md)]">
                       <h4 className="font-semibold text-slate-800 mb-3 flex items-center gap-2 text-sm">
                         <Clock className="w-4 h-4 text-orange-600" /> Status & Priority
                       </h4>
@@ -1010,7 +1010,7 @@ const NOCAllTickets: React.FC = () => {
                         : selectedTicket.attachments;
                       if (Array.isArray(attachments) && attachments.length > 0) {
                         return (
-                          <div className="bg-white rounded-xl p-5 border border-slate-100 shadow-sm">
+                          <div className="bg-white rounded-xl p-5 border border-slate-100 shadow-[var(--shadow-md)]">
                             <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2">
                               <FileText className="w-5 h-5 text-orange-600" /> Attachments ({attachments.length})
                             </h3>
@@ -1071,7 +1071,7 @@ const NOCAllTickets: React.FC = () => {
                   ) : null}
 
                   {/* Timeline */}
-                  <div className="bg-white rounded-xl p-5 border border-slate-100 shadow-sm">
+                  <div className="bg-white rounded-xl p-5 border border-slate-100 shadow-[var(--shadow-md)]">
                     <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2">
                       <Calendar className="w-5 h-5 text-orange-600" /> Activity Timeline
                     </h3>

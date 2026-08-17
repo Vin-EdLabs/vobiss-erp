@@ -170,7 +170,7 @@ const ItemsOut: React.FC = () => {
         </Button>
       </div>
 
-      <div className="bg-[var(--surface)] rounded-xl border border-[var(--border)] p-4 mb-6">
+      <div className="bg-[var(--surface)] rounded-xl border border-[var(--border)] p-4 mb-6 shadow-[var(--shadow-md)]">
         <div className="flex flex-wrap items-center gap-3">
           <div className="relative flex-1 min-w-[180px]">
             <Search className="h-4 w-4 absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)]" />
@@ -204,7 +204,7 @@ const ItemsOut: React.FC = () => {
           </TabsTrigger>
         </TabsList>
         <TabsContent value={activeTab} className="mt-0">
-          <div className="bg-[var(--surface)] rounded-xl border border-[var(--border)] overflow-hidden">
+          <div className="bg-[var(--surface)] rounded-xl border border-[var(--border)] overflow-hidden shadow-[var(--shadow-md)]">
             <div className="overflow-x-auto">
               <table className="min-w-full divide-y divide-[var(--border)] text-sm">
                 <thead className="bg-[var(--surface-secondary)]">

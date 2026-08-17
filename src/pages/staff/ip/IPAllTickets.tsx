@@ -558,7 +558,7 @@ const IPAllTickets: React.FC = () => {
           </div>
 
           {/* Filters - same as original */}
-          <div className="bg-white rounded-lg border border-slate-200 p-3 mb-3 shadow-sm">
+          <div className="bg-white rounded-lg border border-slate-200 p-3 mb-3 shadow-[var(--shadow-md)]">
             <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
               <div className="md:col-span-2">
                 <label className="block text-xs font-semibold text-slate-500 mb-1">SEARCH</label>
@@ -621,7 +621,7 @@ const IPAllTickets: React.FC = () => {
           </div>
 
           {/* Table - No IDs under names */}
-          <div className="bg-white rounded-lg shadow-sm border border-slate-200 overflow-hidden">
+          <div className="bg-white rounded-lg shadow-[var(--shadow-md)] border border-slate-200 overflow-hidden">
             <div className="overflow-x-auto">
               <table className="w-full">
                 <thead className="bg-gradient-to-r from-slate-800 to-indigo-800 text-white text-xs uppercase tracking-wider">
@@ -804,7 +804,7 @@ const IPAllTickets: React.FC = () => {
 
                   {/* Info Grid */}
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <div className="bg-white rounded-xl p-4 shadow-md border border-slate-100">
+                    <div className="bg-white rounded-xl p-4 shadow-md border border-slate-100 shadow-[var(--shadow-md)]">
                       <h3 className="font-semibold text-slate-800 mb-3 flex items-center gap-2 text-sm">
                         <User className="w-4 h-4 text-indigo-600" /> Customer Details
                       </h3>
@@ -815,7 +815,7 @@ const IPAllTickets: React.FC = () => {
                       </div>
                     </div>
 
-                    <div className="bg-white rounded-xl p-4 shadow-md border border-slate-100">
+                    <div className="bg-white rounded-xl p-4 shadow-md border border-slate-100 shadow-[var(--shadow-md)]">
                       <h3 className="font-semibold text-slate-800 mb-3 flex items-center gap-2 text-sm">
                         <MessageSquare className="w-4 h-4 text-indigo-600" /> Project Details
                       </h3>
@@ -829,7 +829,7 @@ const IPAllTickets: React.FC = () => {
                       </div>
                     </div>
 
-                    <div className="bg-white rounded-xl p-4 shadow-md border border-slate-100">
+                    <div className="bg-white rounded-xl p-4 shadow-md border border-slate-100 shadow-[var(--shadow-md)]">
                       <h3 className="font-semibold text-slate-800 mb-3 flex items-center gap-2 text-sm">
                         <Clock className="w-4 h-4 text-indigo-600" /> Status & Priority
                       </h3>
@@ -890,7 +890,7 @@ const IPAllTickets: React.FC = () => {
                   </div>
 
                   {/* Description */}
-                  <div className="bg-white rounded-xl p-4 shadow-md border border-slate-100">
+                  <div className="bg-white rounded-xl p-4 shadow-md border border-slate-100 shadow-[var(--shadow-md)]">
                     <h3 className="font-bold text-slate-800 mb-3 flex items-center gap-2 text-sm">
                       <MessageSquare className="w-4 h-4 text-indigo-600" /> Description
                     </h3>
@@ -898,7 +898,7 @@ const IPAllTickets: React.FC = () => {
                   </div>
 
                   {/* Timeline */}
-                  <div className="bg-white rounded-xl p-4 shadow-md border border-slate-100">
+                  <div className="bg-white rounded-xl p-4 shadow-md border border-slate-100 shadow-[var(--shadow-md)]">
                     <h3 className="font-bold text-slate-800 mb-3 flex items-center gap-2 text-sm">
                       <Calendar className="w-4 h-4 text-indigo-600" /> Timeline
                     </h3>

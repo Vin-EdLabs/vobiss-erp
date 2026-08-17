@@ -795,7 +795,7 @@ const AllTickets: React.FC = () => {
           </div>
 
           {/* Table */}
-          <div className="bg-white rounded-lg shadow-sm border border-slate-200 overflow-hidden">
+          <div className="bg-white rounded-lg shadow-[var(--shadow-md)] border border-slate-200 overflow-hidden">
             <div className="overflow-x-auto">
               <table className="w-full min-w-[1000px]">
                 <thead className="bg-gradient-to-r from-slate-800 to-indigo-800 text-white text-xs uppercase tracking-wider">
@@ -1005,7 +1005,7 @@ const AllTickets: React.FC = () => {
                       </div>
                     </div>
 
-                    <div className="bg-white p-4 rounded-xl border border-slate-100 shadow-sm">
+                    <div className="bg-white p-4 rounded-xl border border-slate-100 shadow-[var(--shadow-md)]">
                       <h4 className="font-semibold text-slate-800 mb-3 flex items-center gap-2 text-sm">
                         <Clock className="w-4 h-4 text-indigo-600" /> Status & Priority
                       </h4>
@@ -1071,7 +1071,7 @@ const AllTickets: React.FC = () => {
                         : selectedTicket.attachments;
                       if (Array.isArray(attachments) && attachments.length > 0) {
                         return (
-                          <div className="bg-white rounded-xl p-5 border border-slate-100 shadow-sm">
+                          <div className="bg-white rounded-xl p-5 border border-slate-100 shadow-[var(--shadow-md)]">
                             <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2">
                               <FileText className="w-5 h-5 text-indigo-600" /> Attachments ({attachments.length})
                             </h3>

@@ -105,7 +105,7 @@ export default function ProductionUnitsPage() {
 
       <form
         onSubmit={handleCreate}
-        className="mb-8 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-6 shadow-[var(--shadow-sm)]"
+        className="mb-8 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-6 shadow-[var(--shadow-md)]"
       >
         <h2 className="mb-4 font-semibold text-[var(--text-primary)]">Add unit</h2>
         <div className="grid gap-4 sm:grid-cols-3">
@@ -132,7 +132,7 @@ export default function ProductionUnitsPage() {
         </div>
       </form>
 
-      <div className="overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow-sm)]">
+      <div className="overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow-md)]">
         <table className="w-full text-sm">
           <thead className="bg-[var(--surface-secondary)] text-left text-[var(--text-secondary)]">
             <tr>

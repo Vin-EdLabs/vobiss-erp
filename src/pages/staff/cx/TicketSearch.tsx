@@ -140,7 +140,7 @@ const TicketSearch: React.FC = () => {
         </div>
 
         {/* Search Box */}
-        <div className="bg-white rounded-xl shadow-lg border border-slate-200 p-6 mb-6">
+        <div className="bg-white rounded-xl shadow-[var(--shadow-md)] border border-slate-200 p-6 mb-6">
           <div className="flex gap-4">
             <div className="flex-1 relative">
               <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
@@ -225,21 +225,21 @@ const TicketSearch: React.FC = () => {
 
             {/* Stats Grid */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-5">
+              <div className="bg-white rounded-xl shadow-[var(--shadow-md)] border border-slate-200 p-5">
                 <div className="flex items-center justify-between mb-2">
                   <span className="text-sm font-medium text-slate-600">Total Activities</span>
                   <FileText className="w-5 h-5 text-indigo-600" />
                 </div>
                 <div className="text-3xl font-black text-slate-900">{ticketDetails.totalActivities}</div>
               </div>
-              <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-5">
+              <div className="bg-white rounded-xl shadow-[var(--shadow-md)] border border-slate-200 p-5">
                 <div className="flex items-center justify-between mb-2">
                   <span className="text-sm font-medium text-slate-600">Users Involved</span>
                   <Users className="w-5 h-5 text-purple-600" />
                 </div>
                 <div className="text-3xl font-black text-slate-900">{ticketDetails.usersWorkedOn.length}</div>
               </div>
-              <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-5">
+              <div className="bg-white rounded-xl shadow-[var(--shadow-md)] border border-slate-200 p-5">
                 <div className="flex items-center justify-between mb-2">
                   <span className="text-sm font-medium text-slate-600">Status</span>
                   {ticketDetails.ticket.status === 'CLOSED' || ticketDetails.ticket.status === 'RESOLVED' ? (
@@ -255,7 +255,7 @@ const TicketSearch: React.FC = () => {
             </div>
 
             {/* Ticket Info */}
-            <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+            <div className="bg-white rounded-xl shadow-[var(--shadow-md)] border border-slate-200 p-6">
               <h3 className="text-xl font-bold text-slate-900 mb-4">Ticket Information</h3>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div>
@@ -285,7 +285,7 @@ const TicketSearch: React.FC = () => {
 
             {/* Users Who Worked On */}
             {ticketDetails.usersWorkedOn.length > 0 && (
-              <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+              <div className="bg-white rounded-xl shadow-[var(--shadow-md)] border border-slate-200 p-6">
                 <h3 className="text-xl font-bold text-slate-900 mb-4 flex items-center gap-2">
                   <Users className="w-5 h-5 text-indigo-600" />
                   Users Who Worked On This Ticket
@@ -319,7 +319,7 @@ const TicketSearch: React.FC = () => {
             )}
 
             {/* Timeline */}
-            <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+            <div className="bg-white rounded-xl shadow-[var(--shadow-md)] border border-slate-200 p-6">
               <h3 className="text-xl font-bold text-slate-900 mb-4 flex items-center gap-2">
                 <Clock className="w-5 h-5 text-indigo-600" />
                 Complete Timeline

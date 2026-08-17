@@ -219,7 +219,7 @@ const FinanceApprovals: React.FC = () => {
         <p className="text-gray-600">Review and release cash advance requests</p>
       </div>
 
-      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 mb-6">
+      <div className="bg-white rounded-xl shadow-[var(--shadow-md)] border border-gray-200 p-6 mb-6">
         <div className="flex items-center gap-4">
           <Search className="h-5 w-5 text-gray-400" />
           <Input
@@ -248,7 +248,7 @@ const FinanceApprovals: React.FC = () => {
         </TabsList>
 
         <TabsContent value={activeTab}>
-          <div className="bg-white rounded-xl shadow overflow-hidden border border-gray-200">
+          <div className="bg-white rounded-xl shadow overflow-hidden border border-gray-200 shadow-[var(--shadow-md)]">
             <div className="overflow-x-auto">
               <table className="w-full">
                 <thead className="bg-gradient-to-r from-gray-50 to-gray-100">

@@ -138,7 +138,7 @@ export default function AssetDetailPage() {
         <div className="flex items-center gap-4">
         <button
           onClick={() => navigate('/assets')}
-          className="p-3 bg-white rounded-xl shadow-sm border border-gray-200 hover:shadow-md transition"
+          className="p-3 bg-white rounded-xl shadow-[var(--shadow-md)] border border-gray-200 hover:shadow-md transition"
         >
           <ArrowLeft className="h-6 w-6 text-gray-700" />
         </button>
@@ -200,7 +200,7 @@ export default function AssetDetailPage() {
         {/* Left: Photos + Status */}
         <div className="lg:col-span-2 space-y-8">
         {/* Photo Gallery */}
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
+        <div className="bg-white rounded-2xl shadow-[var(--shadow-md)] border border-gray-200 overflow-hidden">
           {(current.photos || []).length > 0 ? (
           <>
             <img
@@ -232,7 +232,7 @@ export default function AssetDetailPage() {
         </div>
 
         {/* Status Card */}
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-8">
+        <div className="bg-white rounded-2xl shadow-[var(--shadow-md)] border border-gray-200 p-8">
           <div className="flex items-center justify-between gap-6">
           <div>
             <p className="text-sm text-gray-600">Current Status</p>
@@ -298,7 +298,7 @@ export default function AssetDetailPage() {
 
         {/* Right: Details */}
         <div className="space-y-6">
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6">
+        <div className="bg-white rounded-2xl shadow-[var(--shadow-md)] border border-gray-200 p-6">
           <h2 className="text-xl font-bold text-gray-900 mb-5">Asset Details</h2>
           <div className="space-y-5">
           <div>
@@ -374,7 +374,7 @@ export default function AssetDetailPage() {
 
         {/* Purchase Information */}
         {(current.purchase_date || current.cost || current.vendor_name || current.warranty_until) && (
-          <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6">
+          <div className="bg-white rounded-2xl shadow-[var(--shadow-md)] border border-gray-200 p-6">
           <h2 className="text-xl font-bold text-gray-900 mb-5 flex items-center gap-2">
             <DollarSign className="h-6 w-6" />
             Purchase Information
@@ -457,7 +457,7 @@ export default function AssetDetailPage() {
         )}
 
         {/* Timeline */}
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6">
+        <div className="bg-white rounded-2xl shadow-[var(--shadow-md)] border border-gray-200 p-6">
           <h2 className="text-xl font-bold text-gray-900 mb-5">Timeline</h2>
           <div className="space-y-4 text-sm">
           <div className="flex items-center gap-3">

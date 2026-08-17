@@ -40,7 +40,7 @@ export function EmploymentRecord({
   const printedAt = new Date().toLocaleString();
 
   return (
-    <div className="employment-print-sheet rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-6 shadow-[var(--shadow)]">
+    <div className="employment-print-sheet rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-6 shadow-[var(--shadow-md)]">
       <style>{`
         @media print {
           @page { margin: 14mm; }

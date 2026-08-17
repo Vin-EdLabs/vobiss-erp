@@ -64,7 +64,7 @@ const HrDocuments = () => {
         actions={<Button onClick={() => setOpen(true)}>Upload document</Button>}
       />
 
-      <div className="mb-4 grid gap-3 rounded-xl border bg-white p-3 shadow-card md:grid-cols-3">
+      <div className="mb-4 grid gap-3 rounded-xl border bg-white p-3 shadow-[var(--shadow-md)] md:grid-cols-3">
         <input className={inputClass} placeholder="Search documents…" value={q} onChange={(e) => setQ(e.target.value)} />
         <select className={inputClass} value={employeeId} onChange={(e) => setEmployeeId(e.target.value)}>
           <option value="">All employees</option>

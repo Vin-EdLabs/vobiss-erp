@@ -91,7 +91,7 @@ export default function MaintenanceList() {
         )}
         {/* Stats */}
         <div className="grid grid-cols-2 md:grid-cols-5 gap-6 mb-10">
-          <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 text-center">
+          <div className="bg-white rounded-2xl shadow-[var(--shadow-md)] border border-gray-200 p-6 text-center">
             <Wrench className="h-10 w-10 text-gray-600 mx-auto mb-3" />
             <p className="text-3xl font-bold text-gray-900">{stats.total}</p>
             <p className="text-sm text-gray-600">Total Cases</p>
@@ -111,7 +111,7 @@ export default function MaintenanceList() {
             <p className="text-3xl font-bold text-emerald-700">{stats.completed}</p>
             <p className="text-sm text-emerald-600">Completed</p>
           </div>
-          <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 text-center">
+          <div className="bg-white rounded-2xl shadow-[var(--shadow-md)] border border-gray-200 p-6 text-center">
             <DollarSign className="h-10 w-10 text-gray-600 mx-auto mb-3" />
             <p className="text-3xl font-bold text-gray-900">₱{stats.totalCost.toLocaleString()}</p>
             <p className="text-sm text-gray-600">Total Cost</p>
@@ -119,7 +119,7 @@ export default function MaintenanceList() {
         </div>
 
         {/* Table */}
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
+        <div className="bg-white rounded-2xl shadow-[var(--shadow-md)] border border-gray-200 overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full">
               <thead className="bg-gray-50 border-b border-gray-200">

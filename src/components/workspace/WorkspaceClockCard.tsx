@@ -1,14 +1,17 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { hrSelfApi, HR_SELF_QUERY } from '@/api/hrSelf';
 import { Button } from '@/components/ui/button';
+import { OutOfRangeMap, parseOutOfRangeError } from '@/components/hr/OutOfRangeMap';
 import { getCurrentPosition } from '@/lib/hrChartHelpers';
 
 export default function WorkspaceClockCard() {
   const qc = useQueryClient();
   const [busy, setBusy] = useState(false);
+  const [outOfRange, setOutOfRange] = useState<ReturnType<typeof parseOutOfRangeError>>(null);
+  const lastCoordsRef = useRef<{ latitude: number; longitude: number } | null>(null);
 
   const meQ = useQuery({ queryKey: ['hr-self', 'me'], queryFn: hrSelfApi.me, ...HR_SELF_QUERY });
   const todayQ = useQuery({
@@ -26,19 +29,30 @@ export default function WorkspaceClockCard() {
   const clockMut = useMutation({
     mutationFn: async (kind: 'in' | 'out') => {
       setBusy(true);
+      setOutOfRange(null);
       const coords = await getCurrentPosition();
+      lastCoordsRef.current = coords;
       return kind === 'in'
         ? hrSelfApi.clockIn(coords.latitude, coords.longitude)
         : hrSelfApi.clockOut(coords.latitude, coords.longitude);
     },
     onSuccess: (_data, kind) => {
       setBusy(false);
+      setOutOfRange(null);
       toast.success(kind === 'in' ? 'Clocked in' : 'Clocked out');
       qc.invalidateQueries({ queryKey: ['hr-self', 'attendance'] });
       qc.invalidateQueries({ queryKey: ['hr-self', 'attendance-today'] });
     },
     onError: (e: Error) => {
       setBusy(false);
+      const parsed = parseOutOfRangeError(e, {
+        coords: lastCoordsRef.current,
+        office: todayQ.data?.office,
+      });
+      if (parsed) {
+        setOutOfRange(parsed);
+        return;
+      }
       toast.error(e.message || 'Could not update attendance');
     },
   });
@@ -78,6 +92,22 @@ export default function WorkspaceClockCard() {
           </Button>
         )}
       </div>
+      {outOfRange && (
+        <OutOfRangeMap
+          userLat={outOfRange.userLat}
+          userLng={outOfRange.userLng}
+          officeLat={outOfRange.officeLat}
+          officeLng={outOfRange.officeLng}
+          officeRadius={outOfRange.officeRadius}
+          officeName={outOfRange.officeName}
+          distanceMeters={outOfRange.distanceMeters}
+          onRetry={() => {
+            setOutOfRange(null);
+            clockMut.mutate('in');
+          }}
+          onDismiss={() => setOutOfRange(null)}
+        />
+      )}
     </section>
   );
 }

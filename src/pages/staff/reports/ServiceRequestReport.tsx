@@ -181,7 +181,7 @@ export default function ServiceRequestReport() {
   return (
     <div className="min-h-full bg-gradient-to-br from-slate-50 via-white to-cyan-50/60 p-6">
       <div className="mx-auto max-w-7xl space-y-6">
-        <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
+        <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[var(--shadow-md)]">
           <div className="bg-gradient-to-r from-cyan-700 via-blue-700 to-indigo-800 p-6 text-white">
             <p className="text-xs font-semibold uppercase tracking-widest text-cyan-100">Report System</p>
             <div className="mt-2 flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
@@ -392,7 +392,7 @@ function ChartCard({
   children: React.ReactNode;
 }) {
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+    <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-[var(--shadow-md)]">
       <div className="mb-4">
         <h2 className="text-base font-semibold text-slate-900">{title}</h2>
         <p className="text-xs text-slate-500">{subtitle}</p>

@@ -1493,6 +1493,13 @@ export async function createUser(firstName, lastName, email, role, userId, ip, o
       }
     }
 
+    try {
+      const { queueUserForHrReview } = await import('./utils/hrShared.js');
+      await queueUserForHrReview(createdUser);
+    } catch (hrErr) {
+      console.warn('[createUser] HR pending queue failed:', hrErr.message);
+    }
+
     return createdUser;
   } catch (error) {
     if (!committed) {

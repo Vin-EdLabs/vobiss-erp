@@ -112,7 +112,7 @@ export default function ReportsHub() {
         </div>
 
         {visibleReports.length === 0 ? (
-          <p className="rounded-xl border border-slate-200 bg-white p-8 text-center text-slate-600">
+          <p className="rounded-xl border border-slate-200 bg-white p-8 text-center text-slate-600 shadow-[var(--shadow-md)]">
             No reports are available for your role. Contact an administrator if you need access.
           </p>
         ) : (
@@ -121,7 +121,7 @@ export default function ReportsHub() {
               <Link
                 key={card.path}
                 to={card.path}
-                className="group relative overflow-hidden rounded-2xl border border-slate-200 bg-white p-6 shadow-sm transition hover:border-indigo-200 hover:shadow-lg"
+                className="group relative overflow-hidden rounded-2xl border border-slate-200 bg-white p-6 shadow-[var(--shadow-md)] transition hover:border-indigo-200 hover:shadow-[var(--shadow-md)]"
               >
                 <div
                   className={`mb-4 inline-flex rounded-xl bg-gradient-to-br ${card.accent} p-3 text-white shadow`}
@@ -139,7 +139,7 @@ export default function ReportsHub() {
           </div>
         )}
 
-        <div className="mt-10 rounded-2xl border border-slate-200 bg-white/80 p-5">
+        <div className="mt-10 rounded-2xl border border-slate-200 bg-white/80 p-5 shadow-[var(--shadow-md)]">
           <div className="flex items-start gap-3">
             <BarChart3 className="mt-0.5 h-5 w-5 text-indigo-500" />
             <div className="text-sm text-slate-600">

@@ -64,7 +64,7 @@ const HrSelfLeave = () => {
       <HrPageHeader title="Leave Request" description="Apply for leave and track your requests." />
       <div className="grid gap-4 lg:grid-cols-2">
         <div className="space-y-4">
-          <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-5">
+          <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-5 shadow-[var(--shadow-md)]">
             <h2 className="text-sm font-semibold text-[var(--text-primary)]">Apply for Leave</h2>
             <form
               className="mt-4 space-y-3"
@@ -101,7 +101,7 @@ const HrSelfLeave = () => {
             </form>
           </div>
 
-          <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-5">
+          <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-5 shadow-[var(--shadow-md)]">
             <h2 className="text-sm font-semibold text-[var(--text-primary)]">Leave balances</h2>
             <div className="mt-3 space-y-3">
               {balances.map((b: any) => {
@@ -122,7 +122,7 @@ const HrSelfLeave = () => {
           </div>
         </div>
 
-        <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-5">
+        <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-5 shadow-[var(--shadow-md)]">
           <h2 className="text-sm font-semibold text-[var(--text-primary)]">My Leave History</h2>
           {reqQ.isLoading && !reqQ.data ? <TableSkeleton rows={4} /> : history.length === 0 ? (
             <EmptyState title="No leave requests yet" />

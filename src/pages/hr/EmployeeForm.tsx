@@ -116,7 +116,7 @@ export function EmployeeForm({
 
   return (
     <form className="space-y-4" onSubmit={onSubmit}>
-      <div className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-4 space-y-4">
+      <div className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-4 space-y-4 shadow-[var(--shadow-md)]">
         <p className="text-sm font-semibold text-[var(--text-primary)]">Profile</p>
         <Field label="Full name" required><input className={inputClass} required value={form.full_name} onChange={(e) => update({ full_name: e.target.value })} /></Field>
         <Field label="Photo">
@@ -169,7 +169,7 @@ export function EmployeeForm({
         </Field>
       </div>
 
-      <div className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-4 space-y-4">
+      <div className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-4 space-y-4 shadow-[var(--shadow-md)]">
         <p className="text-sm font-semibold text-[var(--text-primary)]">Employment</p>
         <div className="grid gap-3 sm:grid-cols-2">
           <Field label="Employment type">
@@ -227,7 +227,7 @@ export function EmployeeForm({
         </div>
       </div>
 
-      <div className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-4 space-y-4">
+      <div className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-4 space-y-4 shadow-[var(--shadow-md)]">
         <p className="text-sm font-semibold text-[var(--text-primary)]">System access</p>
         <Field label="System Role">
           <select
@@ -252,7 +252,7 @@ export function EmployeeForm({
       </div>
 
       {mode === 'add' && documents && setDocuments && (
-        <div className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-4 space-y-4">
+        <div className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-4 space-y-4 shadow-[var(--shadow-md)]">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
               <p className="text-sm font-semibold text-[var(--text-primary)]">Documents</p>

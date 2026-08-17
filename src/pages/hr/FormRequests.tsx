@@ -48,7 +48,7 @@ const HrFormRequests = () => {
   return (
     <div>
       <HrPageHeader title="Form Requests" description="Review employee letters, advances, transfers, and grievances." />
-      <div className="mb-4 grid gap-3 rounded-xl border bg-[var(--surface)] p-3 md:grid-cols-2">
+      <div className="mb-4 grid gap-3 rounded-xl border bg-[var(--surface)] p-3 md:grid-cols-2 shadow-[var(--shadow-md)]">
         <select className={inputClass} value={filters.status} onChange={(e) => setFilters({ ...filters, status: e.target.value })}>
           <option value="">All</option>
           <option value="pending">Pending</option>
@@ -64,7 +64,7 @@ const HrFormRequests = () => {
       {listQ.isLoading && !listQ.data ? <TableSkeleton /> : rows.length === 0 ? (
         <EmptyState title="No form requests" />
       ) : (
-        <div className="rounded-xl border bg-[var(--surface)]">
+        <div className="rounded-xl border bg-[var(--surface)] shadow-[var(--shadow-md)]">
           <Accordion type="single" collapsible className="w-full">
             {rows.map((r: any) => (
               <AccordionItem key={r.id} value={String(r.id)} className="px-4">

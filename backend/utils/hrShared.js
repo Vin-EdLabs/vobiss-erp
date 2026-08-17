@@ -383,7 +383,19 @@ export async function getEmployeeByUserId(userId) {
   return result.rows[0] || null;
 }
 
-export async function ensureEmployeeForUser(user) {
+function staffFullName(user) {
+  const name = `${user?.first_name || ''} ${user?.last_name || ''}`.trim();
+  return name || user?.username || 'Staff';
+}
+
+export function isAcceptedHrEmployee(emp) {
+  if (!emp) return false;
+  const review = String(emp.hr_review_status || 'accepted').toLowerCase();
+  const status = String(emp.status || '').toLowerCase();
+  return review === 'accepted' && status !== 'ignored' && status !== 'pending';
+}
+
+export async function queueUserForHrReview(user) {
   const userId = Number(user?.id);
   if (!userId) return null;
   const role = String(user?.role || user?.main_role || '').toLowerCase();
@@ -392,25 +404,48 @@ export async function ensureEmployeeForUser(user) {
   const existing = await getEmployeeByUserId(userId);
   if (existing) return existing;
 
-  const { rows } = await pool.query(
-    `SELECT id, first_name, last_name, username, email, unit, position
-     FROM users WHERE id = $1 AND deleted_at IS NULL`,
-    [userId]
-  );
-  const u = rows[0];
-  if (!u) return null;
-
-  const fullName = `${u.first_name || ''} ${u.last_name || ''}`.trim() || u.username || 'Staff';
+  const fullName = staffFullName(user);
   const inserted = await pool.query(
-    `INSERT INTO hr_employees (user_id, full_name, email, department, position, employment_type, start_date, status)
-     SELECT $1, $2, $3, $4, $5, 'full-time', CURRENT_DATE, 'active'
+    `INSERT INTO hr_employees (user_id, full_name, email, department, position, employment_type, start_date, status, hr_review_status)
+     SELECT $1, $2, $3, $4, $5, 'full-time', CURRENT_DATE, 'pending', 'pending'
      WHERE NOT EXISTS (SELECT 1 FROM hr_employees WHERE user_id = $1)
      RETURNING *`,
-    [u.id, fullName, u.email || null, u.unit || null, u.position || null]
+    [userId, fullName, user.email || null, user.unit || user.department || null, user.position || 'Staff']
   );
-  const emp = inserted.rows[0] || (await getEmployeeByUserId(userId));
-  if (emp?.id) await ensureLeaveBalances(pool, emp.id);
-  return emp || null;
+  return inserted.rows[0] || (await getEmployeeByUserId(userId));
+}
+
+export async function syncPendingEmployeesFromUsers() {
+  await pool.query(
+    `INSERT INTO hr_employees (user_id, full_name, email, department, position, employment_type, start_date, status, hr_review_status)
+     SELECT
+       u.id,
+       COALESCE(NULLIF(TRIM(CONCAT(COALESCE(u.first_name, ''), ' ', COALESCE(u.last_name, ''))), ''), u.username, 'Staff'),
+       u.email,
+       COALESCE(u.unit, u.department),
+       COALESCE(NULLIF(TRIM(u.position), ''), 'Staff'),
+       'full-time',
+       CURRENT_DATE,
+       'pending',
+       'pending'
+     FROM users u
+     WHERE u.deleted_at IS NULL
+       AND LOWER(COALESCE(u.role, u.main_role, '')) <> 'customer'
+       AND NOT EXISTS (SELECT 1 FROM hr_employees e WHERE e.user_id = u.id)`
+  );
+}
+
+export async function ensureEmployeeForUser(user) {
+  const userId = Number(user?.id);
+  if (!userId) return null;
+  const role = String(user?.role || user?.main_role || '').toLowerCase();
+  if (role === 'customer') return null;
+
+  const existing = await getEmployeeByUserId(userId);
+  if (existing) return isAcceptedHrEmployee(existing) ? existing : null;
+
+  await queueUserForHrReview(user);
+  return null;
 }
 
 export { logHrActivity };

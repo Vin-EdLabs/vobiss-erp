@@ -55,7 +55,7 @@ export function RemarksThread({
               filtered.map((r) => (
                 <div
                   key={r.id}
-                  className="rounded-lg border border-[var(--border)] bg-[var(--surface)] p-3 shadow-[var(--shadow-sm)]"
+                  className="rounded-lg border border-[var(--border)] bg-[var(--surface)] p-3 shadow-[var(--shadow-md)]"
                 >
                   <div className="mb-1 flex flex-wrap items-baseline justify-between gap-2">
                     <span className="text-sm font-semibold text-[var(--text-primary)]">{r.author_name}</span>

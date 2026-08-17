@@ -457,7 +457,7 @@ const TicketDetail = () => {
                           <div className="flex-shrink-0 w-10 h-10 rounded-full bg-indigo-600 text-white flex items-center justify-center shadow z-10">
                             {idx === 0 ? <FileText className="h-5 w-5" /> : <User className="h-5 w-5" />}
                           </div>
-                          <div className="flex-1 bg-white border rounded-lg p-4 shadow-sm">
+                          <div className="flex-1 bg-white border rounded-lg p-4 shadow-[var(--shadow-md)]">
                             <div className="flex justify-between mb-2">
                               <p className="font-medium text-gray-900 text-xs">{entry.actor_role}</p>
                               <p className="text-xs text-gray-500">{formatDateTime(entry.created_at)}</p>

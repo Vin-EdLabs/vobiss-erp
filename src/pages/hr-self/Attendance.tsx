@@ -1,11 +1,11 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ChevronLeft, ChevronRight, MapPin } from 'lucide-react';
 import { hrSelfApi, HR_SELF_QUERY } from '@/api/hrSelf';
 import { Button } from '@/components/ui/button';
 import { EmptyState, HrPageHeader, StatCard, StatusBadge, TableSkeleton } from '@/pages/hr/components';
 import { AttendanceMonthGrid, attendanceSummary, expandApprovedLeaveDates } from '@/pages/hr/AttendanceMonthGrid';
-import { OfficeLocationMap } from '@/components/hr/OfficeLocationMap';
+import { OutOfRangeMap, parseOutOfRangeError } from '@/components/hr/OutOfRangeMap';
 import { formatDuration, formatTime12, getCurrentPosition, hoursWorked } from '@/lib/hrChartHelpers';
 
 function useNow() {
@@ -26,7 +26,9 @@ const HrSelfAttendance = () => {
   const [year, setYear] = useState(accraNow.getFullYear());
   const [tableView, setTableView] = useState(false);
   const [locError, setLocError] = useState<any>(null);
+  const [outOfRange, setOutOfRange] = useState<ReturnType<typeof parseOutOfRangeError>>(null);
   const [busyLabel, setBusyLabel] = useState('');
+  const lastCoordsRef = useRef<{ latitude: number; longitude: number } | null>(null);
 
   const attQ = useQuery({
     queryKey: ['hr-self', 'attendance', month, year],
@@ -75,20 +77,28 @@ const HrSelfAttendance = () => {
   const clockMut = useMutation({
     mutationFn: async (kind: 'in' | 'out') => {
       setLocError(null);
+      setOutOfRange(null);
       setBusyLabel('Getting your location...');
       const coords = await getCurrentPosition();
+      lastCoordsRef.current = coords;
       setBusyLabel(kind === 'in' ? 'Clocking in...' : 'Clocking out...');
       return kind === 'in'
-        ? hrSelfApi.clockIn(coords.latitude, coords.longitude)
-        : hrSelfApi.clockOut(coords.latitude, coords.longitude);
+        ? await hrSelfApi.clockIn(coords.latitude, coords.longitude)
+        : await hrSelfApi.clockOut(coords.latitude, coords.longitude);
     },
     onSuccess: () => {
       setBusyLabel('');
+      setOutOfRange(null);
       invalidate();
     },
     onError: (e: any) => {
       setBusyLabel('');
-      setLocError(e);
+      const parsed = parseOutOfRangeError(e, {
+        coords: lastCoordsRef.current,
+        office: todayQ.data?.office,
+      });
+      if (parsed) setOutOfRange(parsed);
+      else setLocError(e);
     },
   });
 
@@ -167,23 +177,25 @@ const HrSelfAttendance = () => {
           )}
         </div>
 
-        {locError && (
+        {outOfRange && (
+          <OutOfRangeMap
+            userLat={outOfRange.userLat}
+            userLng={outOfRange.userLng}
+            officeLat={outOfRange.officeLat}
+            officeLng={outOfRange.officeLng}
+            officeRadius={outOfRange.officeRadius}
+            officeName={outOfRange.officeName}
+            distanceMeters={outOfRange.distanceMeters}
+            onRetry={() => {
+              setOutOfRange(null);
+              clockMut.mutate('in');
+            }}
+            onDismiss={() => setOutOfRange(null)}
+          />
+        )}
+        {!outOfRange && locError && (
           <div className="mt-4 rounded-[var(--radius)] border border-[var(--accent-red)] bg-[var(--accent-red-light)] p-4">
             <p className="text-sm font-semibold text-[var(--danger-text)]">{locError.message || locError.error}</p>
-            {locError.distance != null && (
-              <p className="mt-1 text-sm text-[var(--danger-text)]">
-                You are {locError.distance} meters away from the office. You must be within {locError.required}m to clock in.
-              </p>
-            )}
-            {locError.office && locError.current && (
-              <div className="mt-3">
-                <OfficeLocationMap
-                  office={{ lat: Number(locError.office.latitude), lng: Number(locError.office.longitude), name: locError.office.name }}
-                  current={{ lat: Number(locError.current.latitude), lng: Number(locError.current.longitude) }}
-                  radiusMeters={Number(locError.required || 100)}
-                />
-              </div>
-            )}
           </div>
         )}
       </div>

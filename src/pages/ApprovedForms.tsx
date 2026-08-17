@@ -269,7 +269,7 @@ const ApprovedForms: React.FC = () => {
         </p>
       </div>
 
-      <div className="bg-[var(--surface)] rounded-xl p-6 shadow-sm border border-[var(--border)] mb-6">
+      <div className="bg-[var(--surface)] rounded-xl p-6 shadow-[var(--shadow-md)] border border-[var(--border)] mb-6">
         <div className="flex items-center">
           <Search className="h-5 w-5 text-[var(--text-muted)] mr-3" />
           <Input
@@ -291,7 +291,7 @@ const ApprovedForms: React.FC = () => {
         </TabsList>
 
         <TabsContent value={activeTab}>
-          <div className="bg-[var(--surface)] rounded-xl shadow border overflow-hidden">
+          <div className="bg-[var(--surface)] rounded-xl shadow border overflow-hidden shadow-[var(--shadow-md)]">
             {filteredRequests.length === 0 ? (
               <div className="text-center py-16 text-[var(--text-muted)]">
                 {activeTab === 'approved'
@@ -360,7 +360,7 @@ const ApprovedForms: React.FC = () => {
 
       {/* Finalize Form */}
       {isFormOpen && selectedRequest && (
-        <div className="bg-[var(--surface)] rounded-2xl shadow-lg border border-[var(--border)] p-8 mb-6">
+        <div className="bg-[var(--surface)] rounded-2xl shadow-[var(--shadow-md)] border border-[var(--border)] p-8 mb-6">
           <div className="text-center mb-6">
             <img src="/vobiss-logo.png" alt="Vobiss Logo" className="mx-auto h-12 w-auto mb-4" />
             <FinalizeForm
@@ -615,7 +615,7 @@ const FinalizeForm: React.FC<FinalizeFormProps> = ({ request, onSave, onCancel }
         <div className="bg-[var(--surface-secondary)] p-4 rounded-lg space-y-3 max-h-48 overflow-y-auto">
           {request.approvals.length > 0 ? (
             request.approvals.map((approval) => (
-              <div key={approval.id} className="text-sm border-l-4 border-blue-300 pl-3 bg-[var(--surface)] rounded-lg p-3 shadow-sm">
+              <div key={approval.id} className="text-sm border-l-4 border-blue-300 pl-3 bg-[var(--surface)] rounded-lg p-3 shadow-[var(--shadow-md)]">
                 <p className="font-semibold text-[var(--text-primary)]">{approval.approver_name}</p>
                 <p className="text-[var(--text-muted)] text-xs">{new Date(approval.approved_at).toLocaleString()}</p>
                 <p className="text-[var(--text-muted)] text-xs italic mt-1">Signature: {approval.signature}</p>
@@ -640,7 +640,7 @@ const FinalizeForm: React.FC<FinalizeFormProps> = ({ request, onSave, onCancel }
             const itemError = errors[index];
             const isOverStock = !isReturn && received > (item.current_stock || 0);
             return (
-              <div key={item.id} className={`p-4 rounded-lg border shadow-sm transition-all ${
+              <div key={item.id} className={`p-4 rounded-lg border shadow-[var(--shadow-md)] transition-all ${
                 itemError ? 'border-red-300 bg-red-50' : 'border-[var(--border)] bg-[var(--surface)]'
               }`}>
                 <div className="flex items-center justify-between mb-3">

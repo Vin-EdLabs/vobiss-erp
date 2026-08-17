@@ -101,7 +101,7 @@ export function AttachmentZone({
             return (
               <div
                 key={att.id}
-                className="overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow-sm)]"
+                className="overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow-md)]"
               >
                 {isImage ? (
                   <button

@@ -353,7 +353,7 @@ const CreateStaffTicketPage: React.FC = () => {
 
         {/* Create Form (same as before) */}
         {showForm && (
-          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 mb-10">
+          <div className="bg-white rounded-xl shadow-[var(--shadow-md)] border border-gray-200 p-6 mb-10">
             <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-2 gap-6" noValidate>
               {/* Customer Select */}
               <div>
@@ -507,7 +507,7 @@ const CreateStaffTicketPage: React.FC = () => {
         )}
 
         {/* Tickets Table - Updated Columns */}
-        <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+        <div className="bg-white rounded-xl shadow-[var(--shadow-md)] border border-gray-200 overflow-hidden">
           <div className="p-6 border-b border-gray-200">
             <h2 className="text-lg font-semibold text-gray-800 flex items-center gap-2">
               <Clock className="w-5 h-5 text-gray-600" />

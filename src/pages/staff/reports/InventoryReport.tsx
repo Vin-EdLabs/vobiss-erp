@@ -218,7 +218,7 @@ export default function InventoryReport() {
           </div>
         )}
 
-        <div className="mb-6 flex flex-wrap items-end gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4 shadow-sm">
+        <div className="mb-6 flex flex-wrap items-end gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4 shadow-[var(--shadow-md)]">
           <div>
             <label className="mb-1 block text-xs font-medium text-[var(--text-muted)]">Period</label>
             <div className="inline-flex rounded-lg border border-[var(--border)] bg-[var(--surface-secondary)] p-0.5">
@@ -451,7 +451,7 @@ export default function InventoryReport() {
           </div>
         </div>
 
-        <div className="overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface)] shadow-lg">
+        <div className="overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow-md)]">
           <table className="w-full min-w-[960px] text-sm">
             <thead className="bg-[var(--surface-secondary)] text-left text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">
               <tr>
@@ -598,7 +598,7 @@ function ChartCard({
   className?: string;
 }) {
   return (
-    <div className={`rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-4 ${className}`}>
+    <div className={`rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-4 ${className} shadow-[var(--shadow-md)]`}>
       <h3 className="mb-3 text-sm font-semibold text-[var(--text-primary)]">{title}</h3>
       {children}
     </div>
