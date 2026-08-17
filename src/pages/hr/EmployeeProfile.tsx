@@ -209,8 +209,8 @@ const HrEmployeeProfile = () => {
   return (
     <div>
       <div className="mb-6 rounded-xl border border-slate-200 bg-white p-6 shadow-[var(--shadow-md)]">
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex items-center gap-4">
+        <div className="flex flex-col items-center gap-4 text-center md:flex-row md:items-center md:justify-between md:text-left">
+          <div className="flex flex-col items-center gap-4 md:flex-row md:items-center">
             <Avatar name={emp.full_name} src={emp.photo_url} size="lg" />
             <div>
               <h1 className="text-2xl font-semibold tracking-tight">{emp.full_name}</h1>
@@ -224,7 +224,7 @@ const HrEmployeeProfile = () => {
               </div>
             </div>
           </div>
-          <div className="flex flex-wrap gap-2">
+          <div className="emp-profile-actions flex flex-wrap gap-2">
             <Button variant="outline" onClick={() => navigate('/hr/employees')}>Close</Button>
             <Button variant="outline" className="employment-print-hide" onClick={() => { setTab('overview'); window.setTimeout(() => window.print(), 80); }}>Print</Button>
             <Button variant="outline" onClick={() => (editOpen ? (setEditOpen(false), setPhoto(null)) : openEdit())}>

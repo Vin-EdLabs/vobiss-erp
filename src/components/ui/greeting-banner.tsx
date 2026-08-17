@@ -38,7 +38,7 @@ export function GreetingBanner({
       )}
       style={{ borderLeftWidth: 4, borderLeftColor: 'var(--primary)' }}
     >
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+      <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
         <div className="min-w-0">
           <h1 className="text-xl font-bold tracking-tight text-[var(--text-primary)] sm:text-2xl">
             {timeOfDayGreeting()}, {name}
@@ -46,7 +46,7 @@ export function GreetingBanner({
           <p className="mt-1 text-[13px] text-[var(--text-muted)]">{dateLabel || formatLongDate()}</p>
           {pills && <div className="mt-3 flex flex-wrap items-center gap-2">{pills}</div>}
         </div>
-        {actions && <div className="flex w-full shrink-0 flex-wrap items-center gap-2 sm:w-auto">{actions}</div>}
+        {actions && <div className="flex w-full shrink-0 flex-wrap items-center gap-2 md:w-auto">{actions}</div>}
       </div>
     </section>
   );

@@ -73,7 +73,7 @@ const Login = () => {
 
   return (
     <div className="flex min-h-dvh items-center justify-center bg-gray-50 px-4 py-12" style={{ colorScheme: 'light' }}>
-      <div className="flex w-full max-w-5xl overflow-hidden rounded-3xl bg-white shadow-2xl" style={{ zoom: 0.8 }}>
+      <div className="login-shell flex w-full max-w-5xl overflow-hidden rounded-3xl bg-white shadow-2xl md:[zoom:0.8]">
         <div className="relative hidden flex-col justify-between overflow-hidden bg-gradient-to-br from-blue-600 via-blue-700 to-red-600 p-12 lg:flex lg:w-1/2">
           {/* Decorative lines */}
           <div className="absolute inset-0 overflow-hidden pointer-events-none">

@@ -60,7 +60,7 @@ export function TodoPanel() {
           className="todo-panel-trigger inline-flex items-center gap-2 rounded-full border-[1.5px] px-2.5 py-1.5 text-[13px] font-medium transition duration-150 sm:px-3.5"
         >
           <ListTodo className="h-4 w-4" />
-          <span className="hidden sm:inline">My to-dos</span>
+          <span className="hidden md:inline">My to-dos</span>
         </button>
       </PopoverTrigger>
       <PopoverContent
@@ -68,7 +68,7 @@ export function TodoPanel() {
         side="bottom"
         sideOffset={10}
         data-todo-panel
-        className="todo-panel w-[min(420px,calc(100vw-1.5rem))] overflow-hidden rounded-2xl border border-transparent bg-transparent p-0 text-inherit shadow-none"
+        className="todo-panel w-[min(420px,calc(100vw-16px))] overflow-hidden rounded-2xl border border-transparent bg-transparent p-0 text-inherit shadow-none"
         onOpenAutoFocus={(e) => e.preventDefault()}
       >
         <div className="flex max-h-[560px] flex-col">

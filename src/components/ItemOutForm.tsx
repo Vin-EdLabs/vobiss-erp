@@ -211,7 +211,7 @@ const ItemOutForm: React.FC<ItemOutFormProps> = ({ onSave, onCancel }) => {
   }
 
   return (
-    <form onSubmit={handleSubmit} className="bg-white p-8 rounded-lg shadow-md border border-gray-200 max-w-6xl mx-auto styled-container shadow-[var(--shadow-md)]" style={{ zoom: 0.7, overflowY: 'auto', scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
+    <form onSubmit={handleSubmit} className="styled-container mx-auto max-w-6xl rounded-lg border border-gray-200 bg-white p-4 shadow-[var(--shadow-md)] md:p-8 md:[zoom:0.7]" style={{ overflowY: 'auto', scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
       <style>{`
         .hide-scrollbar::-webkit-scrollbar {
           display: none;

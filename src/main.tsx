@@ -4,6 +4,7 @@ import { BrowserRouter } from 'react-router-dom';
 import App from './App.tsx';
 import './index.css';
 import './styles/native-mobile.css';
+import './styles/staff-mobile.css';
 import 'leaflet/dist/leaflet.css';
 
 /** Block pinch-zoom on iOS where viewport meta alone is not enough */

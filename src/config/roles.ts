@@ -385,8 +385,8 @@ export function isDirectorOrCto(role?: string): boolean {
 }
 
 /** Map legacy `cto` slug to shared director menu/config key. */
-export function normalizeMenuRole(role: string): string {
-  const r = role.trim().toLowerCase();
+export function normalizeMenuRole(role?: string | null): string {
+  const r = String(role || '').trim().toLowerCase();
   if (isDirectorOrCto(r)) return 'director';
   return r;
 }

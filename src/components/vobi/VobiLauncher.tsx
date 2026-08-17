@@ -42,10 +42,11 @@ export function VobiLauncher({ theme: _theme }: VobiLauncherProps) {
       onClick={handleClick}
       className={cn(
         'vobi-launcher fixed z-[9999] flex h-[52px] w-[52px] items-center justify-center overflow-hidden rounded-full',
-        'bottom-[max(20px,env(safe-area-inset-bottom))] right-[max(20px,env(safe-area-inset-right))]',
+        'bottom-[max(76px,calc(env(safe-area-inset-bottom)+64px))] right-[max(16px,env(safe-area-inset-right))] md:bottom-[max(20px,env(safe-area-inset-bottom))]',
         'bg-[#111827]',
         'transition-transform duration-200 hover:scale-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#5DCAA5]/70',
-        (hasPending || hasAmbientNotice) && !isOpen && 'vobi-attention-ring'
+        (hasPending || hasAmbientNotice) && !isOpen && 'vobi-attention-ring',
+        isOpen && 'pointer-events-none opacity-0'
       )}
     >
       <style>{`

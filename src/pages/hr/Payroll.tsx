@@ -310,7 +310,7 @@ const HrPayroll = () => {
             <p className="mt-1 text-xs text-[var(--text-muted)]">Toggle who to include. Expand a row to add a one-off allowance or bonus for this run.</p>
             {previewQ.isLoading && !previewQ.data ? <TableSkeleton /> : (
               <div className="mt-3 overflow-x-auto">
-                <table className="vobiss-table w-full text-sm">
+                <table className="payroll-preview-table vobiss-table w-full text-sm">
                   <thead>
                     <tr className="border-b text-left text-xs uppercase text-[var(--text-secondary)]">
                       <th className="px-3 py-2">Include</th><th className="px-3 py-2">Employee</th><th className="px-3 py-2">Department</th>

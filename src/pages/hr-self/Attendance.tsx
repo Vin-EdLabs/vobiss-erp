@@ -115,7 +115,7 @@ const HrSelfAttendance = () => {
     <div>
       <HrPageHeader title="My Attendance" description="Clock in at the office with GPS, then review your month." />
 
-      <div className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-5 sm:p-6 shadow-[var(--shadow-md)]">
+      <div className="staff-clock-hero rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-5 sm:p-6 shadow-[var(--shadow-md)] md:text-left">
         <p className="text-xs font-medium uppercase tracking-widest text-[var(--text-muted)]">{dateLabel}</p>
         <p className="mt-2 text-4xl font-bold tracking-tight text-[var(--text-primary)] sm:text-5xl">{timeLabel}</p>
         <p className="mt-3 text-sm text-[var(--text-secondary)]">
@@ -132,7 +132,7 @@ const HrSelfAttendance = () => {
             </div>
           )}
           {!clockedIn && (
-            <Button size="lg" disabled={clockMut.isPending} onClick={() => clockMut.mutate('in')}>
+            <Button size="lg" className="staff-clock-btn" disabled={clockMut.isPending} onClick={() => clockMut.mutate('in')}>
               {clockMut.isPending ? busyLabel || 'Clock In' : 'Clock In'}
             </Button>
           )}
@@ -150,7 +150,7 @@ const HrSelfAttendance = () => {
                   </span>
                 )}
               </div>
-              <Button variant="outline" disabled={clockMut.isPending} onClick={() => clockMut.mutate('out')}>
+              <Button variant="outline" className="staff-clock-btn" disabled={clockMut.isPending} onClick={() => clockMut.mutate('out')}>
                 {clockMut.isPending ? busyLabel || 'Clock Out' : 'Clock Out'}
               </Button>
             </div>

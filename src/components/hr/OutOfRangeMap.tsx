@@ -319,6 +319,7 @@ export function OutOfRangeMap({
     >
       <div
         onClick={(e) => e.stopPropagation()}
+        className="oor-sheet"
         style={{
           width: '100%',
           maxWidth: 560,
@@ -371,9 +372,10 @@ export function OutOfRangeMap({
         </div>
       </div>
 
-      <div ref={mapRef} style={{ height: '280px', width: '100%' }} />
+      <div ref={mapRef} className="oor-map-canvas" style={{ height: '280px', width: '100%' }} />
 
       <div
+        className="oor-distance-row"
         style={{
           padding: '16px 20px',
           display: 'grid',
@@ -448,7 +450,7 @@ export function OutOfRangeMap({
         </span>
       </div>
 
-      <div style={{ padding: '12px 20px 20px', display: 'flex', gap: '10px' }}>
+      <div className="oor-actions" style={{ padding: '12px 20px 20px', display: 'flex', gap: '10px' }}>
         <button
           type="button"
           onClick={onRetry}

@@ -77,7 +77,7 @@ export const VobiCommandBar = forwardRef<
   return (
     <form
       className={cn(
-        'shrink-0 border-t border-[var(--color-border-tertiary)] bg-[var(--color-background-primary)]/95 px-3 py-2.5 shadow-[0_-10px_26px_rgba(15,23,42,0.08)] backdrop-blur-sm',
+        'shrink-0 border-t border-[var(--color-border-tertiary)] bg-[var(--color-background-primary)]/95 px-3 py-2.5 pb-[max(0.65rem,env(safe-area-inset-bottom))] shadow-[0_-10px_26px_rgba(15,23,42,0.08)] backdrop-blur-sm',
         className
       )}
       onSubmit={(e) => {

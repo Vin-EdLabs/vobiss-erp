@@ -38,7 +38,7 @@
     min-width: 0;
   }
 
-  .app-shell > * {
+  .app-shell > *:not(.vobiss-sidebar):not(.staff-sidebar-overlay) {
     min-width: 0;
     max-width: 100%;
   }
@@ -57,7 +57,7 @@
   video,
   iframe,
   pre,
-  table {
+  code {
     max-width: 100%;
   }
 

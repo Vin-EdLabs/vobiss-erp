@@ -95,6 +95,13 @@ const StaffHeader: React.FC<StaffHeaderProps> = ({
   const notifUnread = notifications.filter((n) => !n.read).length;
   const unreadCount = notifUnread + chatUnread;
   const [now, setNow] = useState(() => new Date());
+  const [notifOpen, setNotifOpen] = useState(false);
+
+  useEffect(() => {
+    const open = () => setNotifOpen(true);
+    window.addEventListener('staff:open-notifications', open);
+    return () => window.removeEventListener('staff:open-notifications', open);
+  }, []);
 
   useEffect(() => {
     const id = window.setInterval(() => setNow(new Date()), 30000);
@@ -208,25 +215,25 @@ const StaffHeader: React.FC<StaffHeaderProps> = ({
 
   return (
     <header
-      className="sticky top-0 z-30 flex h-[var(--topbar-height)] shrink-0 items-center gap-1 overflow-visible border-b border-[var(--topbar-border)] bg-[var(--topbar-bg)] px-3 text-[var(--text-primary)] sm:gap-3 sm:px-5"
+      className="staff-topbar sticky top-0 z-30 flex h-[var(--topbar-height)] shrink-0 items-center gap-1 overflow-visible border-b border-[var(--topbar-border)] bg-[var(--topbar-bg)] px-3 text-[var(--text-primary)] sm:gap-3 sm:px-5"
       style={{ paddingTop: 'env(safe-area-inset-top)' }}
     >
       <div className="flex min-w-0 shrink-0 items-center gap-1">
         <button
           type="button"
           onClick={onToggleSidebar}
-          className={iconBtn}
+          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[var(--radius-sm)] text-[var(--text-secondary)] transition duration-150 hover:bg-[var(--surface-hover)]"
           aria-label={sidebarOpen ? 'Collapse sidebar' : 'Expand sidebar'}
           aria-expanded={sidebarOpen}
         >
-          {sidebarOpen ? <X className="h-[17px] w-[17px] lg:hidden" /> : <Menu className="h-[17px] w-[17px] lg:hidden" />}
-          <Menu className="hidden h-[17px] w-[17px] lg:block" />
+          {sidebarOpen ? <X className="h-5 w-5 md:hidden" /> : <Menu className="h-5 w-5 md:hidden" />}
+          <Menu className="hidden h-[17px] w-[17px] md:block" />
         </button>
-        <span className="ml-0.5 inline-flex items-center gap-1 text-[11px] text-[var(--text-secondary)] sm:ml-1 sm:gap-1.5 sm:text-[12px]">
+        <span className="ml-0.5 hidden items-center gap-1.5 text-[12px] text-[var(--text-secondary)] md:inline-flex">
           <Clock className="h-3.5 w-3.5" />
           {timeLabel}
         </span>
-        <Link to="/system-guide" className={iconBtn} aria-label="User guide" title="User guide">
+        <Link to="/system-guide" className={cn(iconBtn, 'hidden md:flex')} aria-label="User guide" title="User guide">
           <BookOpen className="h-[17px] w-[17px]" />
         </Link>
       </div>
@@ -237,11 +244,11 @@ const StaffHeader: React.FC<StaffHeaderProps> = ({
 
       <div className="ml-auto flex min-w-0 shrink-0 items-center gap-1">
         {pushReady.configured && pushReady.permission !== 'granted' && (
-          <button type="button" onClick={enablePush} disabled={pushReady.enabling} className={iconBtn} aria-label="Enable notifications" title="Enable push notifications">
+          <button type="button" onClick={enablePush} disabled={pushReady.enabling} className={cn(iconBtn, 'hidden md:flex')} aria-label="Enable notifications" title="Enable push notifications">
             <BellOff className="h-[17px] w-[17px]" />
           </button>
         )}
-        <Popover>
+        <Popover open={notifOpen} onOpenChange={setNotifOpen}>
           <PopoverTrigger asChild>
             <button type="button" className={cn(iconBtn, 'relative')} aria-label="Notifications">
               <Bell className="h-[17px] w-[17px]" />
@@ -317,14 +324,14 @@ const StaffHeader: React.FC<StaffHeaderProps> = ({
             )}
           </PopoverContent>
         </Popover>
-        <button type="button" onClick={onToggleTheme} className={iconBtn} aria-label="Toggle theme">
+        <button type="button" onClick={onToggleTheme} className={cn(iconBtn, 'hidden md:flex')} aria-label="Toggle theme">
           {isDark ? <Sun className="h-[17px] w-[17px]" /> : <Moon className="h-[17px] w-[17px]" />}
         </button>
-        <span className="mx-1 hidden h-4 w-px bg-[var(--border)] sm:block" />
+        <span className="mx-1 hidden h-4 w-px bg-[var(--border)] md:block" />
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <button type="button" className="flex min-w-0 items-center gap-2.5 rounded-[var(--radius-sm)] pl-1 text-right" aria-label="Account menu">
-              <span className="hidden min-w-0 sm:block">
+              <span className="hidden min-w-0 md:block">
                 <span className="block truncate text-[14px] font-semibold leading-tight text-[var(--text-primary)]">
                   {timeOfDayGreeting()}, {firstName}
                 </span>
@@ -357,6 +364,16 @@ const StaffHeader: React.FC<StaffHeaderProps> = ({
                 <LayoutDashboard className="h-4 w-4" />
                 My Workspace
               </Link>
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              className="cursor-pointer px-4 py-3 md:hidden"
+              onSelect={(e) => {
+                e.preventDefault();
+                onToggleTheme();
+              }}
+            >
+              {isDark ? <Sun className="mr-3 h-4 w-4" /> : <Moon className="mr-3 h-4 w-4" />}
+              {isDark ? 'Light mode' : 'Dark mode'}
             </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem

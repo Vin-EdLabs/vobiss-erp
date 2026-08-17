@@ -243,7 +243,7 @@ export function VobiPanel({ theme: _theme }: VobiPanelProps) {
         className={cn(
           'vobi-panel fixed z-[9998]',
           isMobile
-            ? 'inset-x-0 bottom-0'
+            ? 'inset-0'
             : 'bottom-[max(80px,calc(env(safe-area-inset-bottom)+80px))] right-[max(20px,env(safe-area-inset-right))]',
           isOpen ? 'pointer-events-auto' : 'pointer-events-none'
       )}
@@ -255,7 +255,7 @@ export function VobiPanel({ theme: _theme }: VobiPanelProps) {
           'border border-[var(--color-border-tertiary)] bg-[var(--color-background-primary)] shadow-none',
           'transition-[transform,opacity] duration-[260ms] ease-[cubic-bezier(0.4,0,0.2,1)]',
           isMobile
-            ? 'h-[min(92dvh,640px)] w-full rounded-t-2xl'
+            ? 'h-full w-full rounded-none'
             : 'h-[min(640px,calc(100dvh-100px))] w-[min(400px,calc(100vw-40px))] rounded-2xl',
           isOpen ? 'translate-y-0 opacity-100' : 'translate-y-[110%] opacity-0'
         )}
@@ -294,7 +294,7 @@ export function VobiPanel({ theme: _theme }: VobiPanelProps) {
             <button
               type="button"
               onClick={close}
-              className="p-1 text-[#9FE1CB] transition-colors hover:text-white"
+              className="flex h-11 w-11 items-center justify-center rounded-full p-1 text-[#9FE1CB] transition-colors hover:text-white"
               aria-label="Close Vobi"
             >
               <X className="h-5 w-5" />

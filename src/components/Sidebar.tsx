@@ -15,6 +15,7 @@ import { resolvePrimaryRole, normalizeMenuRole, userHasAnyRole, formatRoleLabel,
 import { getMyProjectUnits, getProjectRequestDashboard, type ProjectUnit } from '../api/project';
 import { getChatUnreadTotal } from '../api/chat';
 import { useAuth } from '../context/AuthContext';
+import { useIsMobile } from '@/hooks/useIsMobile';
 import { useQuery } from '@tanstack/react-query';
 import { hrSelfApi } from '@/api/hrSelf';
 import { hrApi } from '@/api/hr';
@@ -90,7 +91,8 @@ const Sidebar = ({
   } = useAuth();
   const isDark = theme === 'dark';
   void isDark;
-  const isCollapsed = desktopMode === 'collapsed';
+  const isPhone = useIsMobile(767);
+  const compact = desktopMode === 'collapsed' && !isPhone;
   const closeMobile = () => {
     if (onMobileClose) onMobileClose();
     else onToggle();
@@ -984,7 +986,7 @@ const Sidebar = ({
 
   const navItemClass = (active: boolean, extra = '') =>
     `group relative flex h-[34px] items-center rounded-[var(--radius-sm)] text-[13px] font-normal transition-colors duration-150 ${
-      isCollapsed ? 'justify-center mx-1 px-0' : 'mx-1.5 px-2.5'
+      compact ? 'justify-center mx-1 px-0' : 'mx-1.5 px-2.5'
     } ${
       active
         ? 'bg-[var(--sidebar-active-bg)] text-[var(--sidebar-text-active)] border-l-[2.5px] border-[var(--sidebar-active-border)]'
@@ -1002,7 +1004,7 @@ const Sidebar = ({
     <>
       {mobileOpen && !forceHidden && (
         <div
-          className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm lg:hidden"
+          className="staff-sidebar-overlay fixed inset-0 z-[999] bg-black/50 md:hidden"
           onClick={closeMobile}
           aria-hidden
         />
@@ -1010,27 +1012,27 @@ const Sidebar = ({
 
       {!forceHidden && (
       <div
-        aria-hidden={false}
-        className={`vobiss-sidebar relative fixed inset-y-0 left-0 z-50 flex flex-col text-[var(--sidebar-text)] transition-[transform,width] duration-200 ease-out lg:static lg:z-auto ${
-          mobileOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'
-        } ${
-          isCollapsed
-            ? 'w-[min(22rem,calc(100vw-2.5rem))] lg:w-[var(--sidebar-collapsed-width)]'
-            : 'w-[min(22rem,calc(100vw-2.5rem))] lg:w-[var(--sidebar-width)]'
+        aria-hidden={!mobileOpen && isPhone}
+        className={`vobiss-sidebar fixed inset-y-0 left-0 z-[1000] flex h-[100dvh] w-[280px] flex-col text-[var(--sidebar-text)] transition-transform duration-[250ms] ease ${
+          mobileOpen ? 'translate-x-0 pointer-events-auto' : '-translate-x-full pointer-events-none md:pointer-events-auto md:translate-x-0'
+        } md:static md:z-auto md:h-full ${
+          compact
+            ? 'md:w-[64px] lg:w-[var(--sidebar-collapsed-width)]'
+            : 'md:w-[var(--sidebar-width)] lg:w-[var(--sidebar-width)]'
         }`}
       >
         <div className="flex h-full min-h-0 flex-col">
           <div
             className={`relative flex h-14 shrink-0 items-center border-b border-[var(--sidebar-border)] pt-[max(0.25rem,env(safe-area-inset-top))] ${
-              isCollapsed ? 'justify-center px-2' : 'justify-between gap-2.5 px-4'
+              compact ? 'justify-center px-2' : 'justify-between gap-2.5 px-4'
             }`}
           >
             <img
               src="/vobiss-logo.png"
               alt="Vobiss Logo"
-              className={`shrink-0 object-contain ${isCollapsed ? 'h-7 w-7' : 'h-7 w-7'}`}
+              className={`shrink-0 object-contain ${compact ? 'h-7 w-7' : 'h-7 w-7'}`}
             />
-            {!isCollapsed && (
+            {!compact && (
               <div className="min-w-0 flex-1">
                 <span className="block truncate text-[14px] font-semibold leading-tight text-[var(--sidebar-text-active)]">Vobiss ERP</span>
                 <span className="mt-0.5 block truncate text-[10px] leading-tight text-[var(--sidebar-section-label)]">Enterprise Platform</span>
@@ -1039,22 +1041,22 @@ const Sidebar = ({
             <button
               type="button"
               onClick={onToggle}
-              className="hidden h-8 w-8 shrink-0 items-center justify-center rounded-[var(--radius-sm)] text-[var(--sidebar-text)] transition duration-150 hover:bg-[var(--sidebar-hover-bg)] hover:text-[var(--sidebar-text-active)] lg:flex"
-              aria-label={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+              className="hidden h-8 w-8 shrink-0 items-center justify-center rounded-[var(--radius-sm)] text-[var(--sidebar-text)] transition duration-150 hover:bg-[var(--sidebar-hover-bg)] hover:text-[var(--sidebar-text-active)] md:flex"
+              aria-label={compact ? 'Expand sidebar' : 'Collapse sidebar'}
             >
-              {isCollapsed ? <PanelLeft className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
+              {compact ? <PanelLeft className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
             </button>
             <button
               type="button"
               onClick={closeMobile}
-              className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-[var(--radius-sm)] text-[var(--sidebar-text)] transition hover:bg-[var(--sidebar-hover-bg)] lg:hidden ${isCollapsed ? 'hidden' : ''}`}
+              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[var(--radius-sm)] text-[var(--sidebar-text)] transition hover:bg-[var(--sidebar-hover-bg)] md:hidden"
               aria-label="Close menu"
             >
               <X className="h-4 w-4" />
             </button>
           </div>
 
-          {!isCollapsed && (
+          {!compact && (
             <div className="relative mx-4 mt-2.5 mb-1">
               <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[var(--sidebar-section-label)]" />
               <input
@@ -1084,7 +1086,7 @@ const Sidebar = ({
             </div>
           )}
 
-          {user && !isCollapsed && canUseSystemMode && !isAdminSuper && (
+          {user && !compact && canUseSystemMode && !isAdminSuper && (
             <div className="mx-4 my-2">
               <div className="grid grid-cols-2 rounded-[var(--radius-sm)] bg-[var(--sidebar-hover-bg)] p-0.5 text-[11px] font-semibold">
                 <button
@@ -1109,7 +1111,7 @@ const Sidebar = ({
             </div>
           )}
 
-          <nav className={`no-scrollbar flex-1 overflow-y-auto py-2 ${isCollapsed ? 'px-0' : 'px-0'}`}>
+          <nav className={`no-scrollbar flex-1 overflow-y-auto py-2 ${compact ? 'px-0' : 'px-0'}`}>
             {isSearching && visibleMenuItems.length === 0 && (
               <p className="px-4 py-6 text-center text-[12px] text-[var(--sidebar-section-label)]">
                 No matching pages
@@ -1135,25 +1137,25 @@ const Sidebar = ({
                         : undefined
                     }
                   >
-                    {!isCollapsed && (item.label === 'Human Resources' || item.label === 'My HR') && isHrStaff(user) && !userHasAnyRole(user, ['director', 'cto']) && String(user?.position || '').trim().toLowerCase() !== 'director' && (
+                    {!compact && (item.label === 'Human Resources' || item.label === 'My HR') && isHrStaff(user) && !userHasAnyRole(user, ['director', 'cto']) && String(user?.position || '').trim().toLowerCase() !== 'director' && (
                       <div className="mx-4 mb-1 mt-2 text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--sidebar-section-label)]">
                         People
                       </div>
                     )}
                     <div
                       onClick={() => {
-                        if (isCollapsed) {
+                        if (compact) {
                           onRequestExpand?.();
                           item.onToggle();
                           return;
                         }
                         item.onToggle();
                       }}
-                      title={isCollapsed ? item.label : undefined}
+                      title={compact ? item.label : undefined}
                       className={navItemClass(active, 'cursor-pointer')}
                     >
-                      <Icon className={`h-[18px] w-[18px] flex-shrink-0 ${active ? 'text-[var(--sidebar-active-border)]' : ''} ${isCollapsed ? '' : 'mr-2.5'}`} />
-                      {!isCollapsed && (
+                      <Icon className={`h-[18px] w-[18px] flex-shrink-0 ${active ? 'text-[var(--sidebar-active-border)]' : ''} ${compact ? '' : 'mr-2.5'}`} />
+                      {!compact && (
                         <>
                           <span className="flex-1">{item.label}</span>
                           {(item.notificationCount ?? 0) > 0 ? (
@@ -1168,12 +1170,12 @@ const Sidebar = ({
                           <ChevronDown className={`h-3.5 w-3.5 shrink-0 text-[var(--sidebar-section-label)] transition-transform duration-200 ease-in-out ${item.isOpen ? 'rotate-180' : ''}`} />
                         </>
                       )}
-                      {isCollapsed && (item.notificationCount ?? 0) > 0 && (
+                      {compact && (item.notificationCount ?? 0) > 0 && (
                         <span className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-sky-400" />
                       )}
                     </div>
 
-                    {!isCollapsed && (
+                    {!compact && (
                       <div
                         className={`grid transition-[grid-template-rows] duration-200 ease-out ${
                           item.isOpen ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'
@@ -1215,12 +1217,12 @@ const Sidebar = ({
                 <Link
                   key={index}
                   to={item.path}
-                  title={isCollapsed ? item.label : undefined}
+                  title={compact ? item.label : undefined}
                   className={`${navItemClass(isActive)} ${prev?.isCollapsible ? 'mt-3.5' : ''}`}
                   onClick={goToMenuPath}
                 >
-                  <Icon className={`h-[18px] w-[18px] flex-shrink-0 ${isActive ? 'text-[var(--sidebar-active-border)]' : ''} ${isCollapsed ? '' : 'mr-2.5'}`} />
-                  {!isCollapsed && (
+                  <Icon className={`h-[18px] w-[18px] flex-shrink-0 ${isActive ? 'text-[var(--sidebar-active-border)]' : ''} ${compact ? '' : 'mr-2.5'}`} />
+                  {!compact && (
                     <>
                       <span className="flex-1">{item.label}</span>
                       {(item.notificationCount ?? 0) > 0 && (
@@ -1231,7 +1233,7 @@ const Sidebar = ({
                       {renderBadge(item.label)}
                     </>
                   )}
-                  {isCollapsed && (item.notificationCount ?? 0) > 0 && (
+                  {compact && (item.notificationCount ?? 0) > 0 && (
                     <span className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-sky-400" />
                   )}
                 </Link>
@@ -1240,21 +1242,21 @@ const Sidebar = ({
           </nav>
 
           {user && (
-            <div className={`border-t border-[var(--sidebar-border)] ${isCollapsed ? 'px-1.5 py-3' : 'px-3.5 py-3'}`}>
-              <div className={`flex items-center ${isCollapsed ? 'justify-center' : 'gap-2.5'}`}>
+            <div className={`border-t border-[var(--sidebar-border)] ${compact ? 'px-1.5 py-3' : 'px-3.5 py-3'}`}>
+              <div className={`flex items-center ${compact ? 'justify-center' : 'gap-2.5'}`}>
                 <UserAvatar
                   src={user?.avatar_url}
                   name={displayName}
                   className="h-[30px] w-[30px] text-[12px]"
                   colorClass="bg-[var(--sidebar-active-border)]"
                 />
-                {!isCollapsed && (
+                {!compact && (
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-[13px] font-semibold text-[var(--sidebar-text-active)]">{displayName}</p>
                     <p className="truncate text-[11px] capitalize text-[var(--sidebar-text)]">{rolePill}</p>
                   </div>
                 )}
-                {!isCollapsed && (
+                {!compact && (
                   <button
                     type="button"
                     onClick={handleLogout}
@@ -1273,7 +1275,7 @@ const Sidebar = ({
             </div>
           )}
 
-          {isCollapsed && (
+          {compact && (
             <div className="hidden border-t border-[var(--sidebar-border)] px-1 py-2 lg:block">
               <button
                 type="button"

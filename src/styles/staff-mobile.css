@@ -1,0 +1,324 @@
+/* Phone + tablet layout. Desktop (min-width: 1025px) is unchanged.
+   Vobiss Workspace chat (.chat-route-active) is excluded. */
+
+@media (max-width: 768px) {
+  body:not(.chat-route-active) {
+    overflow-x: hidden;
+  }
+
+  body.mobile-sidebar-open {
+    overflow: hidden;
+  }
+
+  body:not(.chat-route-active) .staff-topbar {
+    height: calc(52px + env(safe-area-inset-top));
+    min-height: calc(52px + env(safe-area-inset-top));
+    overflow: hidden;
+    padding-left: max(8px, env(safe-area-inset-left));
+    padding-right: max(8px, env(safe-area-inset-right));
+  }
+
+  body:not(.chat-route-active) .staff-push-strip:empty {
+    display: none;
+  }
+
+  body:not(.chat-route-active) .staff-main-scroll {
+    margin-left: 0 !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    padding: 12px !important;
+    padding-bottom: calc(4.75rem + env(safe-area-inset-bottom)) !important;
+    overflow-x: hidden;
+  }
+
+  body:not(.chat-route-active) .staff-main-scroll > * {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  body:not(.chat-route-active) .staff-main-scroll .vobiss-card,
+  body:not(.chat-route-active) .staff-main-scroll [class*="rounded-[var(--radius-lg)]"],
+  body:not(.chat-route-active) .staff-main-scroll [class*="rounded-xl"],
+  body:not(.chat-route-active) .staff-main-scroll [class*="rounded-2xl"] {
+    width: 100%;
+    max-width: 100%;
+    overflow: hidden;
+    box-sizing: border-box;
+  }
+
+  body:not(.chat-route-active) .staff-main-scroll .vobiss-card:has(table),
+  body:not(.chat-route-active) .staff-main-scroll [class*="rounded-[var(--radius-lg)]"]:has(table),
+  body:not(.chat-route-active) .staff-main-scroll [class*="rounded-xl"]:has(table),
+  body:not(.chat-route-active) .staff-main-scroll [class*="rounded-2xl"]:has(table) {
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+
+  body:not(.chat-route-active) .staff-main-scroll p,
+  body:not(.chat-route-active) .staff-main-scroll h1,
+  body:not(.chat-route-active) .staff-main-scroll h2,
+  body:not(.chat-route-active) .staff-main-scroll span {
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  /* Stat cards and other 2-col bases stay 2-up */
+  body:not(.chat-route-active) .staff-main-scroll .grid.grid-cols-2 {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  body:not(.chat-route-active) .staff-main-scroll .grid.grid-cols-3,
+  body:not(.chat-route-active) .staff-main-scroll .grid.grid-cols-4,
+  body:not(.chat-route-active) .staff-main-scroll .grid.grid-cols-5,
+  body:not(.chat-route-active) .staff-main-scroll .grid.grid-cols-6 {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  /* Side-by-side sections that only become multi-col from sm/md/lg stack on phones */
+  body:not(.chat-route-active) .staff-main-scroll .grid.sm\:grid-cols-2:not(.grid-cols-2),
+  body:not(.chat-route-active) .staff-main-scroll .grid.md\:grid-cols-2:not(.grid-cols-2),
+  body:not(.chat-route-active) .staff-main-scroll .grid.lg\:grid-cols-2:not(.grid-cols-2),
+  body:not(.chat-route-active) .staff-main-scroll .grid.lg\:grid-cols-5,
+  body:not(.chat-route-active) .staff-main-scroll .grid.xl\:grid-cols-2:not(.grid-cols-2),
+  body:not(.chat-route-active) .staff-main-scroll .grid.xl\:grid-cols-3:not(.grid-cols-2) {
+    grid-template-columns: 1fr;
+  }
+
+  body:not(.chat-route-active) .staff-main-scroll .vobiss-card {
+    padding: 14px;
+  }
+
+  body:not(.chat-route-active) .staff-main-scroll .vobiss-card .text-xl {
+    font-size: 1.125rem;
+  }
+
+  body:not(.chat-route-active) .staff-main-scroll .overflow-x-auto,
+  body:not(.chat-route-active) .staff-main-scroll .vobiss-table-wrap,
+  body:not(.chat-route-active) .staff-main-scroll :has(> table) {
+    max-width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-x: contain;
+    box-shadow: inset -12px 0 12px -12px rgba(0, 0, 0, 0.18);
+  }
+
+  body:not(.chat-route-active) .staff-main-scroll table {
+    max-width: none;
+    width: max-content;
+    min-width: 600px;
+  }
+
+  body:not(.chat-route-active) .staff-main-scroll .vobiss-table th:first-child,
+  body:not(.chat-route-active) .staff-main-scroll .vobiss-table td:first-child {
+    position: sticky;
+    left: 0;
+    z-index: 1;
+    background: var(--surface);
+  }
+
+  body:not(.chat-route-active) .staff-main-scroll .payroll-preview-table th:first-child,
+  body:not(.chat-route-active) .staff-main-scroll .payroll-preview-table td:first-child {
+    position: static;
+  }
+
+  body:not(.chat-route-active) .staff-main-scroll .payroll-preview-table th:nth-child(2),
+  body:not(.chat-route-active) .staff-main-scroll .payroll-preview-table td:nth-child(2) {
+    position: sticky;
+    left: 0;
+    z-index: 1;
+    background: var(--surface);
+  }
+
+  body:not(.chat-route-active) .staff-main-scroll form .grid {
+    grid-template-columns: 1fr !important;
+  }
+
+  body:not(.chat-route-active) .staff-main-scroll form input,
+  body:not(.chat-route-active) .staff-main-scroll form select,
+  body:not(.chat-route-active) .staff-main-scroll form textarea {
+    width: 100%;
+    max-width: 100%;
+    min-height: 44px;
+  }
+
+  body:not(.chat-route-active) .staff-main-scroll form label {
+    font-size: 13px;
+  }
+
+  body:not(.chat-route-active) .staff-main-scroll form button[type='submit'],
+  body:not(.chat-route-active) .staff-main-scroll .staff-clock-btn {
+    width: 100%;
+    min-height: 56px;
+  }
+
+  body:not(.chat-route-active) .staff-main-scroll .h-64,
+  body:not(.chat-route-active) .staff-main-scroll .h-72,
+  body:not(.chat-route-active) .staff-main-scroll .h-52 {
+    height: 220px;
+  }
+
+  body:not(.chat-route-active) .staff-clock-hero {
+    text-align: center;
+  }
+
+  body:not(.chat-route-active) .staff-clock-hero .staff-clock-btn {
+    width: 100%;
+  }
+
+  body:not(.chat-route-active) .emp-profile-actions > * {
+    flex: 1 1 100%;
+    min-height: 44px;
+  }
+
+  body:not(.chat-route-active) .staff-main-scroll .vobiss-card .flex.w-full.shrink-0.flex-wrap > * {
+    min-height: 44px;
+  }
+
+  body:not(.chat-route-active) .staff-main-scroll .grid.grid-cols-7 {
+    gap: 4px;
+    grid-template-columns: repeat(7, minmax(0, 1fr));
+  }
+
+  body:not(.chat-route-active) .staff-main-scroll .grid.grid-cols-7 > button {
+    min-width: 0 !important;
+    width: 100%;
+    height: 36px;
+    min-height: 36px;
+    padding: 2px;
+    font-size: 10px;
+  }
+
+  body:not(.chat-route-active) [data-radix-dialog-content] {
+    width: calc(100vw - 24px) !important;
+    max-width: calc(100vw - 24px) !important;
+    max-height: 90vh !important;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: 16px !important;
+    border-radius: 12px 12px 0 0 !important;
+  }
+
+  body:not(.chat-route-active) .oor-sheet {
+    width: calc(100vw - 24px) !important;
+    max-width: calc(100vw - 24px) !important;
+    max-height: 90vh !important;
+    border-radius: 12px 12px 0 0 !important;
+  }
+
+  body:not(.chat-route-active) .oor-actions {
+    flex-direction: column !important;
+  }
+
+  body:not(.chat-route-active) .oor-actions button {
+    width: 100%;
+    min-height: 44px;
+  }
+
+  body:not(.chat-route-active) .todo-panel {
+    width: calc(100vw - 16px) !important;
+    max-width: calc(100vw - 16px) !important;
+    max-height: 80vh;
+    overflow-y: auto;
+  }
+
+  body:not(.chat-route-active) .oor-map-canvas {
+    height: 220px !important;
+  }
+
+  body:not(.chat-route-active) .oor-distance-row {
+    grid-template-columns: 1fr 1fr 1fr !important;
+    gap: 8px !important;
+    padding: 12px !important;
+  }
+
+  body:not(.chat-route-active) .oor-distance-row > div {
+    padding: 8px !important;
+  }
+
+  body:not(.chat-route-active) .login-shell,
+  body:not(.chat-route-active) .styled-container {
+    zoom: 1 !important;
+  }
+
+  body:not(.chat-route-active) .styled-container {
+    padding: 1rem !important;
+    max-width: 100%;
+  }
+
+  .login-shell {
+    zoom: 1 !important;
+    flex-direction: column;
+    max-width: 100%;
+  }
+
+  body:not(.chat-route-active) .staff-main-scroll [role='tablist'] {
+    display: flex;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    justify-content: flex-start;
+    max-width: 100%;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  body:not(.chat-route-active) .staff-main-scroll [role='tablist'].grid {
+    display: flex !important;
+    grid-template-columns: none !important;
+  }
+
+  body:not(.chat-route-active) .staff-main-scroll [role='tab'] {
+    flex: 0 0 auto;
+    min-height: 44px;
+  }
+}
+
+@media (max-width: 480px) {
+  body:not(.chat-route-active) .staff-main-scroll .grid.grid-cols-2,
+  body:not(.chat-route-active) .staff-main-scroll .grid.grid-cols-3,
+  body:not(.chat-route-active) .staff-main-scroll .grid.grid-cols-4,
+  body:not(.chat-route-active) .staff-main-scroll .grid.grid-cols-5,
+  body:not(.chat-route-active) .staff-main-scroll .grid.grid-cols-6 {
+    grid-template-columns: 1fr;
+  }
+
+  body:not(.chat-route-active) .staff-main-scroll .grid.grid-cols-7 {
+    grid-template-columns: repeat(7, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 769px) and (max-width: 1024px) {
+  body:not(.chat-route-active) .staff-main-scroll {
+    overflow-x: hidden;
+    max-width: 100%;
+  }
+
+  body:not(.chat-route-active) .staff-main-scroll .vobiss-card,
+  body:not(.chat-route-active) .staff-main-scroll [class*="rounded-[var(--radius-lg)]"] {
+    max-width: 100%;
+  }
+
+  body:not(.chat-route-active) .staff-main-scroll .overflow-x-auto,
+  body:not(.chat-route-active) .staff-main-scroll .vobiss-table-wrap,
+  body:not(.chat-route-active) .staff-main-scroll :has(> table) {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    box-shadow: inset -12px 0 12px -12px rgba(0, 0, 0, 0.18);
+  }
+
+  body:not(.chat-route-active) .staff-main-scroll table {
+    min-width: 600px;
+  }
+}
+
+@media (min-width: 769px) {
+  .staff-bottom-nav {
+    display: none !important;
+  }
+
+  .login-shell {
+    zoom: 0.8;
+  }
+
+  .styled-container {
+    zoom: 0.7;
+  }
+}

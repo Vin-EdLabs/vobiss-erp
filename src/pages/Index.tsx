@@ -34,6 +34,7 @@ import { VobiRoot } from '../components/vobi';
 import { PushNotificationSetup } from '../components/PushNotificationSetup';
 import { PWAUpdateToast } from '../components/PWAUpdateToast';
 import StaffHeader from '../components/StaffHeader';
+import { MobileBottomNav } from '../components/MobileBottomNav';
 import { useIsMobile } from '@/hooks/useIsMobile';
 import { applyTheme, readStoredTheme } from '@/lib/theme';
 import { useAuth } from '../context/AuthContext';
@@ -155,6 +156,10 @@ const Index = () => {
   const { user, ackUnsuspendNotice } = useAuth();
   const [desktopSidebar, setDesktopSidebar] = useState<'expanded' | 'collapsed'>(() => {
     if (typeof window === 'undefined') return 'expanded';
+    const tablet = window.matchMedia('(min-width: 768px) and (max-width: 1024px)').matches;
+    if (tablet) {
+      return localStorage.getItem('sidebar-tablet') === 'expanded' ? 'expanded' : 'collapsed';
+    }
     return localStorage.getItem('sidebar-desktop') === 'collapsed' ? 'collapsed' : 'expanded';
   });
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
@@ -185,10 +190,15 @@ const Index = () => {
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    if (!window.matchMedia('(min-width: 1024px)').matches) {
+    if (!window.matchMedia('(min-width: 1025px)').matches) {
       setMobileSidebarOpen(false);
     }
   }, [location.pathname]);
+
+  useEffect(() => {
+    document.body.classList.toggle('mobile-sidebar-open', mobileSidebarOpen);
+    return () => document.body.classList.remove('mobile-sidebar-open');
+  }, [mobileSidebarOpen]);
 
   // Restore main navigation when leaving chat
   useEffect(() => {
@@ -196,13 +206,14 @@ const Index = () => {
   }, [isChatRoute]);
 
   const toggleSidebar = () => {
-    if (typeof window !== 'undefined' && window.matchMedia('(max-width: 1023px)').matches) {
+    if (typeof window !== 'undefined' && window.matchMedia('(max-width: 767px)').matches) {
       setMobileSidebarOpen((open) => !open);
       return;
     }
     setDesktopSidebar((prev) => {
       const next = prev === 'expanded' ? 'collapsed' : 'expanded';
-      localStorage.setItem('sidebar-desktop', next);
+      const tablet = typeof window !== 'undefined' && window.matchMedia('(min-width: 768px) and (max-width: 1024px)').matches;
+      localStorage.setItem(tablet ? 'sidebar-tablet' : 'sidebar-desktop', next);
       return next;
     });
   };
@@ -211,8 +222,6 @@ const Index = () => {
     setDesktopSidebar('expanded');
     localStorage.setItem('sidebar-desktop', 'expanded');
   };
-
-  const isSidebarWide = !isChatRoute && (desktopSidebar === 'expanded' || mobileSidebarOpen);
 
   const toggleTheme = () => {
     setTheme((prev) => {
@@ -265,14 +274,14 @@ const Index = () => {
             aria-hidden={isChatRoute}
           >
             <StaffHeader
-              sidebarOpen={isSidebarWide}
+              sidebarOpen={isMobileViewport ? mobileSidebarOpen : desktopSidebar === 'expanded'}
               onToggleSidebar={toggleSidebar}
               theme={theme}
               onToggleTheme={toggleTheme}
             />
           </div>
           {!isChatRoute && (
-            <div className="shrink-0 border-b border-[var(--border)] bg-[var(--surface)] px-3 py-2 md:hidden">
+            <div className="staff-push-strip shrink-0 border-b border-[var(--border)] bg-[var(--surface)] px-3 py-2 md:hidden">
               <PushNotificationSetup />
             </div>
           )}
@@ -280,7 +289,7 @@ const Index = () => {
             className={
               isChatRoute
                 ? 'flex min-h-0 flex-1 flex-col overflow-hidden p-0'
-                : 'staff-main-scroll page-enter flex-1 overflow-x-hidden overflow-y-auto overscroll-y-contain px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-3 sm:pt-3 md:px-8 md:pb-8 md:pt-6'
+                : 'staff-main-scroll page-enter flex-1 overflow-x-hidden overflow-y-auto overscroll-y-contain px-3 pb-[calc(4.75rem+env(safe-area-inset-bottom))] pt-3 md:px-8 md:pb-8 md:pt-6'
             }
           >
             {!isChatRoute && user?.unsuspend_reason && user?.unsuspend_ack === false && (
@@ -1008,6 +1017,9 @@ const Index = () => {
         </div>
       </div>
       </div>
+      {!isChatRoute && (
+        <MobileBottomNav onMore={() => setMobileSidebarOpen(true)} />
+      )}
       <VobiRoot theme={theme} />
       </VobiProvider>
     </RealtimeProvider>

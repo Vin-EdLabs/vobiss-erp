@@ -101,7 +101,10 @@ export function AttendanceMonthGrid({
     <div className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-4 shadow-[var(--shadow-md)]">
       <div className="mb-2 grid grid-cols-7 gap-2 text-center text-xs font-semibold text-[var(--text-secondary)]">
         {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((d) => (
-          <div key={d}>{d}</div>
+          <div key={d}>
+            <span className="md:hidden">{d.slice(0, 1)}</span>
+            <span className="hidden md:inline">{d}</span>
+          </div>
         ))}
       </div>
       <div className="grid grid-cols-7 gap-2">
@@ -123,7 +126,7 @@ export function AttendanceMonthGrid({
                 <button
                   type="button"
                   className={cn(
-                    'relative h-12 w-full min-w-[40px] rounded-[var(--radius-sm)] border p-1.5 text-left',
+                    'relative h-9 w-full min-w-0 rounded-[var(--radius-sm)] border p-1 text-left md:h-12 md:min-w-[40px] md:p-1.5',
                     weekend ? 'border-[var(--border)] bg-[var(--surface-secondary)]' : 'border-[var(--border)]',
                     isToday && 'border-[var(--primary)]',
                     future && 'opacity-50'
