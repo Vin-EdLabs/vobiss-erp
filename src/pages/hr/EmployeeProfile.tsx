@@ -4,9 +4,8 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { Check, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { hrApi, HR_QUERY } from '@/api/hr';
-import { formatGhs } from '@/lib/taxCalculations';
 import { Button } from '@/components/ui/button';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Progress } from '@/components/ui/progress';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
@@ -15,6 +14,9 @@ import { AttendanceMonthGrid, attendanceSummary, expandApprovedLeaveDates } from
 import { DocumentPreview } from './DocumentPreview';
 import { EmployeeForm, emptyEmployeeForm, type EmployeeFormValues } from './EmployeeForm';
 import { EmploymentRecord } from './EmploymentRecord';
+import { PayslipView } from '@/components/hr/PayslipView';
+import { EmployeePayrollTab } from './EmployeePayrollTab';
+import { API_URL } from '@/lib/api';
 
 const HrEmployeeProfile = () => {
   const { id } = useParams();
@@ -27,7 +29,6 @@ const HrEmployeeProfile = () => {
   const [docForm, setDocForm] = useState({ document_name: '', category: 'Contract', notes: '' });
   const [docFile, setDocFile] = useState<File | null>(null);
   const [slip, setSlip] = useState<any>(null);
-  const [allowForm, setAllowForm] = useState({ allowance_name: '', allowance_type: 'fixed', value: '', taxable: true });
   const [suspendOpen, setSuspendOpen] = useState(false);
   const [unsuspendOpen, setUnsuspendOpen] = useState(false);
   const now = new Date();
@@ -39,7 +40,6 @@ const HrEmployeeProfile = () => {
   const employeesQ = useQuery({ queryKey: ['hr', 'employees'], queryFn: () => hrApi.employees(), ...HR_QUERY });
   const leaveQ = useQuery({ queryKey: ['hr', 'emp-leave', id], queryFn: () => hrApi.employeeLeave(id!), enabled: !!id && tab === 'leave', ...HR_QUERY });
   const payQ = useQuery({ queryKey: ['hr', 'emp-pay', id], queryFn: () => hrApi.employeePayroll(id!), enabled: !!id && tab === 'payroll', ...HR_QUERY });
-  const allowQ = useQuery({ queryKey: ['hr', 'emp-allow', id], queryFn: () => hrApi.employeeAllowances(id!), enabled: !!id && tab === 'payroll', ...HR_QUERY });
   const attQ = useQuery({
     queryKey: ['hr', 'emp-att', id, attMonth, attYear],
     queryFn: () => hrApi.employeeAttendance(id!, attMonth, attYear),
@@ -105,30 +105,6 @@ const HrEmployeeProfile = () => {
     },
     onError: (e: Error) => toast.error(e.message),
   });
-  const addAllowMut = useMutation({
-    mutationFn: () =>
-      hrApi.createEmployeeAllowance({
-        employee_id: Number(id),
-        allowance_name: allowForm.allowance_name,
-        allowance_type: allowForm.allowance_type,
-        value: Number(allowForm.value || 0),
-        taxable: allowForm.taxable,
-      }),
-    onSuccess: () => {
-      toast.success('Allowance added');
-      qc.invalidateQueries({ queryKey: ['hr', 'emp-allow', id] });
-      setAllowForm({ allowance_name: '', allowance_type: 'fixed', value: '', taxable: true });
-    },
-    onError: (e: Error) => toast.error(e.message),
-  });
-  const delAllowMut = useMutation({
-    mutationFn: (allowId: number) => hrApi.deleteEmployeeAllowance(allowId),
-    onSuccess: () => {
-      toast.success('Allowance removed');
-      qc.invalidateQueries({ queryKey: ['hr', 'emp-allow', id] });
-    },
-  });
-
   if (empQ.isLoading && !empQ.data) return <TableSkeleton />;
   if (!emp) return <EmptyState title="Employee not found" action={<Button onClick={() => navigate('/hr/employees')}>Back</Button>} />;
 
@@ -341,79 +317,7 @@ const HrEmployeeProfile = () => {
           </div>
         </TabsContent>
         <TabsContent value="payroll">
-          <div className="mb-4 rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-5 shadow-[var(--shadow-md)]">
-            <h3 className="text-sm font-semibold">Allowances</h3>
-            <p className="mt-0.5 text-xs text-[var(--text-muted)]">These are included automatically when payroll is generated.</p>
-            <table className="vobiss-table mt-3 w-full text-sm">
-              <thead>
-                <tr className="border-b text-left text-xs uppercase text-[var(--text-secondary)]">
-                  <th className="px-3 py-2">Name</th><th className="px-3 py-2">Type</th><th className="px-3 py-2">Value</th><th className="px-3 py-2">Taxable</th><th />
-                </tr>
-              </thead>
-              <tbody>
-                {(allowQ.data || []).map((a: any) => (
-                  <tr key={a.id} className="border-b">
-                    <td className="px-3 py-2">{a.allowance_name}</td>
-                    <td className="px-3 py-2 capitalize">{a.type}</td>
-                    <td className="px-3 py-2">{a.type === 'percentage' ? `${a.value}%` : formatGhs(a.value)}</td>
-                    <td className="px-3 py-2">{a.taxable ? 'Yes' : 'No'}</td>
-                    <td className="px-3 py-2"><Button size="sm" variant="outline" onClick={() => delAllowMut.mutate(a.id)}>Remove</Button></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            <div className="mt-3 grid gap-2 sm:grid-cols-4">
-              <input className={inputClass} placeholder="Allowance name" value={allowForm.allowance_name} onChange={(e) => setAllowForm({ ...allowForm, allowance_name: e.target.value })} />
-              <select className={inputClass} value={allowForm.allowance_type} onChange={(e) => setAllowForm({ ...allowForm, allowance_type: e.target.value })}>
-                <option value="fixed">Fixed</option>
-                <option value="percentage">%</option>
-              </select>
-              <input className={inputClass} type="number" placeholder="Value" value={allowForm.value} onChange={(e) => setAllowForm({ ...allowForm, value: e.target.value })} />
-              <Button onClick={() => addAllowMut.mutate()} disabled={!allowForm.allowance_name || addAllowMut.isPending}>Add</Button>
-            </div>
-          </div>
-          {payslips.length === 0 ? (
-            <EmptyState
-              title="No payslips yet"
-              description="Generate payroll for this month to create payslips."
-              action={<Button onClick={() => navigate('/hr/payroll')}>Generate Payroll</Button>}
-            />
-          ) : (
-            <div className="overflow-x-auto rounded-xl border bg-white shadow-[var(--shadow-md)]">
-              <table className="vobiss-table w-full text-sm">
-                <thead>
-                  <tr className="border-b text-left text-xs uppercase text-slate-500">
-                    <th className="px-4 py-3">Period</th>
-                    <th className="px-4 py-3">Gross</th>
-                    <th className="px-4 py-3">PAYE</th>
-                    <th className="px-4 py-3">Net</th>
-                    <th className="px-4 py-3">Status</th>
-                    <th className="px-4 py-3">Download</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {payslips.map((p: any) => (
-                    <tr key={p.id} className="border-b">
-                      <td className="px-4 py-3">{p.month}/{p.year}</td>
-                      <td className="px-4 py-3">{formatGhs(p.gross)}</td>
-                      <td className="px-4 py-3">{formatGhs(p.paye)}</td>
-                      <td className="px-4 py-3 font-semibold">{formatGhs(p.net_pay)}</td>
-                      <td className="px-4 py-3"><StatusBadge status={p.payroll_status} /></td>
-                      <td className="px-4 py-3">
-                        <Button size="sm" variant="outline" onClick={async () => {
-                          try {
-                            setSlip(await hrApi.payslip(p.employee_id, p.month, p.year));
-                          } catch (e: any) {
-                            toast.error(e.message);
-                          }
-                        }}>Download</Button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
+          {id && <EmployeePayrollTab employeeId={id} employee={emp} payslips={payslips} onOpenSlip={setSlip} />}
         </TabsContent>
         <TabsContent value="attendance">
           <div className="mb-4 flex flex-wrap gap-2">
@@ -496,15 +400,35 @@ const HrEmployeeProfile = () => {
       </Dialog>
 
       <Dialog open={!!slip} onOpenChange={() => setSlip(null)}>
-        <DialogContent className="max-w-lg print:shadow-none">
-          {slip && (
-            <div className="space-y-3">
-              <DialogHeader><DialogTitle>Payslip — {slip.month}/{slip.year}</DialogTitle></DialogHeader>
-              <p className="text-sm">{slip.full_name}</p>
-              <p className="text-sm">Net {formatGhs(slip.net_pay)}</p>
-              <Button onClick={() => window.print()}>Print / Download</Button>
-            </div>
-          )}
+        <DialogContent className="max-w-2xl print:max-w-none print:border-0 print:shadow-none">
+          {slip && <PayslipView slip={slip} />}
+          <DialogFooter className="print:hidden">
+            <Button variant="outline" onClick={() => window.print()}>Print</Button>
+            <Button
+              variant="outline"
+              onClick={async () => {
+                try {
+                  const token = localStorage.getItem('token');
+                  const res = await fetch(
+                    `${API_URL}/hr/payroll/employee/${slip.employee_id}/slip/${slip.month}/${slip.year}/pdf`,
+                    { headers: token ? { Authorization: `Bearer ${token}` } : {} }
+                  );
+                  if (!res.ok) throw new Error('Failed to download PDF');
+                  const blob = await res.blob();
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement('a');
+                  a.href = url;
+                  a.download = `payslip-${slip.month}-${slip.year}.pdf`;
+                  a.click();
+                  URL.revokeObjectURL(url);
+                } catch (e: any) {
+                  toast.error(e.message || 'PDF download failed');
+                }
+              }}
+            >
+              Download PDF
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

@@ -270,6 +270,120 @@ export async function initHrSchema(pool) {
       created_at TIMESTAMP DEFAULT NOW()
     )
   `);
+
+  await pool.query(`ALTER TABLE hr_payroll_settings ADD COLUMN IF NOT EXISTS tax_relief_defaults JSONB DEFAULT '[]'::jsonb`);
+  await pool.query(`
+    UPDATE hr_payroll_settings
+    SET tax_relief_defaults = '[
+      {"key":"marriage","name":"Marriage Relief","annual_amount":1200},
+      {"key":"child_education","name":"Child Education Relief","annual_amount":600},
+      {"key":"disability","name":"Disability Relief","annual_amount":1800},
+      {"key":"old_age","name":"Old Age Relief (60+)","annual_amount":1500},
+      {"key":"dependent","name":"Dependent Relief","annual_amount":600}
+    ]'::jsonb
+    WHERE tax_relief_defaults IS NULL
+       OR tax_relief_defaults = '[]'::jsonb
+       OR tax_relief_defaults = 'null'::jsonb
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS hr_employee_reliefs (
+      id SERIAL PRIMARY KEY,
+      employee_id INTEGER NOT NULL REFERENCES hr_employees(id) ON DELETE CASCADE,
+      relief_name TEXT NOT NULL,
+      annual_amount NUMERIC(12, 2) NOT NULL DEFAULT 0,
+      monthly_amount NUMERIC(12, 2) NOT NULL DEFAULT 0,
+      is_active BOOLEAN NOT NULL DEFAULT TRUE,
+      notes TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS hr_employee_deductions (
+      id SERIAL PRIMARY KEY,
+      employee_id INTEGER NOT NULL REFERENCES hr_employees(id) ON DELETE CASCADE,
+      deduction_name TEXT NOT NULL,
+      deduction_type VARCHAR(20) NOT NULL DEFAULT 'fixed',
+      value NUMERIC(12, 2) NOT NULL DEFAULT 0,
+      is_loan BOOLEAN NOT NULL DEFAULT FALSE,
+      total_loan_amount NUMERIC(12, 2),
+      remaining_balance NUMERIC(12, 2),
+      auto_stop BOOLEAN NOT NULL DEFAULT TRUE,
+      is_active BOOLEAN NOT NULL DEFAULT TRUE,
+      effective_from DATE,
+      effective_to DATE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  await pool.query(`ALTER TABLE hr_payroll_settings ADD COLUMN IF NOT EXISTS deduction_types JSONB DEFAULT '[]'::jsonb`);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS hr_salary_advances (
+      id SERIAL PRIMARY KEY,
+      employee_id INTEGER NOT NULL REFERENCES hr_employees(id) ON DELETE CASCADE,
+      loan_amount NUMERIC(12, 2) NOT NULL DEFAULT 0,
+      monthly_deduction NUMERIC(12, 2) NOT NULL DEFAULT 0,
+      remaining_balance NUMERIC(12, 2) NOT NULL DEFAULT 0,
+      paid_so_far NUMERIC(12, 2) NOT NULL DEFAULT 0,
+      start_month INTEGER NOT NULL,
+      start_year INTEGER NOT NULL,
+      notes TEXT,
+      auto_stop BOOLEAN NOT NULL DEFAULT TRUE,
+      status VARCHAR(20) NOT NULL DEFAULT 'active',
+      created_by INTEGER,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS hr_salary_advance_repayments (
+      id SERIAL PRIMARY KEY,
+      advance_id INTEGER NOT NULL REFERENCES hr_salary_advances(id) ON DELETE CASCADE,
+      payroll_id INTEGER REFERENCES hr_payroll(id) ON DELETE SET NULL,
+      month INTEGER NOT NULL,
+      year INTEGER NOT NULL,
+      amount_deducted NUMERIC(12, 2) NOT NULL DEFAULT 0,
+      remaining_after NUMERIC(12, 2) NOT NULL DEFAULT 0,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_hr_salary_advances_employee ON hr_salary_advances(employee_id)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_hr_salary_advances_status ON hr_salary_advances(status)`);
+
+  await pool.query(`ALTER TABLE hr_payroll_items ADD COLUMN IF NOT EXISTS reliefs_total NUMERIC(12, 2) DEFAULT 0`);
+  await pool.query(`ALTER TABLE hr_payroll_items ADD COLUMN IF NOT EXISTS other_deductions NUMERIC(12, 2) DEFAULT 0`);
+  await pool.query(`ALTER TABLE hr_payroll_items ADD COLUMN IF NOT EXISTS relief_breakdown JSONB DEFAULT '[]'::jsonb`);
+  await pool.query(`ALTER TABLE hr_payroll_items ADD COLUMN IF NOT EXISTS deduction_breakdown JSONB DEFAULT '[]'::jsonb`);
+  await pool.query(`ALTER TABLE hr_payroll_items ADD COLUMN IF NOT EXISTS allowance_breakdown JSONB DEFAULT '[]'::jsonb`);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS hr_payroll_audit (
+      id BIGSERIAL PRIMARY KEY,
+      action_type TEXT NOT NULL,
+      category TEXT NOT NULL,
+      employee_id INTEGER REFERENCES hr_employees(id) ON DELETE SET NULL,
+      performed_by INTEGER,
+      performed_by_name TEXT,
+      ip_address TEXT,
+      before_snapshot JSONB,
+      after_snapshot JSONB,
+      description TEXT NOT NULL,
+      payroll_month INTEGER,
+      payroll_year INTEGER,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_hr_payroll_audit_created_at ON hr_payroll_audit(created_at DESC)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_hr_payroll_audit_action_type ON hr_payroll_audit(action_type)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_hr_payroll_audit_category ON hr_payroll_audit(category)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_hr_payroll_audit_employee_id ON hr_payroll_audit(employee_id)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_hr_payroll_audit_performed_by ON hr_payroll_audit(performed_by)`);
 }
 
 export async function ensureLeaveBalances(pool, employeeId, year = new Date().getFullYear()) {

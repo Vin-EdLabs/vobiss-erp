@@ -64,6 +64,8 @@ export const hrSelfApi = {
       method: 'POST',
       body: form,
     }),
+  payslips: () => selfFetch('/payslips'),
+  payslip: (month: number, year: number) => selfFetch(`/payslips/${month}/${year}`),
 };
 
 export function countWeekdays(start: string, end: string) {

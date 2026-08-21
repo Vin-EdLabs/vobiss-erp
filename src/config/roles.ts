@@ -629,6 +629,7 @@ export function getWorkspaceQuickLinks(
       { label: 'Employees', path: '/hr/employees', description: 'Staff directory and profiles' },
       { label: 'Leave Management', path: '/hr/leave', description: 'Leave records and balances' },
       { label: 'Payroll', path: '/hr/payroll', description: 'Monthly payroll and payslips' },
+      { label: 'Payroll History', path: '/hr/payroll-history', description: 'Archive of past payroll runs by year' },
       profile,
     ],
   };
@@ -666,6 +667,7 @@ export function getWorkspaceQuickLinks(
 
   const hrLinks: QuickLink[] = [
     { label: 'Clock In', path: '/hr-self/attendance', description: 'Sign your attendance' },
+    { label: 'My Payslips', path: '/hr-self/payslips', description: 'View and download your payslips' },
     { label: 'Leave Request', path: '/hr-self/leave', description: 'Apply for leave' },
     { label: 'HR Forms', path: '/hr-self/forms', description: 'Request letters and advances' },
   ];

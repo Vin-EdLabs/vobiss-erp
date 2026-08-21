@@ -19,7 +19,7 @@ async function hrFetch(path: string, options: RequestInit = {}) {
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     const error = new Error(err.error || `Request failed (${res.status})`);
-    Object.assign(error, err);
+    Object.assign(error, err, { status: res.status });
     throw error;
   }
   if (res.status === 204) return null;
@@ -163,6 +163,57 @@ export const hrApi = {
       body: JSON.stringify(body),
     }),
   deleteEmployeeAllowance: (id: number | string) => hrFetch(`/employee-allowances/${id}`, { method: 'DELETE' }),
+  employeeReliefs: (employeeId: number | string) => hrFetch(`/employee-reliefs/${employeeId}`),
+  createEmployeeRelief: (body: Record<string, unknown>) =>
+    hrFetch('/employee-reliefs', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+  updateEmployeeRelief: (id: number | string, body: Record<string, unknown>) =>
+    hrFetch(`/employee-reliefs/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+  deleteEmployeeRelief: (id: number | string) => hrFetch(`/employee-reliefs/${id}`, { method: 'DELETE' }),
+  employeeDeductions: (employeeId: number | string) => hrFetch(`/employee-deductions/${employeeId}`),
+  createEmployeeDeduction: (body: Record<string, unknown>) =>
+    hrFetch('/employee-deductions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+  updateEmployeeDeduction: (id: number | string, body: Record<string, unknown>) =>
+    hrFetch(`/employee-deductions/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+  deleteEmployeeDeduction: (id: number | string) => hrFetch(`/employee-deductions/${id}`, { method: 'DELETE' }),
+  salaryAdvancesSummary: () => hrFetch('/salary-advances/summary'),
+  salaryAdvances: (params?: { status?: string; employee_id?: number | string }) => {
+    const q = params
+      ? '?' +
+        new URLSearchParams(
+          Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== '').map(([k, v]) => [k, String(v)]))
+        ).toString()
+      : '';
+    return hrFetch(`/salary-advances${q}`);
+  },
+  salaryAdvance: (id: number | string) => hrFetch(`/salary-advances/${id}`),
+  createSalaryAdvance: (body: Record<string, unknown>) =>
+    hrFetch('/salary-advances', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+  updateSalaryAdvanceStatus: (id: number | string, status: string) =>
+    hrFetch(`/salary-advances/${id}/status`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status }),
+    }),
   payrollItems: (id: number | string) => hrFetch(`/payroll/${id}/items`),
   updatePayrollStatus: (id: number | string, status: string) =>
     hrFetch(`/payroll/${id}`, {
@@ -172,6 +223,49 @@ export const hrApi = {
     }),
   payslip: (employeeId: number | string, month: number, year: number) =>
     hrFetch(`/payroll/employee/${employeeId}/slip/${month}/${year}`),
+  payslipPdfUrl: (employeeId: number | string, month: number, year: number) =>
+    `${API_URL}/hr/payroll/employee/${employeeId}/slip/${month}/${year}/pdf`,
+  payrollAudit: (params?: Record<string, string | number | undefined>) => {
+    const q = params
+      ? '?' +
+        new URLSearchParams(
+          Object.fromEntries(
+            Object.entries(params)
+              .filter(([, v]) => v !== '' && v != null)
+              .map(([k, v]) => [k, String(v)])
+          )
+        ).toString()
+      : '';
+    return hrFetch(`/payroll/audit${q}`);
+  },
+  payrollAuditSummary: (params?: Record<string, string | number | undefined>) => {
+    const q = params
+      ? '?' +
+        new URLSearchParams(
+          Object.fromEntries(
+            Object.entries(params)
+              .filter(([, v]) => v !== '' && v != null)
+              .map(([k, v]) => [k, String(v)])
+          )
+        ).toString()
+      : '';
+    return hrFetch(`/payroll/audit/summary${q}`);
+  },
+  payrollAuditPerformers: () => hrFetch('/payroll/audit/performers'),
+  payrollAuditDetail: (id: number | string) => hrFetch(`/payroll/audit/${id}`),
+  payrollAuditExportUrl: (params?: Record<string, string | number | undefined>) => {
+    const q = params
+      ? '?' +
+        new URLSearchParams(
+          Object.fromEntries(
+            Object.entries(params)
+              .filter(([, v]) => v !== '' && v != null)
+              .map(([k, v]) => [k, String(v)])
+          )
+        ).toString()
+      : '';
+    return `${API_URL}/hr/payroll/audit/export${q}`;
+  },
   attendanceSummary: (month: number, year: number) =>
     hrFetch(`/attendance/summary?month=${month}&year=${year}`),
   attendanceLive: () => hrFetch('/attendance/live'),

@@ -44,11 +44,16 @@ import {
   savePayrollSettings,
   allowancesForEmployee,
   allowancesByEmployeeIds,
+  reliefsByEmployeeIds,
+  deductionsByEmployeeIds,
+  advancesByEmployeeIds,
   mergeAllowances,
   totalsFromCalcs,
   roundTotals,
+  mapAdvance,
 } from '../utils/hrPayrollEngine.js';
-import { calculateNetPay } from '../utils/payrollCalculator.js';
+import { calculateNetPay, roundMoney, DEFAULT_TAX_BANDS } from '../utils/payrollCalculator.js';
+import { renderPayslipPdf } from '../utils/payslipPdf.js';
 import { peopleSnapshot, attendanceHealth, leaveOverview, payrollIntelligence } from '../utils/hrInsights.js';
 import {
   monthlySummaryReport,
@@ -57,6 +62,13 @@ import {
   leaveReport,
   directoryReport,
 } from '../utils/hrReports.js';
+import {
+  auditFromReq,
+  auditSystem,
+  fmtGhs,
+  actionLabel,
+} from '../utils/payrollAudit.js';
+import { buildSimpleLetterPdf } from '../utils/simplePdf.js';
 
 const router = express.Router();
 const __filename = fileURLToPath(import.meta.url);
@@ -99,6 +111,136 @@ router.use(invalidateOnMutation);
 
 const actorId = (req) => req.user?.id || null;
 
+async function employeeBrief(employeeId) {
+  if (employeeId == null) return null;
+  try {
+    const r = await pool.query(
+      `SELECT id, full_name, department, position FROM hr_employees WHERE id = $1`,
+      [employeeId]
+    );
+    return r.rows[0] || null;
+  } catch {
+    return null;
+  }
+}
+
+function payrollAuditFilters(query = {}) {
+  const clauses = [];
+  const params = [];
+  const search = String(query.search || '').trim();
+  if (search) {
+    params.push(`%${search.toLowerCase()}%`);
+    clauses.push(`(
+      LOWER(COALESCE(a.performed_by_name,'')) LIKE $${params.length}
+      OR LOWER(COALESCE(a.action_type,'')) LIKE $${params.length}
+      OR LOWER(COALESCE(a.description,'')) LIKE $${params.length}
+      OR LOWER(COALESCE(e.full_name,'')) LIKE $${params.length}
+      OR LOWER(COALESCE(a.category,'')) LIKE $${params.length}
+    )`);
+  }
+  const category = String(query.category || '').trim().toLowerCase();
+  if (category && category !== 'all' && category !== 'all actions') {
+    params.push(category);
+    clauses.push(`LOWER(a.category) = $${params.length}`);
+  }
+  if (query.performed_by === 'system' || query.performed_by === '0') {
+    clauses.push(`a.performed_by IS NULL`);
+  } else if (query.performed_by) {
+    params.push(Number(query.performed_by));
+    clauses.push(`a.performed_by = $${params.length}`);
+  }
+  if (query.from) {
+    params.push(String(query.from));
+    clauses.push(`a.created_at >= $${params.length}::timestamptz`);
+  }
+  if (query.to) {
+    params.push(String(query.to));
+    // inclusive end-of-day if date-only
+    const toVal = String(query.to);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(toVal)) {
+      clauses.push(`a.created_at < ($${params.length}::date + INTERVAL '1 day')`);
+    } else {
+      clauses.push(`a.created_at <= $${params.length}::timestamptz`);
+    }
+  }
+  return { where: clauses.length ? `WHERE ${clauses.join(' AND ')}` : '', params };
+}
+
+function formatGhanaTimestamp(iso) {
+  try {
+    return new Date(iso).toLocaleString('en-GB', {
+      timeZone: 'Africa/Accra',
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false,
+    });
+  } catch {
+    return String(iso || '');
+  }
+}
+
+function normalizeBandsForCompare(bands) {
+  return (Array.isArray(bands) ? bands : []).map((b) => ({
+    from: Number(b.from) || 0,
+    to: b.to == null || b.to === '' ? null : Number(b.to),
+    rate: Number(b.rate) || 0,
+  }));
+}
+
+function catalogueKey(item) {
+  return String(item?.id || item?.name || item?.deduction_name || item?.allowance_name || '').toLowerCase();
+}
+
+async function auditCatalogueDiffs(req, beforeList, afterList, kind) {
+  const beforeMap = new Map((beforeList || []).map((i) => [catalogueKey(i), i]));
+  const afterMap = new Map((afterList || []).map((i) => [catalogueKey(i), i]));
+  const category = kind === 'allowance' ? 'allowance' : 'deduction';
+
+  for (const [key, after] of afterMap) {
+    const before = beforeMap.get(key);
+    if (!before) {
+      await auditFromReq(req, {
+        action_type: kind === 'allowance' ? 'allowance_catalogue_created' : 'deduction_added',
+        category,
+        after_snapshot: after,
+        description:
+          kind === 'allowance'
+            ? `Allowance catalogue item created — ${after.name || after.allowance_name} (${after.type || 'fixed'}, ${fmtGhs(after.value ?? after.default_value)})`
+            : `Deduction catalogue item created — ${after.name || after.deduction_name}`,
+      });
+    } else if (JSON.stringify(before) !== JSON.stringify(after)) {
+      await auditFromReq(req, {
+        action_type: kind === 'allowance' ? 'allowance_catalogue_edited' : 'deduction_edited',
+        category,
+        before_snapshot: before,
+        after_snapshot: after,
+        description:
+          kind === 'allowance'
+            ? `Allowance catalogue item edited — ${after.name || after.allowance_name}`
+            : `Deduction catalogue item edited — ${after.name || after.deduction_name}`,
+      });
+    }
+  }
+  for (const [key, before] of beforeMap) {
+    if (!afterMap.has(key)) {
+      await auditFromReq(req, {
+        action_type: kind === 'allowance' ? 'allowance_catalogue_deleted' : 'deduction_removed',
+        category,
+        before_snapshot: before,
+        description:
+          kind === 'allowance'
+            ? `Allowance catalogue item deleted — ${before.name || before.allowance_name}`
+            : `Deduction catalogue item deleted — ${before.name || before.deduction_name}`,
+      });
+    }
+  }
+}
+
+
 async function safeQuery(sql, params = [], fallback = { rows: [], rowCount: 0 }) {
   try {
     return await pool.query(sql, params);
@@ -111,6 +253,35 @@ async function safeQuery(sql, params = [], fallback = { rows: [], rowCount: 0 })
 function toNum(v, fallback = 0) {
   const n = Number(v);
   return Number.isFinite(n) ? n : fallback;
+}
+
+function parseJsonArrayField(value) {
+  if (Array.isArray(value)) return value;
+  if (value == null || value === '') return [];
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+  return [];
+}
+
+function normalizePayrollItem(row) {
+  if (!row) return row;
+  const allowance_breakdown = parseJsonArrayField(row.allowance_breakdown);
+  const relief_breakdown = parseJsonArrayField(row.relief_breakdown);
+  const deduction_breakdown = parseJsonArrayField(row.deduction_breakdown);
+  const otherFromBreakdown = deduction_breakdown.reduce((s, d) => s + Number(d.amount || 0), 0);
+  return {
+    ...row,
+    allowance_breakdown,
+    relief_breakdown,
+    deduction_breakdown,
+    other_deductions: Number(row.other_deductions) > 0 ? Number(row.other_deductions) : otherFromBreakdown,
+  };
 }
 
 function isoDate(value) {
@@ -609,7 +780,16 @@ router.post('/employee-allowances', async (req, res) => {
         b.effective_to || null,
       ]
     );
-    res.status(201).json(result.rows[0]);
+    const row = result.rows[0];
+    const emp = await employeeBrief(row.employee_id);
+    await auditFromReq(req, {
+      action_type: 'allowance_added',
+      category: 'allowance',
+      employee_id: row.employee_id,
+      after_snapshot: row,
+      description: `${row.allowance_name} added for ${emp?.full_name || 'employee'} — ${fmtGhs(row.value)}${row.allowance_type === 'percent' ? '%' : '/month'} (${row.taxable ? 'Taxable' : 'Non-taxable'})`,
+    });
+    res.status(201).json(row);
   } catch (err) {
     console.error('HR create allowance:', err);
     res.status(500).json({ error: 'Failed to save allowance' });
@@ -619,6 +799,9 @@ router.post('/employee-allowances', async (req, res) => {
 router.put('/employee-allowances/:id', async (req, res) => {
   try {
     const b = req.body || {};
+    const existing = await pool.query(`SELECT * FROM hr_employee_allowances WHERE id = $1`, [req.params.id]);
+    if (existing.rowCount === 0) return res.status(404).json({ error: 'Allowance not found' });
+    const before = existing.rows[0];
     const result = await pool.query(
       `UPDATE hr_employee_allowances SET
          allowance_name = COALESCE($1, allowance_name),
@@ -630,8 +813,17 @@ router.put('/employee-allowances/:id', async (req, res) => {
        WHERE id = $7 RETURNING *`,
       [b.allowance_name, b.allowance_type || b.type, b.value != null ? toNum(b.value) : null, b.taxable, b.effective_from, b.effective_to, req.params.id]
     );
-    if (result.rowCount === 0) return res.status(404).json({ error: 'Allowance not found' });
-    res.json(result.rows[0]);
+    const row = result.rows[0];
+    const emp = await employeeBrief(row.employee_id);
+    await auditFromReq(req, {
+      action_type: 'allowance_edited',
+      category: 'allowance',
+      employee_id: row.employee_id,
+      before_snapshot: before,
+      after_snapshot: row,
+      description: `${row.allowance_name} edited for ${emp?.full_name || 'employee'} — ${fmtGhs(before.value)} → ${fmtGhs(row.value)}`,
+    });
+    res.json(row);
   } catch (err) {
     console.error('HR update allowance:', err);
     res.status(500).json({ error: 'Failed to update allowance' });
@@ -640,12 +832,443 @@ router.put('/employee-allowances/:id', async (req, res) => {
 
 router.delete('/employee-allowances/:id', async (req, res) => {
   try {
-    const result = await pool.query(`DELETE FROM hr_employee_allowances WHERE id = $1 RETURNING id`, [req.params.id]);
-    if (result.rowCount === 0) return res.status(404).json({ error: 'Allowance not found' });
+    const existing = await pool.query(`SELECT * FROM hr_employee_allowances WHERE id = $1`, [req.params.id]);
+    if (existing.rowCount === 0) return res.status(404).json({ error: 'Allowance not found' });
+    const before = existing.rows[0];
+    await pool.query(`DELETE FROM hr_employee_allowances WHERE id = $1`, [req.params.id]);
+    const emp = await employeeBrief(before.employee_id);
+    await auditFromReq(req, {
+      action_type: 'allowance_removed',
+      category: 'allowance',
+      employee_id: before.employee_id,
+      before_snapshot: before,
+      description: `${before.allowance_name} removed from ${emp?.full_name || 'employee'}`,
+    });
     res.status(204).end();
   } catch (err) {
     console.error('HR delete allowance:', err);
     res.status(500).json({ error: 'Failed to delete allowance' });
+  }
+});
+
+router.get('/employee-reliefs/:employeeId', async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT * FROM hr_employee_reliefs WHERE employee_id = $1 ORDER BY id`,
+      [req.params.employeeId]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error('HR employee reliefs:', err);
+    res.status(500).json({ error: 'Failed to load reliefs' });
+  }
+});
+
+router.post('/employee-reliefs', async (req, res) => {
+  try {
+    const b = req.body || {};
+    if (!b.employee_id || !b.relief_name) {
+      return res.status(400).json({ error: 'employee and relief name are required' });
+    }
+    const annual = toNum(b.annual_amount);
+    const monthly = b.monthly_amount != null ? toNum(b.monthly_amount) : roundMoney(annual / 12);
+    const result = await pool.query(
+      `INSERT INTO hr_employee_reliefs
+         (employee_id, relief_name, annual_amount, monthly_amount, is_active, notes)
+       VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
+      [b.employee_id, b.relief_name, annual, monthly, b.is_active !== false, b.notes || null]
+    );
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    console.error('HR create relief:', err);
+    res.status(500).json({ error: 'Failed to save relief' });
+  }
+});
+
+router.put('/employee-reliefs/:id', async (req, res) => {
+  try {
+    const b = req.body || {};
+    const existing = await pool.query(`SELECT * FROM hr_employee_reliefs WHERE id = $1`, [req.params.id]);
+    if (existing.rowCount === 0) return res.status(404).json({ error: 'Relief not found' });
+    const cur = existing.rows[0];
+    const annual = b.annual_amount != null ? toNum(b.annual_amount) : Number(cur.annual_amount);
+    const monthly = b.monthly_amount != null ? toNum(b.monthly_amount) : roundMoney(annual / 12);
+    const result = await pool.query(
+      `UPDATE hr_employee_reliefs SET
+         relief_name = COALESCE($1, relief_name),
+         annual_amount = $2,
+         monthly_amount = $3,
+         is_active = COALESCE($4, is_active),
+         notes = COALESCE($5, notes),
+         updated_at = NOW()
+       WHERE id = $6 RETURNING *`,
+      [b.relief_name, annual, monthly, b.is_active, b.notes, req.params.id]
+    );
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('HR update relief:', err);
+    res.status(500).json({ error: 'Failed to update relief' });
+  }
+});
+
+router.delete('/employee-reliefs/:id', async (req, res) => {
+  try {
+    const result = await pool.query(`DELETE FROM hr_employee_reliefs WHERE id = $1 RETURNING id`, [req.params.id]);
+    if (result.rowCount === 0) return res.status(404).json({ error: 'Relief not found' });
+    res.status(204).end();
+  } catch (err) {
+    console.error('HR delete relief:', err);
+    res.status(500).json({ error: 'Failed to delete relief' });
+  }
+});
+
+router.get('/employee-deductions/:employeeId', async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT * FROM hr_employee_deductions WHERE employee_id = $1 ORDER BY id`,
+      [req.params.employeeId]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error('HR employee deductions:', err);
+    res.status(500).json({ error: 'Failed to load deductions' });
+  }
+});
+
+router.post('/employee-deductions', async (req, res) => {
+  try {
+    const b = req.body || {};
+    if (!b.employee_id || !b.deduction_name) {
+      return res.status(400).json({ error: 'employee and deduction name are required' });
+    }
+    const isLoan = !!b.is_loan;
+    const totalLoan = isLoan ? toNum(b.total_loan_amount) : null;
+    const remaining = isLoan
+      ? b.remaining_balance != null
+        ? toNum(b.remaining_balance)
+        : totalLoan
+      : null;
+    const result = await pool.query(
+      `INSERT INTO hr_employee_deductions
+         (employee_id, deduction_name, deduction_type, value, is_loan, total_loan_amount,
+          remaining_balance, auto_stop, is_active, effective_from, effective_to)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
+      [
+        b.employee_id,
+        b.deduction_name,
+        b.deduction_type || b.type || 'fixed',
+        toNum(b.value),
+        isLoan,
+        totalLoan,
+        remaining,
+        b.auto_stop !== false,
+        b.is_active !== false,
+        b.effective_from || null,
+        b.effective_to || null,
+      ]
+    );
+    const row = result.rows[0];
+    const emp = await employeeBrief(row.employee_id);
+    if (isLoan) {
+      await auditFromReq(req, {
+        action_type: 'loan_created',
+        category: 'loan',
+        employee_id: row.employee_id,
+        after_snapshot: row,
+        description: `Loan created for ${emp?.full_name || 'employee'} — amount ${fmtGhs(totalLoan)}, monthly deduction ${fmtGhs(row.value)}`,
+      });
+    } else {
+      await auditFromReq(req, {
+        action_type: 'deduction_added',
+        category: 'deduction',
+        employee_id: row.employee_id,
+        after_snapshot: row,
+        description: `${row.deduction_name} added for ${emp?.full_name || 'employee'} — ${fmtGhs(row.value)} (${row.deduction_type})`,
+      });
+    }
+    res.status(201).json(row);
+  } catch (err) {
+    console.error('HR create deduction:', err);
+    res.status(500).json({ error: 'Failed to save deduction' });
+  }
+});
+
+router.put('/employee-deductions/:id', async (req, res) => {
+  try {
+    const b = req.body || {};
+    const existing = await pool.query(`SELECT * FROM hr_employee_deductions WHERE id = $1`, [req.params.id]);
+    if (existing.rowCount === 0) return res.status(404).json({ error: 'Deduction not found' });
+    const cur = existing.rows[0];
+    const result = await pool.query(
+      `UPDATE hr_employee_deductions SET
+         deduction_name = COALESCE($1, deduction_name),
+         deduction_type = COALESCE($2, deduction_type),
+         value = COALESCE($3, value),
+         is_loan = COALESCE($4, is_loan),
+         total_loan_amount = COALESCE($5, total_loan_amount),
+         remaining_balance = COALESCE($6, remaining_balance),
+         auto_stop = COALESCE($7, auto_stop),
+         is_active = COALESCE($8, is_active),
+         effective_from = COALESCE($9, effective_from),
+         effective_to = COALESCE($10, effective_to),
+         updated_at = NOW()
+       WHERE id = $11 RETURNING *`,
+      [
+        b.deduction_name,
+        b.deduction_type || b.type,
+        b.value != null ? toNum(b.value) : null,
+        b.is_loan,
+        b.total_loan_amount != null ? toNum(b.total_loan_amount) : null,
+        b.remaining_balance != null ? toNum(b.remaining_balance) : null,
+        b.auto_stop,
+        b.is_active,
+        b.effective_from,
+        b.effective_to,
+        req.params.id,
+      ]
+    );
+    const row = result.rows[0];
+    const emp = await employeeBrief(row.employee_id);
+    const wasActive = cur.is_active !== false;
+    const nowActive = row.is_active !== false;
+    if (wasActive !== nowActive) {
+      await auditFromReq(req, {
+        action_type: nowActive ? 'deduction_activated' : 'deduction_deactivated',
+        category: 'deduction',
+        employee_id: row.employee_id,
+        before_snapshot: cur,
+        after_snapshot: row,
+        description: `${row.deduction_name} ${nowActive ? 'activated' : 'deactivated'} for ${emp?.full_name || 'employee'}`,
+      });
+    } else {
+      await auditFromReq(req, {
+        action_type: 'deduction_edited',
+        category: row.is_loan ? 'loan' : 'deduction',
+        employee_id: row.employee_id,
+        before_snapshot: cur,
+        after_snapshot: row,
+        description: `${row.deduction_name} edited for ${emp?.full_name || 'employee'} — ${fmtGhs(cur.value)} → ${fmtGhs(row.value)}`,
+      });
+    }
+    res.json(row);
+  } catch (err) {
+    console.error('HR update deduction:', err);
+    res.status(500).json({ error: 'Failed to update deduction' });
+  }
+});
+
+router.delete('/employee-deductions/:id', async (req, res) => {
+  try {
+    const existing = await pool.query(`SELECT * FROM hr_employee_deductions WHERE id = $1`, [req.params.id]);
+    if (existing.rowCount === 0) return res.status(404).json({ error: 'Deduction not found' });
+    const before = existing.rows[0];
+    await pool.query(`DELETE FROM hr_employee_deductions WHERE id = $1`, [req.params.id]);
+    const emp = await employeeBrief(before.employee_id);
+    await auditFromReq(req, {
+      action_type: 'deduction_removed',
+      category: before.is_loan ? 'loan' : 'deduction',
+      employee_id: before.employee_id,
+      before_snapshot: before,
+      description: `${before.deduction_name} removed from ${emp?.full_name || 'employee'}`,
+    });
+    res.status(204).end();
+  } catch (err) {
+    console.error('HR delete deduction:', err);
+    res.status(500).json({ error: 'Failed to delete deduction' });
+  }
+});
+
+// ── Salary Advances / Staff Loans ────────────────────────────────────────────
+
+router.get('/salary-advances/summary', async (_req, res) => {
+  try {
+    const now = new Date();
+    const month = now.getMonth() + 1;
+    const year = now.getFullYear();
+    const [counts, recovered] = await Promise.all([
+      pool.query(`
+        SELECT
+          COUNT(*) FILTER (WHERE status = 'active')::int AS active_loans,
+          COALESCE(SUM(remaining_balance) FILTER (WHERE status = 'active'), 0)::float AS outstanding,
+          COUNT(*) FILTER (WHERE status = 'settled')::int AS fully_repaid
+        FROM hr_salary_advances
+      `),
+      pool.query(
+        `SELECT COALESCE(SUM(amount_deducted), 0)::float AS recovered
+         FROM hr_salary_advance_repayments WHERE month = $1 AND year = $2`,
+        [month, year]
+      ),
+    ]);
+    const c = counts.rows[0] || {};
+    res.json({
+      active_loans: c.active_loans || 0,
+      outstanding_balance: Number(c.outstanding || 0),
+      recovered_this_month: Number(recovered.rows[0]?.recovered || 0),
+      fully_repaid: c.fully_repaid || 0,
+    });
+  } catch (err) {
+    console.error('HR advances summary:', err);
+    res.status(500).json({ error: 'Failed to load advances summary' });
+  }
+});
+
+router.get('/salary-advances', async (req, res) => {
+  try {
+    const status = req.query.status ? String(req.query.status) : null;
+    const employeeId = req.query.employee_id ? Number(req.query.employee_id) : null;
+    const clauses = [];
+    const params = [];
+    if (status) {
+      params.push(status);
+      clauses.push(`a.status = $${params.length}`);
+    }
+    if (employeeId) {
+      params.push(employeeId);
+      clauses.push(`a.employee_id = $${params.length}`);
+    }
+    const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
+    const result = await pool.query(
+      `SELECT a.*, e.full_name, e.department, e.photo_url, e.basic_salary
+       FROM hr_salary_advances a
+       JOIN hr_employees e ON e.id = a.employee_id
+       ${where}
+       ORDER BY
+         CASE a.status WHEN 'active' THEN 0 WHEN 'paused' THEN 1 ELSE 2 END,
+         a.created_at DESC`,
+      params
+    );
+    res.json(result.rows.map((r) => ({ ...mapAdvance(r), full_name: r.full_name, department: r.department, photo_url: r.photo_url })));
+  } catch (err) {
+    console.error('HR list advances:', err);
+    res.status(500).json({ error: 'Failed to load salary advances' });
+  }
+});
+
+router.get('/salary-advances/:id', async (req, res) => {
+  try {
+    const adv = await pool.query(
+      `SELECT a.*, e.full_name, e.department, e.position, e.photo_url, e.basic_salary, e.email
+       FROM hr_salary_advances a
+       JOIN hr_employees e ON e.id = a.employee_id
+       WHERE a.id = $1`,
+      [req.params.id]
+    );
+    if (adv.rowCount === 0) return res.status(404).json({ error: 'Advance not found' });
+    const repayments = await pool.query(
+      `SELECT r.*, p.status AS payroll_status
+       FROM hr_salary_advance_repayments r
+       LEFT JOIN hr_payroll p ON p.id = r.payroll_id
+       WHERE r.advance_id = $1
+       ORDER BY r.year DESC, r.month DESC, r.id DESC`,
+      [req.params.id]
+    );
+    const row = adv.rows[0];
+    res.json({
+      ...mapAdvance(row),
+      full_name: row.full_name,
+      department: row.department,
+      position: row.position,
+      photo_url: row.photo_url,
+      basic_salary: row.basic_salary,
+      email: row.email,
+      repayments: repayments.rows,
+    });
+  } catch (err) {
+    console.error('HR advance detail:', err);
+    res.status(500).json({ error: 'Failed to load advance' });
+  }
+});
+
+router.post('/salary-advances', async (req, res) => {
+  try {
+    const b = req.body || {};
+    if (!b.employee_id || !b.loan_amount || !b.monthly_deduction) {
+      return res.status(400).json({ error: 'employee, loan amount, and monthly deduction are required' });
+    }
+    const loanAmount = toNum(b.loan_amount);
+    const monthly = toNum(b.monthly_deduction);
+    const now = new Date();
+    const startMonth = toNum(b.start_month, now.getMonth() + 1);
+    const startYear = toNum(b.start_year, now.getFullYear());
+    if (loanAmount <= 0 || monthly <= 0) {
+      return res.status(400).json({ error: 'Loan amount and monthly deduction must be greater than zero' });
+    }
+    const result = await pool.query(
+      `INSERT INTO hr_salary_advances
+         (employee_id, loan_amount, monthly_deduction, remaining_balance, paid_so_far,
+          start_month, start_year, notes, auto_stop, status, created_by)
+       VALUES ($1,$2,$3,$2,0,$4,$5,$6,$7,'active',$8) RETURNING *`,
+      [
+        b.employee_id,
+        loanAmount,
+        monthly,
+        startMonth,
+        startYear,
+        b.notes || null,
+        b.auto_stop !== false,
+        actorId(req),
+      ]
+    );
+    const row = result.rows[0];
+    const emp = await employeeBrief(row.employee_id);
+    await auditFromReq(req, {
+      action_type: 'loan_created',
+      category: 'loan',
+      employee_id: row.employee_id,
+      after_snapshot: row,
+      description: `Loan created for ${emp?.full_name || 'employee'} — amount ${fmtGhs(loanAmount)}, monthly deduction ${fmtGhs(monthly)}`,
+      payroll_month: startMonth,
+      payroll_year: startYear,
+    });
+    res.status(201).json(mapAdvance(row));
+  } catch (err) {
+    console.error('HR create advance:', err);
+    res.status(500).json({ error: 'Failed to create salary advance' });
+  }
+});
+
+router.patch('/salary-advances/:id/status', async (req, res) => {
+  try {
+    const status = String(req.body?.status || '').toLowerCase();
+    if (!['active', 'paused', 'settled'].includes(status)) {
+      return res.status(400).json({ error: 'status must be active, paused, or settled' });
+    }
+    const existing = await pool.query(`SELECT * FROM hr_salary_advances WHERE id = $1`, [req.params.id]);
+    if (existing.rowCount === 0) return res.status(404).json({ error: 'Advance not found' });
+    const before = existing.rows[0];
+    const result = await pool.query(
+      `UPDATE hr_salary_advances SET
+         status = $1,
+         remaining_balance = CASE WHEN $1 = 'settled' THEN 0 ELSE remaining_balance END,
+         updated_at = NOW()
+       WHERE id = $2 RETURNING *`,
+      [status, req.params.id]
+    );
+    const row = result.rows[0];
+    const emp = await employeeBrief(row.employee_id);
+    let action_type = 'loan_resumed';
+    let description = `Loan resumed for ${emp?.full_name || 'employee'} — remaining ${fmtGhs(row.remaining_balance)}`;
+    if (status === 'paused') {
+      action_type = 'loan_paused';
+      description = `Loan paused for ${emp?.full_name || 'employee'} — remaining balance at pause ${fmtGhs(before.remaining_balance)}`;
+    } else if (status === 'settled') {
+      action_type = 'loan_settled_manually';
+      description = `Loan marked settled for ${emp?.full_name || 'employee'} — remaining at settlement ${fmtGhs(before.remaining_balance)}`;
+    }
+    await auditFromReq(req, {
+      action_type,
+      category: 'loan',
+      employee_id: row.employee_id,
+      before_snapshot: before,
+      after_snapshot: row,
+      description,
+      payroll_month: row.start_month,
+      payroll_year: row.start_year,
+    });
+    res.json(mapAdvance(row));
+  } catch (err) {
+    console.error('HR advance status:', err);
+    res.status(500).json({ error: 'Failed to update advance status' });
   }
 });
 
@@ -749,6 +1372,22 @@ router.put('/employees/:id', upload.single('photo'), async (req, res) => {
       ]
     );
     const updated = result.rows[0];
+    const oldSalary = Number(emp.basic_salary || 0);
+    const newSalary = Number(updated.basic_salary || 0);
+    if (b.basic_salary != null && Math.abs(oldSalary - newSalary) > 0.0001) {
+      const pct = oldSalary > 0 ? ((newSalary - oldSalary) / oldSalary) * 100 : null;
+      const isIncrement = newSalary > oldSalary && pct != null && pct >= 0.01;
+      await auditFromReq(req, {
+        action_type: isIncrement ? 'salary_increment_applied' : 'salary_changed',
+        category: 'salary',
+        employee_id: updated.id,
+        before_snapshot: { basic_salary: oldSalary, employee: emp },
+        after_snapshot: { basic_salary: newSalary, employee: updated },
+        description: isIncrement
+          ? `Salary increment for ${updated.full_name} — ${fmtGhs(oldSalary)} → ${fmtGhs(newSalary)} (${pct.toFixed(2)}%)`
+          : `Basic salary changed for ${updated.full_name} — ${fmtGhs(oldSalary)} → ${fmtGhs(newSalary)}`,
+      });
+    }
     if (b.system_role) {
       try {
         await provisionEmployeeUser(updated, b.system_role, actorId(req), req.ip);
@@ -1018,8 +1657,50 @@ const generatePayroll = async (req, res) => {
       await client.query('BEGIN');
       const existing = await client.query(`SELECT id FROM hr_payroll WHERE month = $1 AND year = $2`, [month, year]);
       let payrollId;
+      const wasRegenerate = existing.rowCount > 0;
       if (existing.rowCount > 0) {
         payrollId = existing.rows[0].id;
+        // Reverse prior advance repayments for this payroll run
+        const prevRepay = await client.query(
+          `SELECT * FROM hr_salary_advance_repayments WHERE payroll_id = $1`,
+          [payrollId]
+        );
+        for (const r of prevRepay.rows) {
+          await client.query(
+            `UPDATE hr_salary_advances SET
+               remaining_balance = remaining_balance + $1,
+               paid_so_far = GREATEST(0, paid_so_far - $1),
+               status = CASE WHEN status = 'settled' THEN 'active' ELSE status END,
+               updated_at = NOW()
+             WHERE id = $2`,
+            [Number(r.amount_deducted), r.advance_id]
+          );
+        }
+        await client.query(`DELETE FROM hr_salary_advance_repayments WHERE payroll_id = $1`, [payrollId]);
+
+        const prevItems = await client.query(
+          `SELECT deduction_breakdown FROM hr_payroll_items WHERE payroll_id = $1`,
+          [payrollId]
+        );
+        for (const item of prevItems.rows) {
+          const breakdown =
+            typeof item.deduction_breakdown === 'string'
+              ? JSON.parse(item.deduction_breakdown || '[]')
+              : Array.isArray(item.deduction_breakdown)
+                ? item.deduction_breakdown
+                : [];
+          for (const d of breakdown) {
+            if (!d?.is_loan || d.is_advance || !d.id || !Number(d.amount)) continue;
+            await client.query(
+              `UPDATE hr_employee_deductions SET
+                 remaining_balance = COALESCE(remaining_balance, 0) + $1,
+                 is_active = TRUE,
+                 updated_at = NOW()
+               WHERE id = $2`,
+              [Number(d.amount), d.id]
+            );
+          }
+        }
         await client.query(`DELETE FROM hr_payroll_items WHERE payroll_id = $1`, [payrollId]);
         await client.query(
           `UPDATE hr_payroll SET status = 'Draft', generated_by = $1, generated_at = CURRENT_TIMESTAMP,
@@ -1035,18 +1716,34 @@ const generatePayroll = async (req, res) => {
       }
 
       const employees = await client.query(`SELECT * FROM hr_employees WHERE status = 'active'`);
-      const allowMap = await allowancesByEmployeeIds(employees.rows.map((e) => e.id), asOf);
+      const empIds = employees.rows.map((e) => e.id);
+      const [allowMap, reliefMap, deductionMap, advanceMap] = await Promise.all([
+        allowancesByEmployeeIds(empIds, asOf),
+        reliefsByEmployeeIds(empIds),
+        deductionsByEmployeeIds(empIds, asOf),
+        advancesByEmployeeIds(empIds, month, year),
+      ]);
       const items = [];
       for (const emp of employees.rows) {
         const ov = overrideMap.get(Number(emp.id));
         if (ov && ov.included === false) continue;
         const extra = Array.isArray(ov?.additional_allowances) ? ov.additional_allowances : [];
-        const calc = calculateNetPay(emp, mergeAllowances(allowMap.get(Number(emp.id)) || [], extra), settings);
+        const calc = calculateNetPay(
+          emp,
+          mergeAllowances(allowMap.get(Number(emp.id)) || [], extra),
+          settings,
+          {
+            reliefs: reliefMap.get(Number(emp.id)) || [],
+            deductions: deductionMap.get(Number(emp.id)) || [],
+            advances: advanceMap.get(Number(emp.id)) || [],
+          }
+        );
         const inserted = await client.query(
           `INSERT INTO hr_payroll_items (
             payroll_id, employee_id, basic_salary, allowances, gross,
-            ssnit_employer, ssnit_employee, taxable_income, paye, net_pay, allowance_breakdown
-          ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb) RETURNING *`,
+            ssnit_employer, ssnit_employee, taxable_income, paye, net_pay,
+            allowance_breakdown, reliefs_total, other_deductions, relief_breakdown, deduction_breakdown
+          ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,$12,$13,$14::jsonb,$15::jsonb) RETURNING *`,
           [
             payrollId,
             emp.id,
@@ -1059,8 +1756,72 @@ const generatePayroll = async (req, res) => {
             calc.paye,
             calc.net_pay,
             JSON.stringify(calc.allowance_breakdown || []),
+            calc.reliefs_total || 0,
+            calc.other_deductions || 0,
+            JSON.stringify(calc.relief_breakdown || []),
+            JSON.stringify(calc.deduction_breakdown || []),
           ]
         );
+        for (const loan of calc.loan_updates || []) {
+          await client.query(
+            `UPDATE hr_employee_deductions SET
+               remaining_balance = $1,
+               is_active = CASE WHEN $2 THEN FALSE ELSE is_active END,
+               updated_at = NOW()
+             WHERE id = $3`,
+            [loan.remaining_balance, !!loan.deactivate, loan.id]
+          );
+          await auditSystem({
+            action_type: loan.deactivate ? 'loan_auto_completed' : 'loan_repayment_recorded',
+            category: 'loan',
+            employee_id: emp.id,
+            after_snapshot: {
+              deduction_id: loan.id,
+              amount_deducted: loan.amount_deducted ?? loan.amount,
+              remaining_balance: loan.remaining_balance,
+              deactivate: !!loan.deactivate,
+            },
+            description: loan.deactivate
+              ? `Loan auto-completed for ${emp.full_name} — final amount deducted ${fmtGhs(loan.amount_deducted ?? loan.amount)}`
+              : `Loan repayment deducted — ${fmtGhs(loan.amount_deducted ?? loan.amount)}, Remaining: ${fmtGhs(loan.remaining_balance)}`,
+            payroll_month: month,
+            payroll_year: year,
+          });
+        }
+        for (const adv of calc.advance_updates || []) {
+          await client.query(
+            `UPDATE hr_salary_advances SET
+               remaining_balance = $1,
+               paid_so_far = $2,
+               status = CASE WHEN $3 THEN 'settled' ELSE status END,
+               updated_at = NOW()
+             WHERE id = $4`,
+            [adv.remaining_balance, adv.paid_so_far, !!adv.settle, adv.id]
+          );
+          await client.query(
+            `INSERT INTO hr_salary_advance_repayments
+               (advance_id, payroll_id, month, year, amount_deducted, remaining_after)
+             VALUES ($1,$2,$3,$4,$5,$6)`,
+            [adv.id, payrollId, month, year, adv.amount_deducted, adv.remaining_balance]
+          );
+          await auditSystem({
+            action_type: adv.settle ? 'loan_auto_completed' : 'loan_repayment_recorded',
+            category: 'loan',
+            employee_id: emp.id,
+            after_snapshot: {
+              advance_id: adv.id,
+              amount_deducted: adv.amount_deducted,
+              remaining_balance: adv.remaining_balance,
+              paid_so_far: adv.paid_so_far,
+              settle: !!adv.settle,
+            },
+            description: adv.settle
+              ? `Loan auto-completed for ${emp.full_name} — final amount deducted ${fmtGhs(adv.amount_deducted)}`
+              : `Loan repayment deducted — ${fmtGhs(adv.amount_deducted)}, Remaining: ${fmtGhs(adv.remaining_balance)}`,
+            payroll_month: month,
+            payroll_year: year,
+          });
+        }
         items.push({ ...inserted.rows[0], full_name: emp.full_name, department: emp.department, position: emp.position });
       }
       await client.query('COMMIT');
@@ -1069,6 +1830,22 @@ const generatePayroll = async (req, res) => {
         message: `Payroll generated for ${month}/${year}`,
       });
       const payroll = await pool.query('SELECT * FROM hr_payroll WHERE id = $1', [payrollId]);
+      const totalNet = items.reduce((s, i) => s + Number(i.net_pay || 0), 0);
+      await auditFromReq(req, {
+        action_type: wasRegenerate ? 'payroll_regenerated' : 'payroll_generated',
+        category: 'payroll',
+        after_snapshot: {
+          payroll: payroll.rows[0],
+          employee_count: items.length,
+          total_net: totalNet,
+          overrides_count: overrides.length,
+        },
+        description: wasRegenerate
+          ? `Payroll regenerated for ${month}/${year} — ${items.length} employees, total net ${fmtGhs(totalNet)}`
+          : `Payroll generated for ${month}/${year} — ${items.length} employees, total net ${fmtGhs(totalNet)}`,
+        payroll_month: month,
+        payroll_year: year,
+      });
       res.json({ payroll: payroll.rows[0], items });
     } catch (err) {
       await client.query('ROLLBACK');
@@ -1096,7 +1873,50 @@ router.get('/payroll/settings', async (_req, res) => {
 
 router.put('/payroll/settings', async (req, res) => {
   try {
-    res.json(await savePayrollSettings(req.body || {}, actorId(req)));
+    const before = await getPayrollSettings();
+    const body = req.body || {};
+    const saved = await savePayrollSettings(body, actorId(req));
+
+    if (Number(before.ssnit_employee_rate) !== Number(saved.ssnit_employee_rate)) {
+      await auditFromReq(req, {
+        action_type: 'ssnit_employee_rate_changed',
+        category: 'settings',
+        before_snapshot: before,
+        after_snapshot: saved,
+        description: `SSNIT employee rate changed from ${before.ssnit_employee_rate}% to ${saved.ssnit_employee_rate}%`,
+      });
+    }
+    if (Number(before.ssnit_employer_rate) !== Number(saved.ssnit_employer_rate)) {
+      await auditFromReq(req, {
+        action_type: 'ssnit_employer_rate_changed',
+        category: 'settings',
+        before_snapshot: before,
+        after_snapshot: saved,
+        description: `SSNIT employer rate changed from ${before.ssnit_employer_rate}% to ${saved.ssnit_employer_rate}%`,
+      });
+    }
+
+    const bandsBefore = JSON.stringify(before.tax_bands || []);
+    const bandsAfter = JSON.stringify(saved.tax_bands || []);
+    if (bandsBefore !== bandsAfter) {
+      const resetToDefault =
+        JSON.stringify(normalizeBandsForCompare(DEFAULT_TAX_BANDS)) ===
+        JSON.stringify(normalizeBandsForCompare(saved.tax_bands));
+      await auditFromReq(req, {
+        action_type: resetToDefault ? 'paye_bands_reset' : 'paye_bands_updated',
+        category: 'settings',
+        before_snapshot: { tax_bands: before.tax_bands },
+        after_snapshot: { tax_bands: saved.tax_bands },
+        description: resetToDefault
+          ? 'PAYE bands reset to Ghana defaults'
+          : `PAYE bands updated — ${(saved.tax_bands || []).length} bands configured`,
+      });
+    }
+
+    await auditCatalogueDiffs(req, before.allowance_types || [], saved.allowance_types || [], 'allowance');
+    await auditCatalogueDiffs(req, before.deduction_types || [], saved.deduction_types || [], 'deduction');
+
+    res.json(saved);
   } catch (err) {
     console.error('HR save payroll settings:', err);
     res.status(500).json({ error: 'Failed to save payroll settings' });
@@ -1117,12 +1937,19 @@ router.post('/payroll/preview', async (req, res) => {
        FROM hr_employees WHERE status = 'active' ORDER BY full_name`
     );
     const allowMap = await allowancesByEmployeeIds(employees.rows.map((e) => e.id), asOf);
+    const reliefMap = await reliefsByEmployeeIds(employees.rows.map((e) => e.id));
+    const deductionMap = await deductionsByEmployeeIds(employees.rows.map((e) => e.id), asOf);
+    const advanceMap = await advancesByEmployeeIds(employees.rows.map((e) => e.id), month, year);
     const items = employees.rows.map((emp) => {
       const ov = overrideMap.get(Number(emp.id));
       const included = !(ov && ov.included === false);
       const extra = Array.isArray(ov?.additional_allowances) ? ov.additional_allowances : [];
       const configured = allowMap.get(Number(emp.id)) || [];
-      const calc = calculateNetPay(emp, mergeAllowances(configured, extra), settings);
+      const calc = calculateNetPay(emp, mergeAllowances(configured, extra), settings, {
+        reliefs: reliefMap.get(Number(emp.id)) || [],
+        deductions: deductionMap.get(Number(emp.id)) || [],
+        advances: advanceMap.get(Number(emp.id)) || [],
+      });
       return {
         employee_id: emp.id,
         full_name: emp.full_name,
@@ -1163,10 +1990,55 @@ router.get('/payroll/employee/:employeeId/slip/:month/:year', async (req, res) =
       [employeeId, month, year]
     );
     if (result.rowCount === 0) return res.status(404).json({ error: 'Payslip not found' });
-    res.json(result.rows[0]);
+    const slip = normalizePayrollItem(result.rows[0]);
+    await auditFromReq(req, {
+      action_type: 'payslip_viewed',
+      category: 'payslip',
+      employee_id: Number(employeeId),
+      after_snapshot: { employee_id: Number(employeeId), month: Number(month), year: Number(year), net_pay: slip.net_pay },
+      description: `Payslip viewed for ${slip.full_name} — ${month}/${year}`,
+      payroll_month: Number(month),
+      payroll_year: Number(year),
+    });
+    res.json(slip);
   } catch (err) {
     console.error('HR payslip:', err);
     res.status(500).json({ error: 'Failed to load payslip' });
+  }
+});
+
+router.get('/payroll/employee/:employeeId/slip/:month/:year/pdf', async (req, res) => {
+  try {
+    const { employeeId, month, year } = req.params;
+    const result = await pool.query(
+      `SELECT i.*, p.month, p.year, p.status AS payroll_status, p.generated_at, p.paid_at,
+              e.full_name, e.email, e.department, e.position, e.photo_url, e.employment_type,
+              e.ssnit_number, e.bank_name, e.bank_account
+       FROM hr_payroll_items i
+       JOIN hr_payroll p ON p.id = i.payroll_id
+       JOIN hr_employees e ON e.id = i.employee_id
+       WHERE i.employee_id = $1 AND p.month = $2 AND p.year = $3`,
+      [employeeId, month, year]
+    );
+    if (result.rowCount === 0) return res.status(404).json({ error: 'Payslip not found' });
+    const slip = normalizePayrollItem(result.rows[0]);
+    await auditFromReq(req, {
+      action_type: 'payslip_downloaded',
+      category: 'payslip',
+      employee_id: Number(employeeId),
+      after_snapshot: { employee_id: Number(employeeId), month: Number(month), year: Number(year), format: 'pdf' },
+      description: `Payslip downloaded for ${slip.full_name} — ${month}/${year}`,
+      payroll_month: Number(month),
+      payroll_year: Number(year),
+    });
+    const pdf = await renderPayslipPdf(slip);
+    const filename = `payslip-${String(slip.full_name || employeeId).replace(/[^\w.-]+/g, '_')}-${month}-${year}.pdf`;
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(pdf);
+  } catch (err) {
+    console.error('HR payslip PDF:', err);
+    res.status(500).json({ error: 'Failed to generate payslip PDF' });
   }
 });
 
@@ -1182,7 +2054,7 @@ router.get('/payroll/:id/items', async (req, res) => {
        ORDER BY e.full_name`,
       [req.params.id]
     );
-    res.json({ payroll: payroll.rows[0], items: items.rows });
+    res.json({ payroll: payroll.rows[0], items: items.rows.map(normalizePayrollItem) });
   } catch (err) {
     console.error('HR payroll items:', err);
     res.status(500).json({ error: 'Failed to load payroll items' });
@@ -1212,7 +2084,7 @@ router.get('/payroll', async (req, res) => {
          WHERE i.payroll_id = $1 ORDER BY e.full_name`,
         [payroll.rows[0].id]
       );
-      return res.json({ payroll: payroll.rows[0], items: items.rows });
+      return res.json({ payroll: payroll.rows[0], items: items.rows.map(normalizePayrollItem) });
     }
     const history = await pool.query(
       `SELECT p.*, COUNT(i.id)::int AS item_count, COALESCE(SUM(i.net_pay),0)::numeric AS total_net
@@ -1230,8 +2102,35 @@ router.get('/payroll', async (req, res) => {
 
 router.put('/payroll/:id', async (req, res) => {
   try {
-    const row = await setPayrollStatus(req.params.id, req.body?.status, actorId(req));
+    const beforeQ = await pool.query(`SELECT * FROM hr_payroll WHERE id = $1`, [req.params.id]);
+    if (beforeQ.rowCount === 0) return res.status(404).json({ error: 'Payroll not found' });
+    const before = beforeQ.rows[0];
+    const newStatus = String(req.body?.status || '');
+    const row = await setPayrollStatus(req.params.id, newStatus, actorId(req));
     if (!row) return res.status(404).json({ error: 'Payroll not found' });
+    const reason = req.body?.reason || req.body?.notes || null;
+    let action_type = 'payroll_status_reversed';
+    let description = `Payroll status changed from ${before.status} to ${row.status}${reason ? ` — ${reason}` : ''} (${row.month}/${row.year})`;
+    if (newStatus === 'Approved') {
+      action_type = 'payroll_approved';
+      const totals = await pool.query(
+        `SELECT COALESCE(SUM(net_pay),0)::float AS total_net FROM hr_payroll_items WHERE payroll_id = $1`,
+        [row.id]
+      );
+      description = `Payroll approved for ${row.month}/${row.year} — total net ${fmtGhs(totals.rows[0]?.total_net || 0)}`;
+    } else if (newStatus === 'Paid') {
+      action_type = 'payroll_marked_paid';
+      description = `Payroll marked as paid for ${row.month}/${row.year}`;
+    }
+    await auditFromReq(req, {
+      action_type,
+      category: 'payroll',
+      before_snapshot: before,
+      after_snapshot: { ...row, reason },
+      description,
+      payroll_month: row.month,
+      payroll_year: row.year,
+    });
     res.json(row);
   } catch (err) {
     res.status(err.statusCode || 500).json({ error: err.message || 'Failed to update payroll' });
@@ -1240,8 +2139,25 @@ router.put('/payroll/:id', async (req, res) => {
 
 router.patch('/payroll/:id/approve', async (req, res) => {
   try {
+    const beforeQ = await pool.query(`SELECT * FROM hr_payroll WHERE id = $1`, [req.params.id]);
+    if (beforeQ.rowCount === 0) return res.status(404).json({ error: 'Payroll not found' });
+    const before = beforeQ.rows[0];
     const row = await setPayrollStatus(req.params.id, 'Approved', actorId(req));
     if (!row) return res.status(404).json({ error: 'Payroll not found' });
+    const totals = await pool.query(
+      `SELECT COALESCE(SUM(net_pay),0)::float AS total_net, COUNT(*)::int AS n FROM hr_payroll_items WHERE payroll_id = $1`,
+      [row.id]
+    );
+    const totalNet = Number(totals.rows[0]?.total_net || 0);
+    await auditFromReq(req, {
+      action_type: 'payroll_approved',
+      category: 'payroll',
+      before_snapshot: before,
+      after_snapshot: { ...row, total_net: totalNet, employee_count: totals.rows[0]?.n },
+      description: `Payroll approved for ${row.month}/${row.year} — total net ${fmtGhs(totalNet)}`,
+      payroll_month: row.month,
+      payroll_year: row.year,
+    });
     res.json(row);
   } catch (err) {
     res.status(err.statusCode || 500).json({ error: err.message || 'Failed to approve payroll' });
@@ -1250,11 +2166,213 @@ router.patch('/payroll/:id/approve', async (req, res) => {
 
 router.patch('/payroll/:id/mark-paid', async (req, res) => {
   try {
+    const beforeQ = await pool.query(`SELECT * FROM hr_payroll WHERE id = $1`, [req.params.id]);
+    if (beforeQ.rowCount === 0) return res.status(404).json({ error: 'Payroll not found' });
+    const before = beforeQ.rows[0];
     const row = await setPayrollStatus(req.params.id, 'Paid', actorId(req));
     if (!row) return res.status(404).json({ error: 'Payroll not found' });
+    await auditFromReq(req, {
+      action_type: 'payroll_marked_paid',
+      category: 'payroll',
+      before_snapshot: before,
+      after_snapshot: row,
+      description: `Payroll marked as paid for ${row.month}/${row.year}`,
+      payroll_month: row.month,
+      payroll_year: row.year,
+    });
     res.json(row);
   } catch (err) {
     res.status(err.statusCode || 500).json({ error: err.message || 'Failed to mark payroll paid' });
+  }
+});
+
+// ── Payroll Audit (HR admin only, read-only) ─────────────────────────────────
+
+function mapAuditRow(row) {
+  return {
+    id: row.id,
+    action_type: row.action_type,
+    action_label: actionLabel(row.action_type),
+    category: row.category,
+    employee_id: row.employee_id,
+    employee_name: row.employee_name || null,
+    employee_department: row.employee_department || null,
+    performed_by: row.performed_by,
+    performed_by_name: row.performed_by_name || (row.performed_by == null ? 'System' : null),
+    performed_by_role: row.performed_by_role || null,
+    ip_address: row.ip_address,
+    before_snapshot: row.before_snapshot,
+    after_snapshot: row.after_snapshot,
+    description: row.description,
+    payroll_month: row.payroll_month,
+    payroll_year: row.payroll_year,
+    created_at: row.created_at,
+    created_at_ghana: formatGhanaTimestamp(row.created_at),
+  };
+}
+
+router.get('/payroll/audit/performers', async (_req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT DISTINCT
+         a.performed_by AS id,
+         COALESCE(NULLIF(TRIM(a.performed_by_name), ''), 'System') AS name
+       FROM hr_payroll_audit a
+       ORDER BY name ASC`
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error('HR audit performers:', err);
+    res.status(500).json({ error: 'Failed to load performers' });
+  }
+});
+
+router.get('/payroll/audit/summary', async (req, res) => {
+  try {
+    const { where, params } = payrollAuditFilters(req.query);
+    const result = await pool.query(
+      `SELECT
+         COUNT(*)::int AS total_actions,
+         COUNT(*) FILTER (WHERE LOWER(a.category) = 'payroll')::int AS payroll_runs,
+         COUNT(*) FILTER (WHERE LOWER(a.category) = 'salary')::int AS salary_changes,
+         COUNT(*) FILTER (WHERE LOWER(a.category) = 'settings')::int AS settings_changes
+       FROM hr_payroll_audit a
+       LEFT JOIN hr_employees e ON e.id = a.employee_id
+       ${where}`,
+      params
+    );
+    res.json(result.rows[0] || { total_actions: 0, payroll_runs: 0, salary_changes: 0, settings_changes: 0 });
+  } catch (err) {
+    console.error('HR audit summary:', err);
+    res.status(500).json({ error: 'Failed to load audit summary' });
+  }
+});
+
+router.get('/payroll/audit/export', async (req, res) => {
+  try {
+    const format = String(req.query.format || 'csv').toLowerCase();
+    const { where, params } = payrollAuditFilters(req.query);
+    const result = await pool.query(
+      `SELECT a.*, e.full_name AS employee_name, e.department AS employee_department
+       FROM hr_payroll_audit a
+       LEFT JOIN hr_employees e ON e.id = a.employee_id
+       ${where}
+       ORDER BY a.created_at DESC, a.id DESC`,
+      params
+    );
+    const rows = result.rows.map(mapAuditRow);
+
+    if (format === 'pdf') {
+      const paragraphs = rows.slice(0, 80).map(
+        (r) =>
+          `${r.created_at_ghana} | ${r.action_label} | ${r.category} | ${r.employee_name || '-'} | ${r.performed_by_name || 'System'} | ${r.description}`
+      );
+      if (rows.length > 80) paragraphs.push(`… and ${rows.length - 80} more rows (export CSV for full list).`);
+      const pdf = buildSimpleLetterPdf({
+        title: 'Payroll Audit Trail',
+        paragraphs: paragraphs.length ? paragraphs : ['No audit records for the selected filters.'],
+        footerLines: [`Exported ${formatGhanaTimestamp(new Date().toISOString())} (Ghana time)`, `${rows.length} record(s)`],
+      });
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', 'attachment; filename="payroll-audit.pdf"');
+      return res.send(pdf);
+    }
+
+    const header = ['Timestamp (Ghana)', 'Action', 'Category', 'Employee Affected', 'Employee ID', 'Performed By', 'Details', 'Payroll Month', 'Payroll Year', 'IP'];
+    const escapeCsv = (v) => {
+      const s = v == null ? '' : String(v);
+      if (/[",\n]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+      return s;
+    };
+    const lines = [header.join(',')];
+    for (const r of rows) {
+      lines.push(
+        [
+          r.created_at_ghana,
+          r.action_label,
+          r.category,
+          r.employee_name || '',
+          r.employee_id || '',
+          r.performed_by_name || 'System',
+          r.description,
+          r.payroll_month || '',
+          r.payroll_year || '',
+          r.ip_address || '',
+        ]
+          .map(escapeCsv)
+          .join(',')
+      );
+    }
+    const csv = '\uFEFF' + lines.join('\r\n');
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="payroll-audit.csv"');
+    res.send(csv);
+  } catch (err) {
+    console.error('HR audit export:', err);
+    res.status(500).json({ error: 'Failed to export audit log' });
+  }
+});
+
+router.get('/payroll/audit/:id', async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT a.*,
+              e.full_name AS employee_name,
+              e.department AS employee_department,
+              COALESCE(u.role, u.main_role, u.position) AS performed_by_role
+       FROM hr_payroll_audit a
+       LEFT JOIN hr_employees e ON e.id = a.employee_id
+       LEFT JOIN users u ON u.id = a.performed_by
+       WHERE a.id = $1`,
+      [req.params.id]
+    );
+    if (result.rowCount === 0) return res.status(404).json({ error: 'Audit record not found' });
+    res.json(mapAuditRow(result.rows[0]));
+  } catch (err) {
+    console.error('HR audit detail:', err);
+    res.status(500).json({ error: 'Failed to load audit detail' });
+  }
+});
+
+router.get('/payroll/audit', async (req, res) => {
+  try {
+    const page = Math.max(1, toNum(req.query.page, 1));
+    const limit = Math.min(100, Math.max(1, toNum(req.query.limit, 50)));
+    const offset = (page - 1) * limit;
+    const { where, params } = payrollAuditFilters(req.query);
+    const countQ = await pool.query(
+      `SELECT COUNT(*)::int AS n
+       FROM hr_payroll_audit a
+       LEFT JOIN hr_employees e ON e.id = a.employee_id
+       ${where}`,
+      params
+    );
+    const total = countQ.rows[0]?.n || 0;
+    const listParams = [...params, limit, offset];
+    const result = await pool.query(
+      `SELECT a.*,
+              e.full_name AS employee_name,
+              e.department AS employee_department,
+              COALESCE(u.role, u.main_role, u.position) AS performed_by_role
+       FROM hr_payroll_audit a
+       LEFT JOIN hr_employees e ON e.id = a.employee_id
+       LEFT JOIN users u ON u.id = a.performed_by
+       ${where}
+       ORDER BY a.created_at DESC, a.id DESC
+       LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
+      listParams
+    );
+    res.json({
+      page,
+      limit,
+      offset,
+      total,
+      total_pages: Math.max(1, Math.ceil(total / limit)),
+      rows: result.rows.map(mapAuditRow),
+    });
+  } catch (err) {
+    console.error('HR audit list:', err);
+    res.status(500).json({ error: 'Failed to load payroll audit' });
   }
 });
 

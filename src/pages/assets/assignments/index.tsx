@@ -58,8 +58,8 @@ export default function AssignmentsPage() {
       .catch(console.error);
   }, [people]);
 
-  const getAssignedCount = (personId: string) => {
-    const list = assignmentsByPerson[personId] || [];
+  const getAssignedCount = (personId: string | number) => {
+    const list = assignmentsByPerson[String(personId)] || [];
     return list.filter((a: any) => a.status === 'assigned').length;
   };
 

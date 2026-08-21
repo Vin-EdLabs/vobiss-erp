@@ -217,9 +217,19 @@ export function EmployeeForm({
             )}
           </Field>
         </div>
-        <div className="grid gap-3 sm:grid-cols-2">
-          <Field label="Basic salary (GHS)"><input className={inputClass} type="number" value={form.basic_salary} onChange={(e) => update({ basic_salary: e.target.value })} /></Field>
-          <Field label="Allowances"><input className={inputClass} type="number" value={form.allowances} onChange={(e) => update({ allowances: e.target.value })} /></Field>
+        <div className="space-y-3">
+          <Field label="Basic salary (GHS)">
+            <input
+              className={inputClass}
+              type="number"
+              value={form.basic_salary}
+              onChange={(e) => update({ basic_salary: e.target.value })}
+              placeholder="0.00"
+            />
+          </Field>
+          <p className="rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface-secondary)] px-3 py-2 text-xs text-[var(--text-secondary)]">
+            Housing, transport, and other allowances are assigned later in <strong>HR → Payroll → Allowances</strong> — not on this form.
+          </p>
         </div>
         <div className="grid gap-3 sm:grid-cols-2">
           <Field label="Emergency contact"><input className={inputClass} value={form.emergency_contact_name} onChange={(e) => update({ emergency_contact_name: e.target.value })} /></Field>

@@ -8,7 +8,7 @@ import {
   DollarSign, HandCoins, Sliders, MessageCircle, ChevronsRight, ChevronDown, ChevronRight,
   Headphones, Ticket, MessagesSquare, Users2, User, FilePlus, Headset,
   Globe, CircleAlert, AlertCircle, Search, Network, LayoutDashboard,
-  Briefcase, CalendarDays, CalendarCheck, CalendarOff, Wallet, ClipboardCheck, FolderOpen, PanelLeftClose, PanelLeft, Landmark
+  Briefcase, CalendarDays, CalendarCheck, CalendarOff, Wallet, ClipboardCheck, FolderOpen, PanelLeftClose, PanelLeft, Landmark, ShieldCheck
 } from 'lucide-react';
 import { getRequests, getLowStockItems, getNotifications, getWorkspace } from '../api';
 import { resolvePrimaryRole, normalizeMenuRole, userHasAnyRole, formatRoleLabel, isHrStaff, SYSTEM_ADMIN_LABEL } from '../config/roles';
@@ -727,11 +727,14 @@ const Sidebar = ({
         { icon: Users, label: 'Employees', path: '/hr/employees' },
         { icon: CalendarDays, label: 'Leave Management', path: '/hr/leave', notificationCount: hrPendingLeave },
         { icon: Wallet, label: 'Payroll', path: '/hr/payroll' },
+        { icon: HandCoins, label: 'Salary Advances', path: '/hr/payroll/advances' },
+        { icon: ClipboardList, label: 'Payroll History', path: '/hr/payroll-history' },
         { icon: ClipboardCheck, label: 'Attendance', path: '/hr/attendance' },
         { icon: BarChart3, label: 'Analytics', path: '/hr/analytics' },
         { icon: BarChart2, label: 'Reports', path: '/hr/reports' },
         { icon: FolderOpen, label: 'Documents', path: '/hr/documents' },
         { icon: FileText, label: 'Form Requests', path: '/hr/forms', notificationCount: hrPendingForms },
+        { icon: ShieldCheck, label: 'Payroll Audit', path: '/hr/payroll/audit' },
       ],
     };
     const myHrSection = {
@@ -745,6 +748,7 @@ const Sidebar = ({
       notificationCount: myHrAttentionCount,
       subItems: [
         { icon: CalendarCheck, label: 'Attendance', path: '/hr-self/attendance' },
+        { icon: Wallet, label: 'My Payslips', path: '/hr-self/payslips' },
         { icon: CalendarOff, label: 'Leave Request', path: '/hr-self/leave', notificationCount: myPendingLeave },
         { icon: FileText, label: 'Forms', path: '/hr-self/forms', notificationCount: myPendingForms },
       ],
@@ -763,9 +767,11 @@ const Sidebar = ({
       subItems: [
         { icon: Users, label: 'Employees', path: '/hr/employees' },
         { icon: CalendarDays, label: 'Leave Management', path: '/hr/leave', notificationCount: hrPendingLeave },
+        { icon: Wallet, label: 'Payroll', path: '/hr/payroll' },
         { icon: ClipboardCheck, label: 'Attendance', path: '/hr/attendance' },
         { icon: BarChart2, label: 'Reports', path: '/hr/reports' },
         { icon: FileText, label: 'Form Requests', path: '/hr/forms', notificationCount: hrPendingForms },
+        { icon: ShieldCheck, label: 'Payroll Audit', path: '/hr/payroll/audit' },
       ],
     };
 
@@ -1184,7 +1190,17 @@ const Sidebar = ({
                         <div className="overflow-hidden">
                           {item.subItems.map((sub: any) => {
                             const SubIcon = sub.icon;
-                            const subActive = location.pathname.startsWith(sub.path);
+                            const moreSpecific = item.subItems.some(
+                              (other: any) =>
+                                other.path !== sub.path &&
+                                other.path.startsWith(`${sub.path}/`) &&
+                                (location.pathname === other.path ||
+                                  location.pathname.startsWith(`${other.path}/`))
+                            );
+                            const subActive =
+                              !moreSpecific &&
+                              (location.pathname === sub.path ||
+                                location.pathname.startsWith(`${sub.path}/`));
                             return (
                               <Link
                                 key={sub.path}

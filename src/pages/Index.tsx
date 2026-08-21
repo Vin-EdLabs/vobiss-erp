@@ -113,6 +113,9 @@ import HrEmployees from './hr/Employees';
 import HrEmployeeProfile from './hr/EmployeeProfile';
 import HrLeave from './hr/Leave';
 import HrPayroll from './hr/Payroll';
+import HrPayrollAdvances from './hr/PayrollAdvances';
+import HrPayrollHistory from './hr/PayrollHistory';
+import HrPayrollAudit from './hr/PayrollAudit';
 import HrAttendance from './hr/Attendance';
 import HrAnalytics from './hr/Analytics';
 import HrReports from './hr/Reports';
@@ -121,6 +124,7 @@ import HrFormRequests from './hr/FormRequests';
 import HrSelfAttendance from './hr-self/Attendance';
 import HrSelfLeave from './hr-self/Leave';
 import HrSelfForms from './hr-self/Forms';
+import HrSelfPayslips from './hr-self/Payslips';
 import {
   WORKSPACE_ROLES,
   TICKET_SUPPORT_ROLES,
@@ -945,6 +949,30 @@ const Index = () => {
                 }
               />
               <Route
+                path="/hr/payroll/advances"
+                element={
+                  <ProtectedRoute allowedRoles={HR_ROLES} allowedUnits={HR_UNITS} allowedPositions={HR_POSITIONS}>
+                    <HrPayrollAdvances />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/hr/payroll/audit"
+                element={
+                  <ProtectedRoute allowedRoles={HR_ROLES} allowedUnits={HR_UNITS} allowedPositions={HR_POSITIONS}>
+                    <HrPayrollAudit />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/hr/payroll-history"
+                element={
+                  <ProtectedRoute allowedRoles={HR_ROLES} allowedUnits={HR_UNITS} allowedPositions={HR_POSITIONS}>
+                    <HrPayrollHistory />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
                 path="/hr/attendance"
                 element={
                   <ProtectedRoute allowedRoles={HR_ROLES} allowedUnits={HR_UNITS} allowedPositions={HR_POSITIONS}>
@@ -989,6 +1017,22 @@ const Index = () => {
                 element={
                   <ProtectedRoute allowedRoles={WORKSPACE_ROLES}>
                     <HrSelfAttendance />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/hr-self/payslips"
+                element={
+                  <ProtectedRoute allowedRoles={WORKSPACE_ROLES}>
+                    <HrSelfPayslips />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/employee/payslips"
+                element={
+                  <ProtectedRoute allowedRoles={WORKSPACE_ROLES}>
+                    <HrSelfPayslips />
                   </ProtectedRoute>
                 }
               />

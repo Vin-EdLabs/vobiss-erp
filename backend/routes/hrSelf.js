@@ -19,6 +19,8 @@ import {
   publicUploadUrl,
   hrUploadsDir,
 } from '../utils/hrShared.js';
+import { renderPayslipPdf } from '../utils/payslipPdf.js';
+import { auditFromReq, actorDisplayName } from '../utils/payrollAudit.js';
 
 const router = express.Router();
 router.use(authenticateToken);
@@ -454,6 +456,101 @@ router.post('/forms/requests', upload.single('attachment'), async (req, res) => 
   } catch (err) {
     console.error('hr-self create form:', err);
     res.status(500).json({ error: err.message || 'Failed to submit form request' });
+  }
+});
+
+router.get('/payslips', async (req, res) => {
+  try {
+    const emp = await requireLinkedEmployee(req, res);
+    if (!emp) return;
+    const result = await pool.query(
+      `SELECT i.*, p.month, p.year, p.status AS payroll_status, p.generated_at, p.paid_at
+       FROM hr_payroll_items i
+       JOIN hr_payroll p ON p.id = i.payroll_id
+       WHERE i.employee_id = $1
+       ORDER BY p.year DESC, p.month DESC`,
+      [emp.id]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error('hr-self payslips:', err);
+    res.status(500).json({ error: 'Failed to load payslips' });
+  }
+});
+
+router.get('/payslips/:month/:year', async (req, res) => {
+  try {
+    const emp = await requireLinkedEmployee(req, res);
+    if (!emp) return;
+    const month = Number(req.params.month);
+    const year = Number(req.params.year);
+    const result = await pool.query(
+      `SELECT i.*, p.month, p.year, p.status AS payroll_status, p.generated_at, p.paid_at,
+              e.full_name, e.email, e.department, e.position, e.photo_url, e.employment_type,
+              e.ssnit_number, e.bank_name, e.bank_account
+       FROM hr_payroll_items i
+       JOIN hr_payroll p ON p.id = i.payroll_id
+       JOIN hr_employees e ON e.id = i.employee_id
+       WHERE i.employee_id = $1 AND p.month = $2 AND p.year = $3`,
+      [emp.id, month, year]
+    );
+    if (result.rowCount === 0) return res.status(404).json({ error: 'No payslip available for this period' });
+    const slip = result.rows[0];
+    await auditFromReq(req, {
+      action_type: 'payslip_viewed_by_employee',
+      category: 'payslip',
+      employee_id: emp.id,
+      performed_by: req.user?.id ?? null,
+      performed_by_name: emp.full_name || actorDisplayName(req.user),
+      after_snapshot: { employee_id: emp.id, month, year },
+      description: `Payslip viewed by employee ${emp.full_name} — ${month}/${year}`,
+      payroll_month: month,
+      payroll_year: year,
+    });
+    res.json(slip);
+  } catch (err) {
+    console.error('hr-self payslip:', err);
+    res.status(500).json({ error: 'Failed to load payslip' });
+  }
+});
+
+router.get('/payslips/:month/:year/pdf', async (req, res) => {
+  try {
+    const emp = await requireLinkedEmployee(req, res);
+    if (!emp) return;
+    const month = Number(req.params.month);
+    const year = Number(req.params.year);
+    const result = await pool.query(
+      `SELECT i.*, p.month, p.year, p.status AS payroll_status, p.generated_at, p.paid_at,
+              e.full_name, e.email, e.department, e.position, e.photo_url, e.employment_type,
+              e.ssnit_number, e.bank_name, e.bank_account
+       FROM hr_payroll_items i
+       JOIN hr_payroll p ON p.id = i.payroll_id
+       JOIN hr_employees e ON e.id = i.employee_id
+       WHERE i.employee_id = $1 AND p.month = $2 AND p.year = $3`,
+      [emp.id, month, year]
+    );
+    if (result.rowCount === 0) return res.status(404).json({ error: 'No payslip available for this period' });
+    const slip = result.rows[0];
+    await auditFromReq(req, {
+      action_type: 'payslip_downloaded_by_employee',
+      category: 'payslip',
+      employee_id: emp.id,
+      performed_by: req.user?.id ?? null,
+      performed_by_name: emp.full_name || actorDisplayName(req.user),
+      after_snapshot: { employee_id: emp.id, month, year, format: 'pdf' },
+      description: `Payslip downloaded by employee ${emp.full_name} — ${month}/${year}`,
+      payroll_month: month,
+      payroll_year: year,
+    });
+    const pdf = await renderPayslipPdf(slip);
+    const filename = `payslip-${month}-${year}.pdf`;
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(pdf);
+  } catch (err) {
+    console.error('hr-self payslip PDF:', err);
+    res.status(500).json({ error: 'Failed to generate payslip PDF' });
   }
 });
 

@@ -92,3 +92,34 @@ export const requireHR = async (req, res, next) => {
   }
   return res.status(403).json({ error: 'HR access required' });
 };
+
+/** Payroll audit / sensitive HR admin actions — not regular HR officers. */
+function isHrAdminUser(user = {}) {
+  if (isSystemAdminAccount(user)) return true;
+  const roles = collectRoleSlugs(user);
+  if (roles.has('director') || roles.has('cto') || roles.has('admin') || roles.has('system_admin')) return true;
+  const position = String(user?.position || '').trim().toLowerCase();
+  if (position === 'director' || position === 'cto') return true;
+  if (/(hr\s*)?(manager|admin|head)/i.test(position) || position === 'hr manager' || position === 'hr admin') {
+    return true;
+  }
+  // Seeded default HR account
+  if (String(user?.username || '').trim().toLowerCase() === 'hr') return true;
+  return false;
+}
+
+export const requireHrAdmin = async (req, res, next) => {
+  if (isHrAdminUser(req.user)) return next();
+  try {
+    const { default: pool } = await import('../db.js');
+    const result = await pool.query(
+      `SELECT username, unit, units, position, role, main_role FROM users WHERE id = $1 AND deleted_at IS NULL`,
+      [req.user.id]
+    );
+    const u = result.rows[0];
+    if (u && isHrAdminUser(u)) return next();
+  } catch (err) {
+    console.error('requireHrAdmin:', err);
+  }
+  return res.status(403).json({ error: 'HR admin access required for payroll audit' });
+};
