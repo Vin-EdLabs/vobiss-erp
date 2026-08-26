@@ -25,6 +25,11 @@ import {
 } from 'lucide-react';
 import { cxApi } from '../../../api';
 import { API_URL } from '@/lib/api';
+import { TicketTagBadgesRow } from '@/components/tickets/TicketTagBadge';
+import {
+  TicketListTagFilter,
+  type TagFilterMode,
+} from '@/components/tickets/TicketListTagFilter';
 
 interface TeamMember {
   id: number;
@@ -64,6 +69,7 @@ interface Ticket {
   updated_at?: string;
   attachments?: any;
   timeline?: TimelineEntry[];
+  tags?: { id: number; name: string; color: string }[];
 }
 
 const ITEMS_PER_PAGE = 10;
@@ -149,7 +155,7 @@ const ManualEmailForm: React.FC<{ ticketId: string; customerEmail: string }> = (
         <button
           onClick={handleSend}
           disabled={sending || !message.trim()}
-          className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 text-sm font-medium"
+          className="px-6 py-2 bg-[var(--primary)] text-white rounded-lg hover:bg-[var(--primary-hover)] transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 text-sm font-medium"
         >
           {sending ? (
             <>
@@ -193,6 +199,8 @@ const AllTickets: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [priorityFilter, setPriorityFilter] = useState<string>('all');
+  const [tagFilterIds, setTagFilterIds] = useState<number[]>([]);
+  const [tagFilterMode, setTagFilterMode] = useState<TagFilterMode>('all');
   const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [modalLoading, setModalLoading] = useState(false);
@@ -254,16 +262,24 @@ const AllTickets: React.FC = () => {
       assignee_name: ticket.assignee_name || ticket.assigned_to?.name,
       created_at: ticket.created_at || new Date().toISOString(),
       timeline: ticket.timeline || ticket.replies || [],
+      tags: Array.isArray(ticket.tags) ? ticket.tags : [],
     }));
 
     processed.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
     return processed;
   };
 
+  const tagQueryParams = React.useMemo(() => {
+    if (!tagFilterIds.length) return undefined;
+    return tagFilterMode === 'any'
+      ? { tag_ids_any: tagFilterIds }
+      : { tag_ids: tagFilterIds };
+  }, [tagFilterIds, tagFilterMode]);
+
   const fetchTicketsSilent = useCallback(async () => {
     try {
       setBackgroundRefreshing(true);
-      const data = await cxApi.getAllTickets();
+      const data = await cxApi.getAllTickets(tagQueryParams);
       let ticketList: any[] = [];
       if (data && data.data) ticketList = data.data;
       else if (Array.isArray(data)) ticketList = data;
@@ -278,13 +294,13 @@ const AllTickets: React.FC = () => {
     } finally {
       setBackgroundRefreshing(false);
     }
-  }, []);
+  }, [tagQueryParams]);
 
   const fetchTicketsWithReset = async () => {
     try {
       setLoading(true);
       setError(null);
-      const data = await cxApi.getAllTickets();
+      const data = await cxApi.getAllTickets(tagQueryParams);
       let ticketList: any[] = [];
       if (data && data.data) ticketList = data.data;
       else if (Array.isArray(data)) ticketList = data;
@@ -324,9 +340,14 @@ const AllTickets: React.FC = () => {
   };
 
   useEffect(() => {
-    fetchTicketsWithReset();
     fetchTeamMembers();
   }, []);
+
+  useEffect(() => {
+    shouldResetPage.current = true;
+    void fetchTicketsWithReset();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- refetch when tag filters change
+  }, [tagQueryParams]);
 
   useEffect(() => {
     const interval = setInterval(fetchTicketsSilent, REFRESH_INTERVAL_MS);
@@ -610,9 +631,9 @@ const AllTickets: React.FC = () => {
   const getStatusColor = (status: string) => {
     const s = status?.toUpperCase() || '';
     switch (s) {
-      case 'NEW': return { bg: 'bg-blue-100', text: 'text-blue-700', border: 'border-blue-200' };
+      case 'NEW': return { bg: 'bg-blue-100', text: 'text-blue-700', border: 'border-[#e0c4a0]' };
       case 'OPEN': return { bg: 'bg-yellow-100', text: 'text-yellow-700', border: 'border-yellow-200' };
-      case 'IN_PROGRESS': return { bg: 'bg-purple-100', text: 'text-purple-700', border: 'border-purple-200' };
+      case 'IN_PROGRESS': return { bg: 'bg-amber-100', text: 'text-amber-800', border: 'border-amber-200' };
       case 'RESOLVED': return { bg: 'bg-green-100', text: 'text-green-700', border: 'border-green-200' };
       case 'CLOSED': return { bg: 'bg-gray-100', text: 'text-gray-700', border: 'border-gray-200' };
       default: return { bg: 'bg-slate-100', text: 'text-slate-600', border: 'border-slate-200' };
@@ -623,9 +644,9 @@ const AllTickets: React.FC = () => {
     const p = priority?.toUpperCase() || '';
     switch (p) {
       case 'URGENT': return { dot: 'bg-red-500', text: 'text-red-600' };
-      case 'HIGH': return { dot: 'bg-orange-500', text: 'text-orange-600' };
+      case 'HIGH': return { dot: 'bg-[var(--accent-green-light)]', text: 'text-[var(--primary)]' };
       case 'MEDIUM': return { dot: 'bg-yellow-500', text: 'text-yellow-600' };
-      case 'LOW': return { dot: 'bg-blue-500', text: 'text-blue-600' };
+      case 'LOW': return { dot: 'bg-[var(--accent-green-light)]', text: 'text-[var(--primary)]' };
       default: return { dot: 'bg-slate-400', text: 'text-slate-600' };
     }
   };
@@ -666,9 +687,9 @@ const AllTickets: React.FC = () => {
 
   if (loading || loadingTeam) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-indigo-50 flex items-center justify-center">
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-[#f5ebe0]/40 flex items-center justify-center">
         <div className="text-center">
-          <RefreshCw className="w-10 h-10 text-indigo-600 animate-spin mx-auto mb-4" />
+          <RefreshCw className="w-10 h-10 text-[var(--primary)] animate-spin mx-auto mb-4" />
           <p className="text-slate-600 text-sm">Loading tickets...</p>
         </div>
       </div>
@@ -677,7 +698,7 @@ const AllTickets: React.FC = () => {
 
   if (error) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-indigo-50 flex items-center justify-center">
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-[#f5ebe0]/40 flex items-center justify-center">
         <div className="text-center max-w-md">
           <AlertCircle className="w-12 h-12 text-red-500 mx-auto mb-4" />
           <h3 className="text-lg font-semibold text-slate-800 mb-2">Error loading tickets</h3>
@@ -689,12 +710,12 @@ const AllTickets: React.FC = () => {
 
   return (
     <>
-      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-indigo-50 text-xs">
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-[#f5ebe0]/40 text-xs">
         <div className="p-3 md:p-4 max-w-[1700px] mx-auto">
           <div className="mb-4">
             <button
               onClick={() => navigate('/staff/cx')}
-              className="flex items-center gap-1 text-indigo-600 hover:text-indigo-800 text-xs font-medium mb-2 group"
+              className="flex items-center gap-1 text-[var(--primary)] hover:text-[var(--primary-hover)] text-xs font-medium mb-2 group"
             >
               <ArrowLeft className="w-3 h-3 group-hover:-translate-x-1 transition-transform" />
               Back to Dashboard
@@ -716,7 +737,7 @@ const AllTickets: React.FC = () => {
               <div className="flex items-center gap-2">
                 <button
                   onClick={() => navigate('/staff/cx/create-ticket')}
-                  className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-medium hover:bg-blue-700 flex items-center gap-1 shadow-sm"
+                  className="px-3 py-1.5 bg-[var(--primary)] text-white rounded-lg text-xs font-medium hover:bg-[var(--primary-hover)] flex items-center gap-1 shadow-sm"
                 >
                   <Plus className="w-3 h-3" /> New Ticket
                 </button>
@@ -744,7 +765,7 @@ const AllTickets: React.FC = () => {
                     placeholder="ID, customer, project, email, phone..."
                     value={searchTerm}
                     onChange={e => setSearchTerm(e.target.value)}
-                    className="pl-9 pr-3 py-1.5 w-full border border-slate-300 rounded-lg text-xs focus:ring-2 focus:ring-indigo-400 outline-none"
+                    className="pl-9 pr-3 py-1.5 w-full border border-slate-300 rounded-lg text-xs focus:ring-2 focus:ring-[var(--primary)]/40 outline-none"
                   />
                 </div>
               </div>
@@ -777,16 +798,31 @@ const AllTickets: React.FC = () => {
                   <option value="LOW">Low</option>
                 </select>
               </div>
+              <div className="md:col-span-4">
+                <TicketListTagFilter
+                  selectedIds={tagFilterIds}
+                  mode={tagFilterMode}
+                  onSelectedIdsChange={(ids) => {
+                    shouldResetPage.current = true;
+                    setTagFilterIds(ids);
+                  }}
+                  onModeChange={(m) => {
+                    shouldResetPage.current = true;
+                    setTagFilterMode(m);
+                  }}
+                />
+              </div>
             </div>
-            {(searchTerm || statusFilter !== 'all' || priorityFilter !== 'all') && (
+            {(searchTerm || statusFilter !== 'all' || priorityFilter !== 'all' || tagFilterIds.length > 0) && (
               <div className="mt-2 text-right">
                 <button
                   onClick={() => {
                     setSearchTerm('');
                     setStatusFilter('all');
                     setPriorityFilter('all');
+                    setTagFilterIds([]);
                   }}
-                  className="text-indigo-600 hover:text-indigo-800 text-xs font-medium"
+                  className="text-[var(--primary)] hover:text-[var(--primary-hover)] text-xs font-medium"
                 >
                   Clear filters
                 </button>
@@ -798,11 +834,12 @@ const AllTickets: React.FC = () => {
           <div className="bg-white rounded-lg shadow-[var(--shadow-md)] border border-slate-200 overflow-hidden">
             <div className="overflow-x-auto">
               <table className="w-full min-w-[1000px]">
-                <thead className="bg-gradient-to-r from-slate-800 to-indigo-800 text-white text-xs uppercase tracking-wider">
+                <thead className="bg-gradient-to-r from-[#5c3a1e] to-[#4a2c16] text-white text-xs uppercase tracking-wider">
                   <tr>
                     <th className="px-4 py-3 text-left font-medium">Ticket ID</th>
                     <th className="px-4 py-3 text-left font-medium">Source</th>
                     <th className="px-4 py-3 text-left font-medium">Customer</th>
+                    <th className="px-4 py-3 text-left font-medium">Tags</th>
                     <th className="px-4 py-3 text-left font-medium">Phone</th>
                     <th className="px-4 py-3 text-left font-medium">Email</th>
                     <th className="px-4 py-3 text-left font-medium">Project</th>
@@ -820,14 +857,14 @@ const AllTickets: React.FC = () => {
                     return (
                       <tr 
                       key={ticket.ticket_id} 
-                      className="hover:bg-indigo-50/40 transition-colors cursor-pointer"
+                      className="hover:bg-[var(--accent-green-light)]/40 transition-colors cursor-pointer"
                       onClick={(e) => {
                         if ((e.target as HTMLElement).closest('select, button')) return;
                         navigate(`/staff/cx/tickets/${ticket.ticket_id}`);
                       }}
                     >
                         <td className="px-4 py-3">
-                          <span className="font-mono bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full text-xs font-bold">
+                          <span className="font-mono bg-[var(--accent-green-light)] text-[var(--primary)] px-2 py-0.5 rounded-full text-xs font-bold">
                             #{ticket.ticket_id}
                           </span>
                         </td>
@@ -838,6 +875,9 @@ const AllTickets: React.FC = () => {
                           </div>
                         </td>
                         <td className="px-4 py-3 font-medium text-slate-800">{ticket.customer_name}</td>
+                        <td className="px-4 py-3">
+                          <TicketTagBadgesRow tags={ticket.tags} max={3} compact />
+                        </td>
                         <td className="px-4 py-3 text-slate-600">
                           {ticket.customer_phone || ticket.contact_phone || <span className="text-slate-400 italic">—</span>}
                         </td>
@@ -883,7 +923,7 @@ const AllTickets: React.FC = () => {
                             </select>
                             <button
                               onClick={() => navigate(`/staff/cx/tickets/${ticket.ticket_id}`)}
-                              className="px-3 py-1.5 bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded hover:from-indigo-700 hover:to-purple-700 text-xs font-medium flex items-center gap-1.5"
+                              className="px-3 py-1.5 bg-gradient-to-r from-[var(--primary)] to-[var(--primary-hover)] text-white rounded hover:from-[var(--primary-hover)] hover:to-[#5c3a1e] text-xs font-medium flex items-center gap-1.5"
                             >
                               <Eye className="w-4 h-4" /> View
                             </button>
@@ -950,10 +990,10 @@ const AllTickets: React.FC = () => {
             className="bg-white rounded-2xl shadow-2xl max-w-4xl w-full max-h-[92vh] overflow-hidden flex flex-col"
             onClick={e => e.stopPropagation()}
           >
-            <div className="bg-gradient-to-r from-slate-800 to-indigo-800 text-white p-5 flex items-center justify-between">
+            <div className="bg-gradient-to-r from-[#5c3a1e] to-[#4a2c16] text-white p-5 flex items-center justify-between">
               <div>
                 <h2 className="text-xl font-bold">Ticket #{selectedTicket.ticket_id}</h2>
-                <p className="text-indigo-200 text-sm mt-1">
+                <p className="text-[#e8d5bc] text-sm mt-1">
                   Created by <strong>{selectedTicket.creator_name}</strong> • {formatFullDate(selectedTicket.created_at)}
                 </p>
               </div>
@@ -965,15 +1005,15 @@ const AllTickets: React.FC = () => {
             <div className="flex-1 overflow-y-auto p-6 space-y-6 bg-gradient-to-br from-slate-50 to-white">
               {modalLoading ? (
                 <div className="flex flex-col items-center justify-center h-64">
-                  <RefreshCw className="w-10 h-10 text-indigo-600 animate-spin mb-4" />
+                  <RefreshCw className="w-10 h-10 text-[var(--primary)] animate-spin mb-4" />
                   <p className="text-slate-600">Loading ticket details...</p>
                 </div>
               ) : (
                 <>
                   {/* Title & Description combined for better flow */}
-                  <div className="bg-gradient-to-r from-indigo-50 to-purple-50 rounded-xl p-5 border border-indigo-100">
+                  <div className="bg-gradient-to-r from-[var(--accent-green-light)] to-[#f8f1e8] rounded-xl p-5 border border-[#e0c4a0]">
                     <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2 mb-3">
-                      <MessageSquare className="w-5 h-5 text-indigo-700" />
+                      <MessageSquare className="w-5 h-5 text-[var(--primary)]" />
                       {selectedTicket.title}
                     </h3>
                     <p className="text-slate-700 whitespace-pre-wrap text-sm leading-relaxed">
@@ -985,7 +1025,7 @@ const AllTickets: React.FC = () => {
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <div className="bg-white p-4 rounded-xl border border-slate-100 shadow-sm">
                       <h4 className="font-semibold text-slate-800 mb-3 flex items-center gap-2 text-sm">
-                        <User className="w-4 h-4 text-indigo-600" /> Customer Details
+                        <User className="w-4 h-4 text-[var(--primary)]" /> Customer Details
                       </h4>
                       <div className="space-y-1.5 text-xs">
                         <p><strong>Name:</strong> {selectedTicket.customer_name}</p>
@@ -997,7 +1037,7 @@ const AllTickets: React.FC = () => {
 
                     <div className="bg-white p-4 rounded-xl border border-slate-100 shadow-sm">
                       <h4 className="font-semibold text-slate-800 mb-3 flex items-center gap-2 text-sm">
-                        <Globe className="w-4 h-4 text-indigo-600" /> Project / Source
+                        <Globe className="w-4 h-4 text-[var(--primary)]" /> Project / Source
                       </h4>
                       <div className="space-y-1.5 text-xs">
                         <p><strong>Project:</strong> {selectedTicket.project_name}</p>
@@ -1007,7 +1047,7 @@ const AllTickets: React.FC = () => {
 
                     <div className="bg-white p-4 rounded-xl border border-slate-100 shadow-[var(--shadow-md)]">
                       <h4 className="font-semibold text-slate-800 mb-3 flex items-center gap-2 text-sm">
-                        <Clock className="w-4 h-4 text-indigo-600" /> Status & Priority
+                        <Clock className="w-4 h-4 text-[var(--primary)]" /> Status & Priority
                       </h4>
                       <div className="space-y-1.5 text-xs">
                         <p>
@@ -1029,16 +1069,16 @@ const AllTickets: React.FC = () => {
                   </div>
 
                   {/* Status buttons */}
-                  <div className="bg-gradient-to-r from-indigo-50 to-purple-50 rounded-xl p-5 border border-indigo-100">
+                  <div className="bg-gradient-to-r from-[var(--accent-green-light)] to-[#f8f1e8] rounded-xl p-5 border border-[#e0c4a0]">
                     <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2">
-                      <UserCheck className="w-5 h-5 text-indigo-600" />
+                      <UserCheck className="w-5 h-5 text-[var(--primary)]" />
                       Update Status
                     </h3>
                     <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
                       {['OPEN', 'IN_PROGRESS', 'RESOLVED', 'CLOSED', 'REOPEN'].map(status => {
                         const isCurrent = selectedTicket.status === status;
                         const disabled = updatingStatus || isCurrent || (selectedTicket.status === 'CLOSED' && status !== 'REOPEN');
-                        let color = "bg-indigo-600 hover:bg-indigo-700";
+                        let color = "bg-[var(--primary)] hover:bg-[var(--primary-hover)]";
                         if (status === 'RESOLVED') color = "bg-green-600 hover:bg-green-700";
                         if (status === 'CLOSED') color = "bg-red-600 hover:bg-red-700";
                         if (status === 'REOPEN') color = "bg-amber-600 hover:bg-amber-700";
@@ -1073,7 +1113,7 @@ const AllTickets: React.FC = () => {
                         return (
                           <div className="bg-white rounded-xl p-5 border border-slate-100 shadow-[var(--shadow-md)]">
                             <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2">
-                              <FileText className="w-5 h-5 text-indigo-600" /> Attachments ({attachments.length})
+                              <FileText className="w-5 h-5 text-[var(--primary)]" /> Attachments ({attachments.length})
                             </h3>
                             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                               {attachments.map((att: any, idx: number) => {
@@ -1102,7 +1142,7 @@ const AllTickets: React.FC = () => {
                                       <img
                                         src={imageUrl}
                                         alt={att.originalName || `Attachment ${idx + 1}`}
-                                        className="w-full h-32 object-cover rounded-lg border border-slate-200 cursor-pointer hover:border-indigo-400 transition"
+                                        className="w-full h-32 object-cover rounded-lg border border-slate-200 cursor-pointer hover:border-[var(--primary)] transition"
                                         onClick={() => window.open(imageUrl, '_blank')}
                                         onError={(e) => {
                                           console.error('Image failed to load:', imageUrl);
@@ -1132,9 +1172,9 @@ const AllTickets: React.FC = () => {
 
                   {/* Manual Email Send */}
                   {selectedTicket.customer_email || selectedTicket.contact_email ? (
-                    <div className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-xl p-5 border border-blue-100">
+                    <div className="bg-gradient-to-r from-[var(--accent-green-light)] to-[#f8f1e8] rounded-xl p-5 border border-blue-100">
                       <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2">
-                        <Mail className="w-5 h-5 text-blue-600" />
+                        <Mail className="w-5 h-5 text-[var(--primary)]" />
                         Send Email to Customer
                       </h3>
                       <ManualEmailForm ticketId={selectedTicket.ticket_id} customerEmail={selectedTicket.customer_email || selectedTicket.contact_email} />
@@ -1144,14 +1184,14 @@ const AllTickets: React.FC = () => {
                   {/* Timeline */}
                   <div className="bg-white rounded-xl p-5 border border-slate-100 shadow-sm">
                     <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2">
-                      <Calendar className="w-5 h-5 text-indigo-600" /> Activity Timeline
+                      <Calendar className="w-5 h-5 text-[var(--primary)]" /> Activity Timeline
                     </h3>
                     {selectedTicket.timeline?.length ? (
                       <div className="space-y-5">
                         {selectedTicket.timeline.map((entry, i) => (
                           <div key={i} className="flex gap-4">
                             <div className={`w-10 h-10 rounded-full flex items-center justify-center text-white font-bold text-sm flex-shrink-0 ${
-                              entry.visibility === 'public' ? 'bg-teal-600' : 'bg-indigo-600'
+                              entry.visibility === 'public' ? 'bg-teal-600' : 'bg-[var(--primary)]'
                             }`}>
                               {entry.actor_name?.[0]?.toUpperCase() || '?'}
                             </div>
@@ -1216,7 +1256,7 @@ const AllTickets: React.FC = () => {
             <div className="flex gap-3">
               <button
                 onClick={() => handleAcknowledge(true)}
-                className="flex-1 px-4 py-2 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700"
+                className="flex-1 px-4 py-2 bg-[var(--primary)] text-white rounded-lg font-medium hover:bg-[var(--primary-hover)]"
               >
                 Yes, Acknowledge
               </button>
@@ -1268,7 +1308,7 @@ const AllTickets: React.FC = () => {
                 <textarea
                   value={reason}
                   onChange={e => setReason(e.target.value)}
-                  className="w-full h-32 p-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400 outline-none resize-none text-sm"
+                  className="w-full h-32 p-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-[var(--primary)]/40 focus:border-[var(--primary)] outline-none resize-none text-sm"
                   placeholder="Enter details here..."
                 />
               </div>

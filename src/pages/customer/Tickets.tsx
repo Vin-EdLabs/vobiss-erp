@@ -24,6 +24,9 @@ interface Ticket {
   project_name?: string;
   project_code?: string;
   customer_name?: string;
+  site_id?: number | null;
+  site_name?: string | null;
+  site_code?: string | null;
 }
 
 interface CustomerProfile {
@@ -42,6 +45,7 @@ const TicketsPage = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
+  const [siteFilter, setSiteFilter] = useState('');
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -105,6 +109,9 @@ const TicketsPage = () => {
             project_name: projectName,
             project_code: projectCode,
             customer_name: item.customer_name || profileData?.name || 'Customer',
+            site_id: item.site_id || null,
+            site_name: item.site_name || null,
+            site_code: item.site_code || null,
           };
         });
 
@@ -122,26 +129,25 @@ const TicketsPage = () => {
   }, [navigate]);
 
   useEffect(() => {
-    if (!searchTerm.trim()) {
-      setFilteredTickets(tickets);
-      return;
-    }
     const lower = searchTerm.toLowerCase();
     const filtered = tickets.filter(
       (ticket) =>
-        ticket.ticket_id.toLowerCase().includes(lower) ||
-        ticket.title.toLowerCase().includes(lower) ||
-        ticket.project_name?.toLowerCase().includes(lower)
+        (!siteFilter || String(ticket.site_id) === siteFilter) &&
+        (!lower ||
+          ticket.ticket_id.toLowerCase().includes(lower) ||
+          ticket.title.toLowerCase().includes(lower) ||
+          ticket.site_name?.toLowerCase().includes(lower) ||
+          ticket.project_name?.toLowerCase().includes(lower))
     );
     setFilteredTickets(filtered);
-  }, [searchTerm, tickets]);
+  }, [searchTerm, siteFilter, tickets]);
 
   const getStatusConfig = (status: string) => {
     switch (status.toUpperCase()) {
       case 'NEW':
         return { color: 'bg-yellow-100 text-yellow-800', icon: <Clock className="w-4 h-4" /> };
       case 'OPEN':
-        return { color: 'bg-blue-100 text-blue-800', icon: <AlertTriangle className="w-4 h-4" /> };
+        return { color: 'bg-blue-100 text-[var(--primary-hover)]', icon: <AlertTriangle className="w-4 h-4" /> };
       case 'RESOLVED':
       case 'CLOSED':
         return { color: 'bg-green-100 text-green-800', icon: <CheckCircle className="w-4 h-4" /> };
@@ -170,10 +176,10 @@ const TicketsPage = () => {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-gray-50 flex items-center justify-center">
+      <div className="flex min-h-screen items-center justify-center bg-[var(--content-bg)]">
         <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-t-4 border-b-4 border-indigo-600 mx-auto mb-4"></div>
-          <p className="text-xl text-gray-700">Loading your tickets...</p>
+          <div className="mx-auto mb-4 h-12 w-12 animate-spin rounded-full border-4 border-[var(--border)] border-t-[var(--primary)]" />
+          <p className="text-lg text-[var(--text-secondary)]">Loading your tickets…</p>
         </div>
       </div>
     );
@@ -181,14 +187,15 @@ const TicketsPage = () => {
 
   if (error) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-gray-50 flex items-center justify-center p-4">
-        <div className="bg-white rounded-2xl shadow-xl p-8 text-center max-w-md">
-          <FileText className="w-16 h-16 text-red-500 mx-auto mb-4" />
-          <h2 className="text-2xl font-bold text-gray-800 mb-3">Error</h2>
-          <p className="text-gray-600 mb-6">{error}</p>
+      <div className="flex min-h-screen items-center justify-center bg-[var(--content-bg)] p-4">
+        <div className="max-w-md rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-8 text-center shadow-[var(--shadow-md)]">
+          <FileText className="mx-auto mb-4 h-16 w-16 text-red-500" />
+          <h2 className="mb-3 text-2xl font-bold text-[var(--text-primary)]">Error</h2>
+          <p className="mb-6 text-[var(--text-muted)]">{error}</p>
           <button
+            type="button"
             onClick={() => window.location.reload()}
-            className="bg-indigo-600 text-white px-6 py-3 rounded-xl hover:bg-indigo-700 font-medium transition"
+            className="rounded-xl bg-[var(--primary)] px-6 py-3 font-medium text-white transition hover:bg-[var(--primary-hover)]"
           >
             Retry
           </button>
@@ -198,98 +205,107 @@ const TicketsPage = () => {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-gray-50 flex">
+    <div className="flex min-h-screen bg-[var(--content-bg)]">
       <CustomerSidebar />
-      <div className="flex-1 md:ml-64 pb-20 md:pb-0">
+      <div className="flex-1 pb-20 md:ml-64 md:pb-0">
         <CustomerHeader
           name={profile?.name || 'Customer'}
           customer_code={profile?.customer_code || 'CUST-XXXXX'}
           heightClass="py-4"
         />
 
-        <div className="pt-28 md:pt-32 lg:pt-36 px-4 md:px-6 lg:px-8">
-          <div className="max-w-7xl mx-auto">
-            {/* Title & Button */}
-            <div className="flex flex-col md:flex-row md:items-center md:justify-between mb-6">
+        <div className="px-4 pb-10 pt-28 md:px-6 md:pt-32 lg:px-8 lg:pt-36">
+          <div className="mx-auto max-w-7xl">
+            <div className="mb-6 flex flex-col md:flex-row md:items-center md:justify-between">
               <div>
-                <h1 className="text-2xl md:text-3xl font-bold text-gray-900">My Tickets</h1>
-                <p className="text-gray-600 mt-1 text-sm md:text-base">
+                <h1 className="text-2xl font-bold text-[var(--text-primary)] md:text-3xl">My Tickets</h1>
+                <p className="mt-1 text-sm text-[var(--text-muted)] md:text-base">
                   {filteredTickets.length} {filteredTickets.length === 1 ? 'ticket' : 'tickets'}
                 </p>
               </div>
               <button
+                type="button"
                 onClick={() => navigate('/customer/create-ticket')}
-                className="mt-4 md:mt-0 bg-gradient-to-r from-indigo-600 to-purple-600 text-white px-5 py-2.5 rounded-xl font-medium hover:shadow-lg transition flex items-center gap-2 text-sm"
+                className="mt-4 flex items-center gap-2 rounded-xl bg-[var(--primary)] px-5 py-2.5 text-sm font-medium text-white transition hover:bg-[var(--primary-hover)] md:mt-0"
               >
-                <FileText className="w-4 h-4 md:w-5 md:h-5" />
+                <FileText className="h-4 w-4 md:h-5 md:w-5" />
                 New Ticket
               </button>
             </div>
 
-            {/* Search */}
-            <div className="relative mb-6">
-              <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
-              <input
-                type="text"
-                placeholder="Search by ID, title, or project..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full pl-12 pr-4 py-3 bg-white/80 backdrop-blur-sm rounded-xl shadow-sm border border-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition text-sm"
-              />
+            <div className="mb-6 grid gap-3 md:grid-cols-[1fr_240px]">
+              <div className="relative">
+                <Search className="absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-[var(--text-muted)]" />
+                <input
+                  type="text"
+                  placeholder="Search by ID, title, or site..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] py-3 pl-12 pr-4 text-sm text-[var(--text-primary)] shadow-sm transition focus:outline-none focus:ring-2 focus:ring-[var(--primary)]/40"
+                />
+              </div>
+              <select
+                value={siteFilter}
+                onChange={(e) => setSiteFilter(e.target.value)}
+                className="rounded-xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3 text-sm text-[var(--text-primary)] shadow-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary)]/40"
+              >
+                <option value="">All sites</option>
+                {Array.from(new Map(tickets.filter((ticket) => ticket.site_id).map((ticket) => [ticket.site_id, ticket])).values()).map((ticket) => (
+                  <option key={ticket.site_id} value={String(ticket.site_id)}>{ticket.site_name || 'Unnamed site'}</option>
+                ))}
+              </select>
             </div>
 
-            {/* Empty State */}
             {filteredTickets.length === 0 ? (
-              <div className="bg-white/80 backdrop-blur-sm rounded-2xl shadow-lg p-10 text-center">
-                <FileText className="w-14 h-14 text-gray-300 mx-auto mb-4" />
-                <p className="text-lg text-gray-600 font-medium">No tickets found</p>
-                <p className="text-gray-500 mt-2 text-sm">
+              <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-10 text-center shadow-[var(--shadow-md)]">
+                <FileText className="mx-auto mb-4 h-14 w-14 text-[var(--text-muted)]" />
+                <p className="text-lg font-medium text-[var(--text-primary)]">No tickets found</p>
+                <p className="mt-2 text-sm text-[var(--text-muted)]">
                   {searchTerm ? 'Try a different search term.' : 'Create your first ticket to get started!'}
                 </p>
               </div>
             ) : (
               <>
-                {/* Desktop: Table */}
-                <div className="hidden md:block bg-white rounded-2xl shadow-lg overflow-hidden">
+                <div className="hidden overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow-md)] md:block">
                   <div className="overflow-x-auto">
-                    <table className="min-w-full divide-y divide-gray-200">
-                      <thead className="bg-gray-50">
+                    <table className="min-w-full divide-y divide-[var(--border)]">
+                      <thead className="bg-[var(--surface-secondary)]">
                         <tr>
-                          <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Project</th>
-                          <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Ticket ID</th>
-                          <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Title</th>
-                          <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Created</th>
-                          <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Status</th>
-                          <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Priority</th>
+                          <th className="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">Site</th>
+                          <th className="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">Ticket ID</th>
+                          <th className="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">Title</th>
+                          <th className="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">Created</th>
+                          <th className="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">Status</th>
+                          <th className="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">Priority</th>
                         </tr>
                       </thead>
-                      <tbody className="bg-white divide-y divide-gray-100">
+                      <tbody className="divide-y divide-[var(--border)] bg-[var(--surface)]">
                         {filteredTickets.map((ticket) => {
                           const statusConfig = getStatusConfig(ticket.status);
                           return (
                             <tr
                               key={ticket.ticket_id}
                               onClick={() => navigate(`/customer/tickets/${ticket.ticket_id}`)}
-                              className="hover:bg-indigo-50 transition cursor-pointer"
+                              className="cursor-pointer transition hover:bg-[var(--surface-hover)]"
                             >
-                              <td className="px-6 py-5 text-sm font-medium text-gray-900">
+                              <td className="px-6 py-5 text-sm font-medium text-[var(--text-primary)]">
                                 <div>
-                                  {ticket.project_name}
-                                  {ticket.project_code && <span className="text-gray-500 text-xs ml-2 font-mono">({ticket.project_code})</span>}
+                                  {ticket.site_name || 'Not assigned'}
+                                  {ticket.site_code && <span className="ml-2 font-mono text-xs text-[var(--text-muted)]">({ticket.site_code})</span>}
                                 </div>
                               </td>
-                              <td className="px-6 py-5 text-sm font-mono text-indigo-600 font-semibold">{ticket.ticket_id}</td>
-                              <td className="px-6 py-5 text-sm text-gray-900 max-w-md">
+                              <td className="px-6 py-5 font-mono text-sm font-semibold text-[var(--primary)]">{ticket.ticket_id}</td>
+                              <td className="max-w-md px-6 py-5 text-sm text-[var(--text-primary)]">
                                 <div className="truncate pr-4">{ticket.title}</div>
                               </td>
-                              <td className="px-6 py-5 text-sm text-gray-600">{formatDate(ticket.created_at)}</td>
+                              <td className="px-6 py-5 text-sm text-[var(--text-muted)]">{formatDate(ticket.created_at)}</td>
                               <td className="px-6 py-5">
-                                <span className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium ${statusConfig.color}`}>
+                                <span className={`inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-medium ${statusConfig.color}`}>
                                   {statusConfig.icon}
                                   {ticket.status.charAt(0).toUpperCase() + ticket.status.slice(1).toLowerCase()}
                                 </span>
                               </td>
-                              <td className="px-6 py-5 text-sm font-medium text-gray-700">{getPriorityBadge(ticket.priority)}</td>
+                              <td className="px-6 py-5 text-sm font-medium text-[var(--text-secondary)]">{getPriorityBadge(ticket.priority)}</td>
                             </tr>
                           );
                         })}
@@ -298,31 +314,30 @@ const TicketsPage = () => {
                   </div>
                 </div>
 
-                {/* Mobile: Compact Cards */}
-                <div className="md:hidden space-y-4">
+                <div className="space-y-4 md:hidden">
                   {filteredTickets.map((ticket) => {
                     const statusConfig = getStatusConfig(ticket.status);
                     return (
                       <div
                         key={ticket.ticket_id}
                         onClick={() => navigate(`/customer/tickets/${ticket.ticket_id}`)}
-                        className="bg-white/80 backdrop-blur-sm rounded-2xl shadow-md hover:shadow-lg transition-all duration-300 cursor-pointer border border-gray-100"
+                        className="cursor-pointer rounded-2xl border border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow-md)] transition hover:bg-[var(--surface-hover)]"
                       >
                         <div className="p-5">
-                          <div className="flex items-start justify-between mb-3">
+                          <div className="mb-3 flex items-start justify-between">
                             <div>
-                              <p className="text-xs text-gray-500 font-medium">{ticket.project_name}</p>
-                              <p className="font-mono text-indigo-600 font-bold text-lg">{ticket.ticket_id}</p>
+                              <p className="text-xs font-medium text-[var(--text-muted)]">{ticket.site_name || 'No site assigned'}</p>
+                              <p className="font-mono text-lg font-bold text-[var(--primary)]">{ticket.ticket_id}</p>
                             </div>
-                            <span className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium ${statusConfig.color}`}>
+                            <span className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium ${statusConfig.color}`}>
                               {statusConfig.icon}
                               {ticket.status.charAt(0).toUpperCase() + ticket.status.slice(1).toLowerCase()}
                             </span>
                           </div>
-                          <h3 className="font-semibold text-gray-900 text-base line-clamp-2 mb-2">{ticket.title}</h3>
+                          <h3 className="mb-2 line-clamp-2 text-base font-semibold text-[var(--text-primary)]">{ticket.title}</h3>
                           <div className="flex items-center justify-between text-sm">
-                            <span className="text-gray-600">Created {formatDate(ticket.created_at)}</span>
-                            <span className="font-medium text-gray-700">{getPriorityBadge(ticket.priority)}</span>
+                            <span className="text-[var(--text-muted)]">Created {formatDate(ticket.created_at)}</span>
+                            <span className="font-medium text-[var(--text-secondary)]">{getPriorityBadge(ticket.priority)}</span>
                           </div>
                         </div>
                       </div>

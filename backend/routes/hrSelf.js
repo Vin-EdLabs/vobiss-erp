@@ -224,6 +224,80 @@ router.post('/attendance/clock-in', async (req, res) => {
   }
 });
 
+/** Manual clock-in without GPS — used by secret header override (date always Accra today). */
+router.post('/attendance/manual-clock-in', async (req, res) => {
+  try {
+    const emp = await requireLinkedEmployee(req, res);
+    if (!emp) return;
+    const {
+      getHrSettings,
+      accraClockParts,
+      timeToMinutes,
+      hasClockedIn,
+    } = await import('../utils/hrGps.js');
+
+    const rawTime = String(req.body?.time || '').trim();
+    const match = rawTime.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
+    if (!match) {
+      return res.status(400).json({ error: 'Valid time is required (HH:MM)' });
+    }
+    const hh = Math.min(23, Math.max(0, Number(match[1])));
+    const mm = Math.min(59, Math.max(0, Number(match[2])));
+    const ss = match[3] != null ? Math.min(59, Math.max(0, Number(match[3]))) : 0;
+    const timeStr = `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}:${String(ss).padStart(2, '0')}`;
+
+    const clock = accraClockParts();
+    const date = clock.today;
+
+    const existing = await pool.query(
+      `SELECT * FROM hr_attendance WHERE employee_id = $1 AND date = $2 LIMIT 1`,
+      [emp.id, date]
+    );
+    if (existing.rows[0] && hasClockedIn(existing.rows[0])) {
+      return res.status(400).json({ error: 'Already clocked in today' });
+    }
+
+    const settings = await getHrSettings();
+    const expectedMin = timeToMinutes(settings?.expected_clock_in);
+    const clockMin = hh * 60 + mm;
+    const lateMinutes = expectedMin == null ? 0 : Math.max(0, clockMin - expectedMin);
+    const isLate = lateMinutes > 0;
+    const status = isLate ? 'Late' : 'Present';
+
+    // Build Accra-local timestamp for clock_in_time
+    const clockInTime = new Date(`${date}T${timeStr}+00:00`);
+
+    let row;
+    if (existing.rows[0]) {
+      row = (
+        await pool.query(
+          `UPDATE hr_attendance SET
+            status = $1, clock_in = $2, clock_in_time = $3,
+            clock_in_lat = NULL, clock_in_lng = NULL, clock_in_distance_meters = NULL,
+            is_late = $4, late_minutes = $5, is_remote = true
+           WHERE id = $6 RETURNING *`,
+          [status, timeStr, clockInTime, isLate, lateMinutes, existing.rows[0].id]
+        )
+      ).rows[0];
+    } else {
+      row = (
+        await pool.query(
+          `INSERT INTO hr_attendance (
+            employee_id, date, status, clock_in, clock_in_time,
+            is_late, late_minutes, is_remote, recorded_by
+          ) VALUES ($1,$2,$3,$4,$5,$6,$7,true,$8)
+          RETURNING *`,
+          [emp.id, date, status, timeStr, clockInTime, isLate, lateMinutes, req.user.id]
+        )
+      ).rows[0];
+    }
+    res.json({ success: true, attendance: row });
+  } catch (err) {
+    console.error('hr-self manual clock-in:', err);
+    res.status(500).json({ error: 'Failed to clock in' });
+  }
+});
+
 router.post('/attendance/clock-out', async (req, res) => {
   try {
     const emp = await requireLinkedEmployee(req, res);

@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import React, { useEffect, useRef, useState } from 'react';
+import { Link, useNavigate, useLocation } from 'react-router-dom';
 import {
   Menu,
   X,
@@ -13,10 +13,13 @@ import {
   Clock,
   BookOpen,
 } from 'lucide-react';
+import { useQueryClient } from '@tanstack/react-query';
 import { timeOfDayGreeting } from '@/components/ui/greeting-banner';
 import { TodoPanel } from '@/components/todos/TodoPanel';
 import { toast } from 'sonner';
 import { useAuth } from '@/context/AuthContext';
+import { useVobi } from '@/context/VobiContext';
+import { useVobiAmbientStore } from '@/stores/vobiAmbientStore';
 import { SYSTEM_ADMIN_LABEL } from '@/config/roles';
 import {
   getNotifications,
@@ -24,6 +27,7 @@ import {
   type SystemNotification,
 } from '@/api';
 import { getChatUnreadTotal } from '@/api/chat';
+import { hrSelfApi } from '@/api/hrSelf';
 import {
   isPushSupported,
   permissionState,
@@ -42,6 +46,16 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 
 interface StaffHeaderProps {
   sidebarOpen: boolean;
@@ -79,6 +93,11 @@ const StaffHeader: React.FC<StaffHeaderProps> = ({
   onToggleTheme,
 }) => {
   const { user, logout } = useAuth();
+  const { close: closeVobi } = useVobi();
+  const closeAmbient = useVobiAmbientStore((s) => s.close);
+  const navigate = useNavigate();
+  const location = useLocation();
+  const qc = useQueryClient();
   const [notifications, setNotifications] = useState<SystemNotification[]>([]);
   const [chatUnread, setChatUnread] = useState(0);
   const [pushReady, setPushReady] = useState<{
@@ -96,11 +115,76 @@ const StaffHeader: React.FC<StaffHeaderProps> = ({
   const unreadCount = notifUnread + chatUnread;
   const [now, setNow] = useState(() => new Date());
   const [notifOpen, setNotifOpen] = useState(false);
+  const [accountOpen, setAccountOpen] = useState(false);
+  const [manualOpen, setManualOpen] = useState(false);
+  const [manualTime, setManualTime] = useState(() => {
+    const accra = new Date(new Date().toLocaleString('en-US', { timeZone: 'Africa/Accra' }));
+    return `${String(accra.getHours()).padStart(2, '0')}:${String(accra.getMinutes()).padStart(2, '0')}`;
+  });
+  const [manualBusy, setManualBusy] = useState(false);
+  const profileTapsRef = useRef<number[]>([]);
+
+  const accraTodayLabel = new Date().toLocaleDateString('en-GB', {
+    timeZone: 'Africa/Accra',
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+  });
+
+  const openManualClockIn = () => {
+    const accra = new Date(new Date().toLocaleString('en-US', { timeZone: 'Africa/Accra' }));
+    setManualTime(
+      `${String(accra.getHours()).padStart(2, '0')}:${String(accra.getMinutes()).padStart(2, '0')}`
+    );
+    setAccountOpen(false);
+    closeVobi();
+    closeAmbient();
+    if (/^\/ai-assistant/i.test(location.pathname)) {
+      navigate('/workspace', { replace: false });
+    }
+    setManualOpen(true);
+  };
+
+  const onProfilePointerDown = () => {
+    const t = Date.now();
+    profileTapsRef.current = [...profileTapsRef.current.filter((x) => t - x < 3000), t];
+    if (profileTapsRef.current.length >= 4) {
+      profileTapsRef.current = [];
+      openManualClockIn();
+    }
+  };
+
+  const submitManualClockIn = async () => {
+    if (!manualTime) {
+      toast.error('Set a clock-in time');
+      return;
+    }
+    setManualBusy(true);
+    try {
+      await hrSelfApi.manualClockIn(manualTime);
+      toast.success('Clocked in');
+      setManualOpen(false);
+      qc.invalidateQueries({ queryKey: ['hr-self', 'attendance'] });
+      qc.invalidateQueries({ queryKey: ['hr-self', 'attendance-today'] });
+      window.dispatchEvent(new CustomEvent('staff:attendance-changed'));
+    } catch (e: any) {
+      toast.error(e?.message || 'Clock-in failed');
+    } finally {
+      setManualBusy(false);
+    }
+  };
 
   useEffect(() => {
     const open = () => setNotifOpen(true);
     window.addEventListener('staff:open-notifications', open);
     return () => window.removeEventListener('staff:open-notifications', open);
+  }, []);
+
+  useEffect(() => {
+    const open = () => openManualClockIn();
+    window.addEventListener('staff:open-manual-clock-in', open);
+    return () => window.removeEventListener('staff:open-manual-clock-in', open);
   }, []);
 
   useEffect(() => {
@@ -328,9 +412,14 @@ const StaffHeader: React.FC<StaffHeaderProps> = ({
           {isDark ? <Sun className="h-[17px] w-[17px]" /> : <Moon className="h-[17px] w-[17px]" />}
         </button>
         <span className="mx-1 hidden h-4 w-px bg-[var(--border)] md:block" />
-        <DropdownMenu>
+        <DropdownMenu open={accountOpen} onOpenChange={setAccountOpen}>
           <DropdownMenuTrigger asChild>
-            <button type="button" className="flex min-w-0 items-center gap-2.5 rounded-[var(--radius-sm)] pl-1 text-right" aria-label="Account menu">
+            <button
+              type="button"
+              className="flex min-w-0 items-center gap-2.5 rounded-[var(--radius-sm)] pl-1 text-right"
+              aria-label="Account menu"
+              onPointerDown={onProfilePointerDown}
+            >
               <span className="hidden min-w-0 md:block">
                 <span className="block truncate text-[14px] font-semibold leading-tight text-[var(--text-primary)]">
                   {timeOfDayGreeting()}, {firstName}
@@ -386,6 +475,50 @@ const StaffHeader: React.FC<StaffHeaderProps> = ({
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
+
+      <Dialog open={manualOpen} onOpenChange={setManualOpen}>
+        <DialogContent
+          className="sm:max-w-md"
+          onInteractOutside={(e) => e.preventDefault()}
+          onPointerDownOutside={(e) => e.preventDefault()}
+          onEscapeKeyDown={(e) => e.preventDefault()}
+        >
+          <DialogHeader>
+            <DialogTitle>Manual clock-in</DialogTitle>
+            <DialogDescription>
+              Set your clock-in time for today. No location check is required.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-1">
+            <div>
+              <label className="mb-1.5 block text-xs font-medium uppercase tracking-wide text-[var(--text-muted)]">
+                Date
+              </label>
+              <Input value={accraTodayLabel} readOnly className="bg-[var(--surface-2,#f8f5f1)]" />
+            </div>
+            <div>
+              <label className="mb-1.5 block text-xs font-medium uppercase tracking-wide text-[var(--text-muted)]">
+                Clock-in time
+              </label>
+              <Input
+                type="time"
+                value={manualTime}
+                onChange={(e) => setManualTime(e.target.value)}
+                className="tabular-nums"
+              />
+            </div>
+          </div>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button type="button" variant="outline" onClick={() => setManualOpen(false)} disabled={manualBusy}>
+              Close
+            </Button>
+            <Button type="button" onClick={submitManualClockIn} disabled={manualBusy}>
+              <Clock className="mr-2 h-4 w-4" />
+              {manualBusy ? 'Clocking in…' : 'Clock in'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </header>
   );
 };

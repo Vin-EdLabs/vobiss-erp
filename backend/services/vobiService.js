@@ -784,7 +784,7 @@ export async function ensureVobiThread(userId) {
   const firstName = await getUserFirstName(uid);
   try {
     const welcome = await askVobi(
-      `Greet ${firstName} warmly in one sentence, introduce yourself as Vobi, then give one useful operational insight from the live data.`,
+      `Greet ${firstName} warmly by name in one short sentence. Introduce yourself as Vobi — created by Vincent Acquah in a lab with a group of developers, still under active high training. Then give one useful operational insight from the live data for their role.`,
       uid,
       null,
       null,
@@ -814,6 +814,21 @@ export async function postVobiMessage(userId, content, meta = {}) {
   const { channelId } = await ensureVobiThread(userId);
   const message = await insertVobiMessage(channelId, content, meta);
   return { channelId, message };
+}
+
+/** Persist a staff user's utterance into their personal Vobi channel (for memory). */
+export async function postVobiUserMessage(userId, content) {
+  const uid = parseUserId(userId);
+  const text = String(content || '').trim();
+  if (!text) return null;
+  const { channelId } = await ensureVobiThread(uid);
+  const { rows } = await pool.query(
+    `INSERT INTO chat_messages (channel_id, sender_id, body, message_type, meta)
+     VALUES ($1, $2, $3, 'text', '{}'::jsonb)
+     RETURNING id, channel_id, body, message_type, meta, created_at`,
+    [channelId, uid, text]
+  );
+  return { channelId, message: rows[0] };
 }
 
 function extractThreadName(text) {

@@ -34,6 +34,18 @@ interface Ticket {
   last_activity_at: string | null;
 }
 
+interface WorkRequest {
+  id: number;
+  type: string;
+  status: string;
+  purpose?: string;
+  department?: string;
+  total_amount?: number | string | null;
+  created_at: string;
+  linked_ticket_id?: string | null;
+  involvement_type?: string;
+}
+
 interface UserInfo {
   id: number;
   fullName: string;
@@ -46,6 +58,9 @@ const UserWorkHistory: React.FC = () => {
   const [users, setUsers] = useState<UserInfo[]>([]);
   const [selectedUserId, setSelectedUserId] = useState<number | null>(null);
   const [tickets, setTickets] = useState<Ticket[]>([]);
+  const [materialRequests, setMaterialRequests] = useState<WorkRequest[]>([]);
+  const [cashRequests, setCashRequests] = useState<WorkRequest[]>([]);
+  const [tab, setTab] = useState<'tickets' | 'material' | 'cash'>('tickets');
   const [loading, setLoading] = useState(false);
   const [loadingUsers, setLoadingUsers] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
@@ -83,7 +98,17 @@ const UserWorkHistory: React.FC = () => {
     try {
       setLoading(true);
       const result = await cxApi.getUserWorkHistory(userId);
-      setTickets(result.data || []);
+      const payload = result.data || result;
+      // Backward compatible: old API returned a ticket array
+      if (Array.isArray(payload)) {
+        setTickets(payload);
+        setMaterialRequests([]);
+        setCashRequests([]);
+      } else {
+        setTickets(payload.tickets || []);
+        setMaterialRequests(payload.material_requests || []);
+        setCashRequests(payload.cash_requests || []);
+      }
     } catch (err: any) {
       console.error('Failed to fetch work history:', err);
       alert(err.message || 'Failed to load work history');
@@ -104,9 +129,9 @@ const UserWorkHistory: React.FC = () => {
   const getStatusColor = (status: string) => {
     const s = status?.toUpperCase() || '';
     switch (s) {
-      case 'NEW': return 'bg-blue-100 text-blue-700 border-blue-200';
+      case 'NEW': return 'bg-blue-100 text-blue-700 border-[#e0c4a0]';
       case 'OPEN': return 'bg-yellow-100 text-yellow-700 border-yellow-200';
-      case 'IN_PROGRESS': return 'bg-purple-100 text-purple-700 border-purple-200';
+      case 'IN_PROGRESS': return 'bg-[var(--accent-green-light)] text-[var(--primary)] border-[#e0c4a0]';
       case 'RESOLVED': return 'bg-green-100 text-green-700 border-green-200';
       case 'CLOSED': return 'bg-gray-100 text-gray-700 border-gray-200';
       default: return 'bg-slate-100 text-slate-600 border-slate-200';
@@ -117,9 +142,9 @@ const UserWorkHistory: React.FC = () => {
     const p = priority?.toUpperCase() || '';
     switch (p) {
       case 'URGENT': return 'bg-red-500';
-      case 'HIGH': return 'bg-orange-500';
+      case 'HIGH': return 'bg-[var(--accent-green-light)]';
       case 'MEDIUM': return 'bg-yellow-500';
-      case 'LOW': return 'bg-blue-500';
+      case 'LOW': return 'bg-[var(--accent-green-light)]';
       default: return 'bg-slate-400';
     }
   };
@@ -169,19 +194,21 @@ const UserWorkHistory: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-indigo-50">
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-[#f5ebe0]/40">
       <div className="max-w-7xl mx-auto p-6">
         {/* Header */}
         <div className="mb-6">
           <button
             onClick={() => navigate('/staff/cx')}
-            className="flex items-center gap-2 text-indigo-600 hover:text-indigo-800 mb-4 font-medium"
+            className="flex items-center gap-2 text-[var(--primary)] hover:text-[var(--primary-hover)] mb-4 font-medium"
           >
             <ArrowLeft className="w-4 h-4" />
             Back to Dashboard
           </button>
           <h1 className="text-3xl font-black text-slate-900 mb-2">User Work History</h1>
-          <p className="text-slate-600">View all tickets worked on by team members</p>
+          <p className="text-slate-600">
+            Cross-module history: tickets, material requests, and cash requests for any staff member.
+          </p>
         </div>
 
         {/* User Selection */}
@@ -198,7 +225,7 @@ const UserWorkHistory: React.FC = () => {
             <select
               value={selectedUserId || ''}
               onChange={(e) => setSelectedUserId(parseInt(e.target.value) || null)}
-              className="w-full md:w-96 px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-400 outline-none"
+              className="w-full md:w-96 px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-[var(--primary)]/40 outline-none"
             >
               <option value="">-- Select a user --</option>
               {users.map(user => (
@@ -216,40 +243,38 @@ const UserWorkHistory: React.FC = () => {
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
               <div className="bg-white rounded-xl shadow-[var(--shadow-md)] border border-slate-200 p-5">
                 <div className="flex items-center justify-between mb-2">
-                  <span className="text-sm font-medium text-slate-600">Total Tickets</span>
-                  <FileText className="w-5 h-5 text-indigo-600" />
+                  <span className="text-sm font-medium text-slate-600">Tickets</span>
+                  <FileText className="w-5 h-5 text-[var(--primary)]" />
                 </div>
                 <div className="text-3xl font-black text-slate-900">{stats.total}</div>
               </div>
               <div className="bg-white rounded-xl shadow-[var(--shadow-md)] border border-slate-200 p-5">
                 <div className="flex items-center justify-between mb-2">
-                  <span className="text-sm font-medium text-slate-600">Resolved</span>
+                  <span className="text-sm font-medium text-slate-600">Resolved tickets</span>
                   <CheckCircle2 className="w-5 h-5 text-green-600" />
                 </div>
                 <div className="text-3xl font-black text-green-700">{stats.resolved}</div>
               </div>
               <div className="bg-white rounded-xl shadow-[var(--shadow-md)] border border-slate-200 p-5">
                 <div className="flex items-center justify-between mb-2">
-                  <span className="text-sm font-medium text-slate-600">Active</span>
-                  <AlertCircle className="w-5 h-5 text-yellow-600" />
+                  <span className="text-sm font-medium text-slate-600">Material requests</span>
+                  <AlertCircle className="w-5 h-5 text-amber-600" />
                 </div>
-                <div className="text-3xl font-black text-yellow-700">{stats.active}</div>
+                <div className="text-3xl font-black text-amber-700">{materialRequests.length}</div>
               </div>
               <div className="bg-white rounded-xl shadow-[var(--shadow-md)] border border-slate-200 p-5">
                 <div className="flex items-center justify-between mb-2">
-                  <span className="text-sm font-medium text-slate-600">Avg Resolution</span>
-                  <TrendingUp className="w-5 h-5 text-blue-600" />
+                  <span className="text-sm font-medium text-slate-600">Cash requests</span>
+                  <TrendingUp className="w-5 h-5 text-[var(--primary)]" />
                 </div>
-                <div className="text-3xl font-black text-blue-700">
-                  {stats.avgResolutionTime > 0 ? `${Math.round(stats.avgResolutionTime)}h` : '—'}
-                </div>
+                <div className="text-3xl font-black text-blue-700">{cashRequests.length}</div>
               </div>
             </div>
 
             {/* User Info */}
-            <div className="bg-gradient-to-r from-indigo-50 to-purple-50 rounded-xl border border-indigo-100 p-6 mb-6">
+            <div className="bg-gradient-to-r from-[var(--accent-green-light)] to-[#f8f1e8] rounded-xl border border-[#e0c4a0] p-6 mb-6">
               <div className="flex items-center gap-4">
-                <div className="w-16 h-16 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-full flex items-center justify-center text-white font-bold text-xl">
+                <div className="w-16 h-16 bg-gradient-to-br from-[var(--primary)] to-[var(--primary-hover)] rounded-full flex items-center justify-center text-white font-bold text-xl">
                   {selectedUser.fullName.slice(0, 2).toUpperCase()}
                 </div>
                 <div>
@@ -260,16 +285,38 @@ const UserWorkHistory: React.FC = () => {
               </div>
             </div>
 
+            {/* Tabs */}
+            <div className="mb-4 flex flex-wrap gap-2">
+              {(
+                [
+                  { id: 'tickets' as const, label: `Tickets (${tickets.length})` },
+                  { id: 'material' as const, label: `Material (${materialRequests.length})` },
+                  { id: 'cash' as const, label: `Cash (${cashRequests.length})` },
+                ] as const
+              ).map((t) => (
+                <button
+                  key={t.id}
+                  type="button"
+                  onClick={() => setTab(t.id)}
+                  className={`rounded-full px-4 py-1.5 text-sm font-semibold ${
+                    tab === t.id ? 'bg-slate-900 text-white' : 'bg-white border border-slate-200 text-slate-700'
+                  }`}
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
+
             {/* Search */}
             <div className="bg-white rounded-xl shadow-[var(--shadow-md)] border border-slate-200 p-4 mb-6">
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
                 <input
                   type="text"
-                  placeholder="Search tickets by ID, title, customer, or project..."
+                  placeholder="Search by ID, title, customer, project, or purpose..."
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
-                  className="w-full pl-10 pr-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-400 outline-none"
+                  className="w-full pl-10 pr-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-[var(--primary)]/40 outline-none"
                 />
               </div>
             </div>
@@ -277,8 +324,31 @@ const UserWorkHistory: React.FC = () => {
             {/* Tickets List */}
             {loading ? (
               <div className="flex items-center justify-center py-12">
-                <RefreshCw className="w-8 h-8 text-indigo-600 animate-spin" />
+                <RefreshCw className="w-8 h-8 text-[var(--primary)] animate-spin" />
               </div>
+            ) : tab === 'material' ? (
+              <RequestTable
+                rows={materialRequests.filter((r) =>
+                  !searchTerm ||
+                  String(r.id).includes(searchTerm) ||
+                  (r.purpose || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+                  (r.linked_ticket_id || '').toLowerCase().includes(searchTerm.toLowerCase())
+                )}
+                emptyLabel="No material requests for this user"
+                onTicket={(id) => id && navigate(`/staff/cx/tickets/${id}`)}
+              />
+            ) : tab === 'cash' ? (
+              <RequestTable
+                rows={cashRequests.filter((r) =>
+                  !searchTerm ||
+                  String(r.id).includes(searchTerm) ||
+                  (r.purpose || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+                  (r.linked_ticket_id || '').toLowerCase().includes(searchTerm.toLowerCase())
+                )}
+                emptyLabel="No cash requests for this user"
+                showAmount
+                onTicket={(id) => id && navigate(`/staff/cx/tickets/${id}`)}
+              />
             ) : filteredTickets.length === 0 ? (
               <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-12 text-center">
                 <FileText className="w-12 h-12 text-slate-300 mx-auto mb-4" />
@@ -291,7 +361,7 @@ const UserWorkHistory: React.FC = () => {
               <div className="bg-white rounded-xl shadow-[var(--shadow-md)] border border-slate-200 overflow-hidden">
                 <div className="overflow-x-auto">
                   <table className="w-full">
-                    <thead className="bg-gradient-to-r from-slate-800 to-indigo-800 text-white">
+                    <thead className="bg-gradient-to-r from-[#5c3a1e] to-[#4a2c16] text-white">
                       <tr>
                         <th className="px-6 py-4 text-left text-sm font-semibold">Ticket ID</th>
                         <th className="px-6 py-4 text-left text-sm font-semibold">Title</th>
@@ -306,9 +376,9 @@ const UserWorkHistory: React.FC = () => {
                     </thead>
                     <tbody className="divide-y divide-slate-100">
                       {filteredTickets.map(ticket => (
-                        <tr key={ticket.ticket_id} className="hover:bg-indigo-50/40 transition-colors">
+                        <tr key={ticket.ticket_id} className="hover:bg-[var(--accent-green-light)]/40 transition-colors">
                           <td className="px-6 py-4">
-                            <span className="font-mono bg-indigo-100 text-indigo-700 px-2 py-1 rounded text-xs font-bold">
+                            <span className="font-mono bg-[var(--accent-green-light)] text-[var(--primary)] px-2 py-1 rounded text-xs font-bold">
                               {ticket.ticket_id}
                             </span>
                           </td>
@@ -364,5 +434,67 @@ const UserWorkHistory: React.FC = () => {
     </div>
   );
 };
+
+function RequestTable({
+  rows,
+  emptyLabel,
+  showAmount,
+  onTicket,
+}: {
+  rows: WorkRequest[];
+  emptyLabel: string;
+  showAmount?: boolean;
+  onTicket: (ticketId?: string | null) => void;
+}) {
+  if (!rows.length) {
+    return (
+      <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-12 text-center text-slate-500">
+        {emptyLabel}
+      </div>
+    );
+  }
+  return (
+    <div className="bg-white rounded-xl shadow-[var(--shadow-md)] border border-slate-200 overflow-hidden">
+      <table className="w-full text-sm">
+        <thead className="bg-slate-900 text-white text-left">
+          <tr>
+            <th className="px-4 py-3">ID</th>
+            <th className="px-4 py-3">Status</th>
+            <th className="px-4 py-3">Purpose</th>
+            {showAmount && <th className="px-4 py-3">Amount</th>}
+            <th className="px-4 py-3">Linked ticket</th>
+            <th className="px-4 py-3">Role</th>
+            <th className="px-4 py-3">Created</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-slate-100">
+          {rows.map((r) => (
+            <tr key={r.id} className="hover:bg-slate-50">
+              <td className="px-4 py-3 font-mono">#{r.id}</td>
+              <td className="px-4 py-3">{r.status}</td>
+              <td className="px-4 py-3">{r.purpose || '—'}</td>
+              {showAmount && <td className="px-4 py-3">{r.total_amount != null ? String(r.total_amount) : '—'}</td>}
+              <td className="px-4 py-3">
+                {r.linked_ticket_id ? (
+                  <button
+                    type="button"
+                    className="font-mono text-[var(--primary)] hover:underline"
+                    onClick={() => onTicket(r.linked_ticket_id)}
+                  >
+                    {r.linked_ticket_id}
+                  </button>
+                ) : (
+                  '—'
+                )}
+              </td>
+              <td className="px-4 py-3 capitalize">{r.involvement_type || '—'}</td>
+              <td className="px-4 py-3">{new Date(r.created_at).toLocaleString()}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
 
 export default UserWorkHistory;

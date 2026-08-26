@@ -22,6 +22,8 @@ import ApprovedForms from './ApprovedForms';
 import RequestDetails from './RequestDetails';
 import AuditLogs from './AuditLogs';
 import UsersPage from './UsersPage';
+import ManageClientsPage from './admin/ManageClients';
+import VobiChatVaultPage from './admin/VobiChatVault';
 import ConfigurationPage from './ConfigurationPage';
 import RealmPage from './RealmPage';
 import SystemGuide from './SystemGuide';
@@ -70,13 +72,16 @@ import CashDetails from './finance/CashDetails';
 // CX & SUPPORT TICKETING
 import CXDashboard from './staff/cx/Dashboard';
 import CXProjects from './staff/cx/Projects';
-import CXCustomers from './staff/cx/Customers';
+import ClientsPage from './staff/cx/Clients';
+import ClientDetailPage from './staff/cx/ClientDetail';
+import SitesPage from './staff/cx/Sites';
 import AllTickets from './staff/cx/Tickets';                  // Master Ticket Queue
 import CreateStaffTicket from './staff/cx/CreateStaffTicket';
 import AssignUser from './staff/cx/AssignUser';
 import EscalateTicket from './staff/cx/EscalateTicket';           // Escalation page
 import UserWorkHistory from './staff/cx/UserWorkHistory';        // User Work History
 import TicketSearch from './staff/cx/TicketSearch';              // Ticket Search
+import TagManager from './staff/cx/TagManager';
 import TicketDetailPage from './staff/cx/TicketDetailPage';       // Full-page Ticket Details
 import ReportsHub from './staff/reports/ReportsHub';
 import TicketReport from './staff/reports/TicketReport';
@@ -86,14 +91,14 @@ import ServiceRequestReport from './staff/reports/ServiceRequestReport';
 // NOC DASHBOARD
 import NOCDashboard from './staff/noc/Dashboard';
 import NOCAllTickets from './staff/noc/NOCAllTickets';
+import IPDashboard from './staff/ip/Dashboard';
+import IPAllTickets from './staff/ip/IPAllTickets';
+import FieldTicketDashboard from './staff/field/TicketDashboard';
 import {
   NocManagerEscalations,
   ROEscalations,
   DirectorEscalations,
 } from './staff/escalation/EscalationPages';
-
-// IP ENGINEERING QUEUE
-import IPAllTickets from './staff/ip/IPAllTickets';
 
 // FIELD ENGINEERS QUEUE
 import FieldAllTickets from './field/FieldAllTickets';
@@ -625,6 +630,8 @@ const Index = () => {
               {/* SYSTEM TOOLS */}
               <Route path="/audit-logs" element={<ProtectedRoute allowedRoles={['admin', ...EXEC_ROLES]}><AuditLogs /></ProtectedRoute>} />
               <Route path="/users" element={<ProtectedRoute allowedRoles={['admin', 'superadmin']}><UsersPage /></ProtectedRoute>} />
+              <Route path="/admin/clients" element={<ProtectedRoute allowedRoles={['admin', 'superadmin']}><ManageClientsPage /></ProtectedRoute>} />
+              <Route path="/admin/vobi-vault" element={<ProtectedRoute allowedRoles={['superadmin']}><VobiChatVaultPage /></ProtectedRoute>} />
               <Route path="/settings" element={<ProtectedRoute allowedRoles={['admin', ...EXEC_ROLES]}><SettingsPage /></ProtectedRoute>} />
               <Route path="/system-messages" element={<ProtectedRoute allowedRoles={['admin', 'superadmin']}><SystemMessages /></ProtectedRoute>} />
               <Route path="/configuration" element={<ProtectedRoute allowedRoles={['admin', 'superadmin']}><ConfigurationPage /></ProtectedRoute>} />
@@ -757,10 +764,34 @@ const Index = () => {
                 }
               />
               <Route
+                path="/staff/cx/sites"
+                element={
+                  <ProtectedRoute allowedRoles={CX_MODULE_ROLES} allowedUnits={['cx']} allowedPositions={CX_POSITIONS}>
+                    <SitesPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
                 path="/staff/cx/customers"
                 element={
                   <ProtectedRoute allowedRoles={CX_MODULE_ROLES} allowedUnits={['cx']} allowedPositions={CX_POSITIONS}>
-                    <CXCustomers />
+                    <Navigate to="/staff/cx/clients" replace />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/staff/cx/clients"
+                element={
+                  <ProtectedRoute allowedRoles={CX_MODULE_ROLES} allowedUnits={['cx']} allowedPositions={CX_POSITIONS}>
+                    <ClientsPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/staff/cx/clients/:id"
+                element={
+                  <ProtectedRoute allowedRoles={CX_MODULE_ROLES} allowedUnits={['cx']} allowedPositions={CX_POSITIONS}>
+                    <ClientDetailPage />
                   </ProtectedRoute>
                 }
               />
@@ -860,8 +891,24 @@ const Index = () => {
                   </ProtectedRoute>
                 }
               />
+              <Route
+                path="/staff/cx/tags"
+                element={
+                  <ProtectedRoute allowedRoles={CX_MODULE_ROLES} allowedUnits={['cx']} allowedPositions={CX_POSITIONS}>
+                    <TagManager />
+                  </ProtectedRoute>
+                }
+              />
 
-              {/* IP TICKETING QUEUE */}
+              {/* IP TICKETING */}
+              <Route
+                path="/staff/ip/dashboard"
+                element={
+                  <ProtectedRoute allowedRoles={IP_TICKET_ROLES} allowedUnits={['ip']}>
+                    <IPDashboard />
+                  </ProtectedRoute>
+                }
+              />
               <Route
                 path="/staff/ip/tickets"
                 element={
@@ -871,7 +918,15 @@ const Index = () => {
                 }
               />
 
-              {/* TX TICKETING QUEUE */}
+              {/* TS / FIELD TICKETING */}
+              <Route
+                path="/staff/field/dashboard"
+                element={
+                  <ProtectedRoute allowedRoles={FIELD_TICKET_ROLES} allowedUnits={['tx', 'ts']}>
+                    <FieldTicketDashboard />
+                  </ProtectedRoute>
+                }
+              />
               <Route
                 path="/staff/field/tickets"
                 element={

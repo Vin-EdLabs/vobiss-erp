@@ -287,6 +287,59 @@ await pool.query(`
     `);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_tickets_escalation ON tickets(escalation_stage, escalation_due_at);`);
 
+    // Response / resolution SLA deadlines (from Configuration → ticket_sla)
+    await pool.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'tickets' AND column_name = 'response_due_at') THEN
+          ALTER TABLE tickets ADD COLUMN response_due_at TIMESTAMPTZ;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'tickets' AND column_name = 'resolution_due_at') THEN
+          ALTER TABLE tickets ADD COLUMN resolution_due_at TIMESTAMPTZ;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'tickets' AND column_name = 'first_response_at') THEN
+          ALTER TABLE tickets ADD COLUMN first_response_at TIMESTAMPTZ;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'tickets' AND column_name = 'custom_sla') THEN
+          ALTER TABLE tickets ADD COLUMN custom_sla BOOLEAN DEFAULT false;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'tickets' AND column_name = 'sla_monitoring') THEN
+          ALTER TABLE tickets ADD COLUMN sla_monitoring BOOLEAN DEFAULT true;
+        END IF;
+      END $$;
+    `);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_tickets_response_due ON tickets(response_due_at) WHERE response_due_at IS NOT NULL`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_tickets_resolution_due ON tickets(resolution_due_at) WHERE resolution_due_at IS NOT NULL`);
+
+    // Ticket tags / labels
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS ticket_tags (
+        id SERIAL PRIMARY KEY,
+        name VARCHAR(50) NOT NULL UNIQUE,
+        color VARCHAR(7) NOT NULL DEFAULT '#1A56DB',
+        created_by INTEGER REFERENCES users(id),
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS ticket_tag_map (
+        ticket_id INTEGER NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
+        tag_id INTEGER NOT NULL REFERENCES ticket_tags(id) ON DELETE CASCADE,
+        added_by INTEGER REFERENCES users(id),
+        added_at TIMESTAMPTZ DEFAULT NOW(),
+        PRIMARY KEY (ticket_id, tag_id)
+      )
+    `);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_ticket_tag_map_tag ON ticket_tag_map(tag_id)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_ticket_tag_map_ticket ON ticket_tag_map(ticket_id)`);
+    await pool.query(`
+      INSERT INTO ticket_tags (name, color)
+      VALUES
+        ('Outage', '#E02424'),
+        ('Critical', '#D03801')
+      ON CONFLICT (name) DO NOTHING
+    `);
+
     // Customer organization: location + optional project
     await pool.query(`
       DO $$
@@ -325,6 +378,13 @@ await pool.query(`
     `);
 
     console.log('✅ Tickets & Timeline tables ready — full status + approver support enabled.');
+
+    try {
+      const { ensureClientSitesSchema } = await import('./db.clients.cjs');
+      await ensureClientSitesSchema();
+    } catch (e) {
+      console.error('⚠️ Client/sites schema init:', e.message);
+    }
   } catch (error) {
     console.error('❌ initTicketTables failed:', error.message);
     throw error;
@@ -519,11 +579,31 @@ async function getCustomerById(customerId) {
   const res = await pool.query(
     `SELECT c.id, c.customer_name, c.customer_code, c.contact_email, c.contact_phone,
             c.project_id, p.project_name, p.project_code, c.created_at
-     FROM customers c JOIN projects p ON c.project_id = p.id
+     FROM customers c
+     LEFT JOIN projects p ON c.project_id = p.id AND p.deleted_at IS NULL
      WHERE c.id = $1 AND c.deleted_at IS NULL`,
     [customerId]
   );
   return res.rows[0] || null;
+}
+
+/** Default org project used when a client has no project_id (ticket FK requires one). */
+async function ensureDefaultOrgProjectId(client = null) {
+  await loadDbModule();
+  const q = client || pool;
+  const def = await q.query(
+    `SELECT id FROM projects WHERE project_name = 'General Organizations' AND deleted_at IS NULL LIMIT 1`
+  );
+  if (def.rows[0]) return def.rows[0].id;
+  const codeRes = await q.query(
+    `SELECT 'PROJ-' || LPAD((COALESCE(MAX(id), 0) + 1)::TEXT, 5, '0') AS next_code FROM projects`
+  );
+  const ins = await q.query(
+    `INSERT INTO projects (project_name, description, project_code)
+     VALUES ($1, $2, $3) RETURNING id`,
+    ['General Organizations', 'Default project for client organizations', codeRes.rows[0].next_code]
+  );
+  return ins.rows[0].id;
 }
 async function getCustomers(projectId = null) {
   await loadDbModule();
@@ -619,7 +699,8 @@ async function createTicket(
     priority = 'normal',
     status = 'NEW',
     attachments = null,
-    source: sourceOverride = null
+    source: sourceOverride = null,
+    site_id = null,
   },
   assigned_to = null,
   created_by_id,
@@ -634,6 +715,24 @@ async function createTicket(
 
   try {
     await client.query('BEGIN');
+
+    let resolvedProjectId = project_id ? Number(project_id) : null;
+    if (!resolvedProjectId && customer_id) {
+      const custProj = await client.query(
+        `SELECT project_id FROM customers WHERE id = $1 AND deleted_at IS NULL`,
+        [customer_id]
+      );
+      resolvedProjectId = custProj.rows[0]?.project_id ? Number(custProj.rows[0].project_id) : null;
+    }
+    if (!resolvedProjectId) {
+      resolvedProjectId = await ensureDefaultOrgProjectId(client);
+      if (customer_id) {
+        await client.query(
+          `UPDATE customers SET project_id = COALESCE(project_id, $1), updated_at = CURRENT_TIMESTAMP WHERE id = $2`,
+          [resolvedProjectId, customer_id]
+        );
+      }
+    }
 
     const ticket_id = await generateTicketId();
 
@@ -664,14 +763,15 @@ async function createTicket(
 
     const ticketRes = await client.query(
       `INSERT INTO tickets (
-         ticket_id, project_id, customer_id, title, category, description,
+         ticket_id, project_id, customer_id, site_id, title, category, description,
          priority, status, source, assigned_to, created_by_id, created_by_type, attachments
-       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
-       RETURNING id, ticket_id, title, status, priority, category, source, created_at, attachments, assigned_to`,
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+       RETURNING id, ticket_id, title, status, priority, category, source, created_at, attachments, assigned_to, site_id`,
       [
         ticket_id,
-        project_id,
+        resolvedProjectId,
         customer_id,
+        site_id ? Number(site_id) : null,
         title,
         category,
         description,
@@ -681,7 +781,7 @@ async function createTicket(
         assigned_to,
         created_by_id,
         created_by_type,
-        attachmentsJsonb ? JSON.stringify(attachmentsJsonb) : null
+        attachmentsJsonb ? JSON.stringify(attachmentsJsonb) : null,
       ]
     );
     const ticket = ticketRes.rows[0];
@@ -714,8 +814,55 @@ async function createTicket(
     const { applyNewTicketRouting } = await import('./ticketEscalation.js');
     await applyNewTicketRouting(client, ticket.id, ticket.ticket_id, created_by_id, route_to_unit);
 
-    await insertAuditLog(client, created_by_id, 'create_ticket', ip, { ticket_id: ticket.ticket_id });
+    try {
+      const { getWorkflowConfig } = await import('./db.js');
+      const { computeSlaDeadlines, formatSlaDuration } = await import('./ticketSlaConfig.js');
+      const wf = await getWorkflowConfig();
+      const sla = computeSlaDeadlines(wf.ticket_sla, priority);
+      await client.query(
+        `UPDATE tickets SET
+           response_due_at = $1,
+           resolution_due_at = $2,
+           sla_monitoring = $3,
+           custom_sla = false,
+           updated_at = CURRENT_TIMESTAMP
+         WHERE id = $4`,
+        [sla.response_due_at, sla.resolution_due_at, sla.monitoring_enabled, ticket.id]
+      );
+      ticket.response_due_at = sla.response_due_at;
+      ticket.resolution_due_at = sla.resolution_due_at;
+      ticket.sla_monitoring = sla.monitoring_enabled;
+      await client.query(
+        `INSERT INTO ticket_timeline (ticket_id, action, message, visibility, actor_id, actor_role, actor_name)
+         VALUES ($1, 'SLA_SET', $2, 'internal', $3, $4, $5)`,
+        [
+          ticket.id,
+          `SLA applied for ${sla.priority_key} priority — first response: ${formatSlaDuration(
+            sla.rule.first_response_value,
+            sla.rule.first_response_unit
+          )}, resolution: ${formatSlaDuration(sla.rule.resolution_value, sla.rule.resolution_unit)}${
+            sla.monitoring_enabled ? '' : ' (monitoring off)'
+          }`,
+          created_by_id,
+          creator_role,
+          creator_name,
+        ]
+      );
+    } catch (slaErr) {
+      console.warn('[ticket-sla] apply on create failed:', slaErr.message);
+    }
+
     await client.query('COMMIT');
+
+    // Audit after commit — customer IDs are not users (FK), so only log staff creates
+    if (created_by_type === 'staff' && created_by_id && insertAuditLog) {
+      try {
+        await insertAuditLog(created_by_id, 'create_ticket', ip, { ticket_id: ticket.ticket_id });
+      } catch (_) {
+        /* non-blocking */
+      }
+    }
+
     return ticket;
   } catch (error) {
     await client.query('ROLLBACK');
@@ -884,6 +1031,13 @@ async function updateTicketStaff(
          VALUES ($1, 'COMMENT', $2, $3, $4, $5, $6)`,
         [internalId, comment.trim(), visibility, actor_id, actor_role, actorName]
       );
+      if (String(visibility).toLowerCase() === 'public') {
+        await client.query(
+          `UPDATE tickets SET first_response_at = COALESCE(first_response_at, CURRENT_TIMESTAMP), updated_at = CURRENT_TIMESTAMP
+           WHERE id = $1 AND first_response_at IS NULL`,
+          [internalId]
+        );
+      }
     }
 
     // Enhanced audit log with assignment details
@@ -937,7 +1091,7 @@ async function getTicketById(ticketId, customerId = null) {
            p.project_name, p.project_code
     FROM tickets t
     JOIN customers c ON t.customer_id = c.id
-    JOIN projects p ON t.project_id = p.id
+    LEFT JOIN projects p ON t.project_id = p.id
     WHERE t.ticket_id = $1
   `;
   const params = [ticketId];
@@ -983,23 +1137,29 @@ async function getTicketTimeline(ticketId) {
 async function getTicketsForCustomer(customerId) {
   await loadDbModule();
   const res = await pool.query(
-    `SELECT ticket_id, title, status, priority, created_at, updated_at
-     FROM tickets WHERE customer_id = $1 ORDER BY created_at DESC`,
+    `SELECT t.ticket_id, t.title, t.status, t.priority, t.created_at, t.updated_at,
+            t.site_id, s.site_name, s.site_code, s.connection_status AS site_connection_status
+     FROM tickets t
+     LEFT JOIN customer_sites s ON s.id = t.site_id
+     WHERE t.customer_id = $1
+     ORDER BY t.created_at DESC`,
     [customerId]
   );
   return res.rows;
 }
 
-async function getAllTickets({ status, project_id, escalation_stage } = {}) {
+async function getAllTickets({ status, project_id, escalation_stage, tag_ids, tag_ids_any } = {}) {
   await loadDbModule();
   let query = `
     SELECT
+      t.id AS row_id,
       t.ticket_id, t.title, t.category, t.priority, t.status, t.description,
       t.created_at, t.updated_at, t.source, t.attachments,
       t.escalation_stage, t.stage_entered_at, t.stage_accepted_at, t.escalation_due_at,
-      t.chat_channel_id, t.assigned_to,
+      t.chat_channel_id, t.assigned_to, t.site_id,
       p.project_name, p.project_code,
       c.customer_name, c.customer_code, c.contact_email, c.contact_phone, c.location AS customer_location,
+      s.site_name, s.site_code, s.connection_status AS site_connection_status,
       u_assigned.first_name || ' ' || u_assigned.last_name AS assignee_name,
       u_assigned.role AS assignee_role,
       u_assigned.unit AS assignee_unit,
@@ -1009,6 +1169,7 @@ async function getAllTickets({ status, project_id, escalation_stage } = {}) {
     FROM tickets t
     JOIN projects p ON t.project_id = p.id
     JOIN customers c ON t.customer_id = c.id
+    LEFT JOIN customer_sites s ON s.id = t.site_id
     LEFT JOIN users u_assigned ON t.assigned_to = u_assigned.id
     LEFT JOIN users u_creator ON t.created_by_id = u_creator.id AND t.created_by_type = 'staff'
     WHERE 1=1
@@ -1028,9 +1189,208 @@ async function getAllTickets({ status, project_id, escalation_stage } = {}) {
     query += ` AND t.escalation_stage = $${values.length}`;
   }
 
+  const andTagIds = Array.isArray(tag_ids) ? tag_ids.map(Number).filter((n) => Number.isFinite(n)) : [];
+  const anyTagIds = Array.isArray(tag_ids_any) ? tag_ids_any.map(Number).filter((n) => Number.isFinite(n)) : [];
+
+  if (andTagIds.length) {
+    values.push(andTagIds);
+    query += `
+      AND (
+        SELECT COUNT(DISTINCT tm.tag_id)::int
+        FROM ticket_tag_map tm
+        WHERE tm.ticket_id = t.id AND tm.tag_id = ANY($${values.length}::int[])
+      ) = ${andTagIds.length}
+    `;
+  } else if (anyTagIds.length) {
+    values.push(anyTagIds);
+    query += `
+      AND EXISTS (
+        SELECT 1 FROM ticket_tag_map tm
+        WHERE tm.ticket_id = t.id AND tm.tag_id = ANY($${values.length}::int[])
+      )
+    `;
+  }
+
   query += ` ORDER BY t.created_at DESC`;
   const result = await pool.query(query, values);
+  return attachTagsToTickets(result.rows);
+}
+
+async function listTicketTags() {
+  await loadDbModule();
+  const result = await pool.query(`
+    SELECT
+      tg.id, tg.name, tg.color, tg.created_by, tg.created_at,
+      COUNT(tm.ticket_id)::int AS usage_count
+    FROM ticket_tags tg
+    LEFT JOIN ticket_tag_map tm ON tm.tag_id = tg.id
+    GROUP BY tg.id
+    ORDER BY LOWER(tg.name) ASC
+  `);
   return result.rows;
+}
+
+async function createTicketTag({ name, color, created_by }) {
+  await loadDbModule();
+  const cleanName = String(name || '').trim();
+  if (!cleanName) throw Object.assign(new Error('Tag name is required'), { statusCode: 400 });
+  if (cleanName.length > 50) throw Object.assign(new Error('Tag name must be 50 characters or less'), { statusCode: 400 });
+  const hex = /^#[0-9A-Fa-f]{6}$/.test(String(color || '')) ? String(color) : '#1A56DB';
+  try {
+    const result = await pool.query(
+      `INSERT INTO ticket_tags (name, color, created_by) VALUES ($1, $2, $3)
+       RETURNING id, name, color, created_by, created_at`,
+      [cleanName, hex, created_by || null]
+    );
+    return { ...result.rows[0], usage_count: 0 };
+  } catch (err) {
+    if (err.code === '23505') throw Object.assign(new Error('A tag with that name already exists'), { statusCode: 409 });
+    throw err;
+  }
+}
+
+async function updateTicketTag(id, { name, color }) {
+  await loadDbModule();
+  const fields = [];
+  const values = [];
+  if (name !== undefined) {
+    const cleanName = String(name || '').trim();
+    if (!cleanName) throw Object.assign(new Error('Tag name is required'), { statusCode: 400 });
+    values.push(cleanName);
+    fields.push(`name = $${values.length}`);
+  }
+  if (color !== undefined) {
+    if (!/^#[0-9A-Fa-f]{6}$/.test(String(color))) {
+      throw Object.assign(new Error('Color must be a hex value like #1A56DB'), { statusCode: 400 });
+    }
+    values.push(String(color));
+    fields.push(`color = $${values.length}`);
+  }
+  if (!fields.length) throw Object.assign(new Error('Nothing to update'), { statusCode: 400 });
+  values.push(Number(id));
+  try {
+    const result = await pool.query(
+      `UPDATE ticket_tags SET ${fields.join(', ')} WHERE id = $${values.length}
+       RETURNING id, name, color, created_by, created_at`,
+      values
+    );
+    if (!result.rowCount) throw Object.assign(new Error('Tag not found'), { statusCode: 404 });
+    const usage = await pool.query(`SELECT COUNT(*)::int AS n FROM ticket_tag_map WHERE tag_id = $1`, [id]);
+    return { ...result.rows[0], usage_count: usage.rows[0]?.n || 0 };
+  } catch (err) {
+    if (err.statusCode) throw err;
+    if (err.code === '23505') throw Object.assign(new Error('A tag with that name already exists'), { statusCode: 409 });
+    throw err;
+  }
+}
+
+async function deleteTicketTag(id) {
+  await loadDbModule();
+  const result = await pool.query(`DELETE FROM ticket_tags WHERE id = $1 RETURNING id`, [id]);
+  if (!result.rowCount) throw Object.assign(new Error('Tag not found'), { statusCode: 404 });
+  return true;
+}
+
+async function getTagsForTicketIds(ticketIds = []) {
+  await loadDbModule();
+  const ids = [...new Set(ticketIds.map(Number).filter((n) => Number.isFinite(n)))];
+  if (!ids.length) return new Map();
+  const result = await pool.query(
+    `SELECT tm.ticket_id, tg.id, tg.name, tg.color
+     FROM ticket_tag_map tm
+     JOIN ticket_tags tg ON tg.id = tm.tag_id
+     WHERE tm.ticket_id = ANY($1::int[])
+     ORDER BY LOWER(tg.name)`,
+    [ids]
+  );
+  const map = new Map();
+  for (const row of result.rows) {
+    const list = map.get(row.ticket_id) || [];
+    list.push({ id: row.id, name: row.name, color: row.color });
+    map.set(row.ticket_id, list);
+  }
+  return map;
+}
+
+async function attachTagsToTickets(rows = []) {
+  if (!Array.isArray(rows) || !rows.length) return rows || [];
+  const ids = rows.map((r) => r.row_id || r.id).filter((id) => id != null);
+  const tagMap = await getTagsForTicketIds(ids);
+  return rows.map((r) => {
+    const key = r.row_id || r.id;
+    return { ...r, tags: tagMap.get(Number(key)) || [] };
+  });
+}
+
+async function getTagsForTicket(ticketRef) {
+  await loadDbModule();
+  const row = await resolveTicketRowRef(ticketRef);
+  if (!row) return [];
+  const map = await getTagsForTicketIds([row.id]);
+  return map.get(row.id) || [];
+}
+
+async function addTagsToTicket(ticketRef, tagIds, actor = {}) {
+  await loadDbModule();
+  const row = await resolveTicketRowRef(ticketRef);
+  if (!row) throw Object.assign(new Error('Ticket not found'), { statusCode: 404 });
+  const ids = [...new Set((tagIds || []).map(Number).filter((n) => Number.isFinite(n) && n > 0))];
+  if (!ids.length) throw Object.assign(new Error('tag_ids is required'), { statusCode: 400 });
+
+  const existing = await pool.query(`SELECT id, name FROM ticket_tags WHERE id = ANY($1::int[])`, [ids]);
+  if (existing.rowCount === 0) throw Object.assign(new Error('No valid tags found'), { statusCode: 400 });
+
+  const addedNames = [];
+  for (const tag of existing.rows) {
+    const inserted = await pool.query(
+      `INSERT INTO ticket_tag_map (ticket_id, tag_id, added_by)
+       VALUES ($1, $2, $3)
+       ON CONFLICT DO NOTHING
+       RETURNING tag_id`,
+      [row.id, tag.id, actor.id || null]
+    );
+    if (inserted.rowCount) addedNames.push(tag.name);
+  }
+
+  if (addedNames.length) {
+    const actorName = actor.name || 'Staff';
+    const actorRole = actor.role || 'staff';
+    await pool.query(
+      `INSERT INTO ticket_timeline (ticket_id, action, message, visibility, actor_id, actor_role, actor_name)
+       VALUES ($1, 'TAGGED', $2, 'internal', $3, $4, $5)`,
+      [row.id, `Tagged: ${addedNames.join(', ')}`, actor.id || 0, actorRole, actorName]
+    );
+  }
+
+  return getTagsForTicket(ticketRef);
+}
+
+async function removeTagFromTicket(ticketRef, tagId, actor = {}) {
+  await loadDbModule();
+  const row = await resolveTicketRowRef(ticketRef);
+  if (!row) throw Object.assign(new Error('Ticket not found'), { statusCode: 404 });
+  const tagRes = await pool.query(`SELECT id, name FROM ticket_tags WHERE id = $1`, [tagId]);
+  if (!tagRes.rowCount) throw Object.assign(new Error('Tag not found'), { statusCode: 404 });
+
+  const deleted = await pool.query(
+    `DELETE FROM ticket_tag_map WHERE ticket_id = $1 AND tag_id = $2 RETURNING tag_id`,
+    [row.id, tagId]
+  );
+  if (!deleted.rowCount) throw Object.assign(new Error('Tag is not on this ticket'), { statusCode: 404 });
+
+  await pool.query(
+    `INSERT INTO ticket_timeline (ticket_id, action, message, visibility, actor_id, actor_role, actor_name)
+     VALUES ($1, 'UNTAGGED', $2, 'internal', $3, $4, $5)`,
+    [
+      row.id,
+      `Untagged: ${tagRes.rows[0].name}`,
+      actor.id || 0,
+      actor.role || 'staff',
+      actor.name || 'Staff',
+    ]
+  );
+
+  return getTagsForTicket(ticketRef);
 }
 
 async function getTicketByIdForStaff(ticketId) {
@@ -1046,6 +1406,10 @@ async function getTicketByIdForStaff(ticketId) {
       COALESCE(c.customer_code, '') AS customer_code,
       COALESCE(c.contact_email, '') AS contact_email,
       COALESCE(c.contact_phone, '') AS contact_phone,
+      s.id AS site_row_id,
+      s.site_name,
+      s.site_code,
+      s.connection_status AS site_connection_status,
       u_assigned.first_name || ' ' || u_assigned.last_name AS assignee_name,
       u_assigned.role AS assignee_role,
       u_creator.first_name || ' ' || u_creator.last_name AS creator_name,
@@ -1053,20 +1417,35 @@ async function getTicketByIdForStaff(ticketId) {
     FROM tickets t
     LEFT JOIN projects p ON t.project_id = p.id
     LEFT JOIN customers c ON t.customer_id = c.id
+    LEFT JOIN customer_sites s ON s.id = t.site_id
     LEFT JOIN users u_assigned ON t.assigned_to = u_assigned.id
     LEFT JOIN users u_creator ON t.created_by_id = u_creator.id AND t.created_by_type = 'staff'
     WHERE TRIM(t.ticket_id) = $1 OR t.id::text = $1
   `;
   const result = await pool.query(query, [ref]);
-  return result.rows[0] || null;
+  const row = result.rows[0];
+  if (!row) return null;
+  if (row.site_id || row.site_row_id) {
+    row.site = {
+      id: row.site_id || row.site_row_id,
+      site_code: row.site_code || null,
+      site_name: row.site_name || null,
+      connection_status: row.site_connection_status || null,
+    };
+  } else {
+    row.site = null;
+  }
+  return row;
 }
 
 // =============== USER WORK HISTORY ===============
 async function getUserWorkHistory(userId) {
   await loadDbModule();
-  
-  // Get all tickets where user was assigned or made timeline entries
-  const result = await pool.query(`
+  const uid = parseInt(userId, 10);
+  if (!Number.isFinite(uid)) return { tickets: [], material_requests: [], cash_requests: [], summary: {} };
+
+  const ticketsResult = await pool.query(
+    `
     SELECT DISTINCT
       t.id,
       t.ticket_id,
@@ -1081,22 +1460,22 @@ async function getUserWorkHistory(userId) {
       p.project_code,
       c.customer_name,
       c.customer_code,
-      CASE 
+      CASE
         WHEN t.assigned_to = $1 THEN 'assigned'
         WHEN EXISTS (
-          SELECT 1 FROM ticket_timeline tl 
+          SELECT 1 FROM ticket_timeline tl
           WHERE tl.ticket_id = t.id AND tl.actor_id = $1
         ) THEN 'worked_on'
         ELSE 'assigned'
       END AS involvement_type,
       (
-        SELECT COUNT(*) 
-        FROM ticket_timeline tl 
+        SELECT COUNT(*)
+        FROM ticket_timeline tl
         WHERE tl.ticket_id = t.id AND tl.actor_id = $1
       ) AS timeline_entries_count,
       (
         SELECT MAX(tl.created_at)
-        FROM ticket_timeline tl 
+        FROM ticket_timeline tl
         WHERE tl.ticket_id = t.id AND tl.actor_id = $1
       ) AS last_activity_at
     FROM tickets t
@@ -1105,14 +1484,78 @@ async function getUserWorkHistory(userId) {
     WHERE (
       t.assigned_to = $1
       OR EXISTS (
-        SELECT 1 FROM ticket_timeline tl 
+        SELECT 1 FROM ticket_timeline tl
         WHERE tl.ticket_id = t.id AND tl.actor_id = $1
       )
     )
     ORDER BY t.created_at DESC
-  `, [userId]);
-  
-  return result.rows;
+  `,
+    [uid]
+  );
+
+  let material_requests = [];
+  let cash_requests = [];
+  try {
+    const reqResult = await pool.query(
+      `
+      SELECT
+        r.id,
+        r.type,
+        r.status,
+        r.purpose,
+        r.department,
+        r.total_amount,
+        r.created_at,
+        r.updated_at,
+        r.ticket_id AS linked_ticket_row_id,
+        t.ticket_id AS linked_ticket_id,
+        CASE
+          WHEN r.created_by_id = $1 THEN 'requester'
+          WHEN EXISTS (
+            SELECT 1 FROM request_approvers ra WHERE ra.request_id = r.id AND ra.approver_id = $1
+          ) OR EXISTS (
+            SELECT 1 FROM approvals a WHERE a.request_id = r.id AND a.approver_id = $1
+          ) THEN 'approver'
+          ELSE 'participant'
+        END AS involvement_type
+      FROM requests r
+      LEFT JOIN tickets t ON t.id = r.ticket_id
+      WHERE r.deleted_at IS NULL
+        AND (
+          r.created_by_id = $1
+          OR EXISTS (
+            SELECT 1 FROM request_approvers ra WHERE ra.request_id = r.id AND ra.approver_id = $1
+          )
+          OR EXISTS (
+            SELECT 1 FROM approvals a WHERE a.request_id = r.id AND a.approver_id = $1
+          )
+        )
+      ORDER BY r.created_at DESC
+      LIMIT 200
+    `,
+      [uid]
+    );
+    material_requests = reqResult.rows.filter((r) =>
+      ['material_request', 'item_return'].includes(String(r.type || ''))
+    );
+    cash_requests = reqResult.rows.filter((r) => String(r.type || '') === 'cash_request');
+  } catch (e) {
+    console.warn('[work-history] requests lookup failed:', e.message);
+  }
+
+  const tickets = ticketsResult.rows;
+  return {
+    tickets,
+    material_requests,
+    cash_requests,
+    summary: {
+      tickets_total: tickets.length,
+      tickets_resolved: tickets.filter((t) => ['RESOLVED', 'CLOSED'].includes(String(t.status || '').toUpperCase())).length,
+      tickets_active: tickets.filter((t) => !['RESOLVED', 'CLOSED'].includes(String(t.status || '').toUpperCase())).length,
+      material_total: material_requests.length,
+      cash_total: cash_requests.length,
+    },
+  };
 }
 
 // =============== TICKET SEARCH WITH FULL DETAILS ===============
@@ -1165,28 +1608,122 @@ async function searchTicketWithFullDetails(ticketId) {
     const created = new Date(ticket.created_at);
     const closed = new Date(ticket.closed_at);
     const diffMs = closed.getTime() - created.getTime();
-    const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
-    const diffDays = Math.floor(diffHours / 24);
-    const diffMinutes = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
-    
     resolutionTime = diffMs;
-    
-    if (diffDays > 0) {
-      resolutionTimeFormatted = `${diffDays} day${diffDays > 1 ? 's' : ''}, ${diffHours % 24} hour${diffHours % 24 !== 1 ? 's' : ''}`;
-    } else if (diffHours > 0) {
-      resolutionTimeFormatted = `${diffHours} hour${diffHours > 1 ? 's' : ''}, ${diffMinutes} minute${diffMinutes !== 1 ? 's' : ''}`;
-    } else {
-      resolutionTimeFormatted = `${diffMinutes} minute${diffMinutes !== 1 ? 's' : ''}`;
+    resolutionTimeFormatted = formatResolutionMs(diffMs);
+  }
+
+  // Linked material / cash requests
+  let linkedRequests = [];
+  try {
+    const { getRequestsByTicketId } = await import('./db.js');
+    linkedRequests = await getRequestsByTicketId(ticket.ticket_id);
+  } catch (e) {
+    console.warn('[ticket-report] linked requests failed:', e.message);
+  }
+
+  const materialRequests = [];
+  const cashRequests = [];
+  const byRequestId = new Map();
+  for (const row of linkedRequests) {
+    const key = row.id;
+    if (!byRequestId.has(key)) {
+      byRequestId.set(key, {
+        id: row.id,
+        type: row.type,
+        status: row.status,
+        purpose: row.purpose,
+        department: row.department,
+        total_amount: row.total_amount,
+        created_at: row.created_at,
+        items: [],
+      });
+    }
+    if (row.material_name) {
+      byRequestId.get(key).items.push({
+        name: row.material_name,
+        quantity_requested: row.quantity_requested,
+        quantity_received: row.quantity_received,
+      });
     }
   }
-  
+  for (const req of byRequestId.values()) {
+    if (String(req.type) === 'cash_request') cashRequests.push(req);
+    else materialRequests.push(req);
+  }
+
+  const tags = typeof getTagsForTicket === 'function' ? await getTagsForTicket(ticket.ticket_id).catch(() => []) : [];
+
+  const startedAt = ticket.created_at;
+  const endedAt = ticket.closed_at || null;
+  const stage = ticket.escalation_stage || null;
+
+  const reportNarrative = [
+    `Ticket ${ticket.ticket_id}: ${ticket.title}`,
+    `Status: ${ticket.status} | Priority: ${ticket.priority} | Category: ${ticket.category || 'general'}`,
+    `Customer: ${ticket.customer_name || '—'} (${ticket.customer_code || '—'})`,
+    `Project: ${ticket.project_name || '—'}`,
+    `Started: ${startedAt ? new Date(startedAt).toISOString() : '—'}`,
+    `Ended: ${endedAt ? new Date(endedAt).toISOString() : 'Still open'}`,
+    resolutionTimeFormatted ? `Resolution time: ${resolutionTimeFormatted}` : null,
+    stage ? `Current escalation stage: ${stage}` : null,
+    ticket.response_due_at ? `SLA first response due: ${new Date(ticket.response_due_at).toISOString()}` : null,
+    ticket.resolution_due_at ? `SLA resolution due: ${new Date(ticket.resolution_due_at).toISOString()}` : null,
+    ticket.first_response_at ? `First response at: ${new Date(ticket.first_response_at).toISOString()}` : null,
+    `People who worked on it (${usersWorkedOn.length}): ${
+      usersWorkedOn.map((u) => `${u.fullName} (${u.role}, ${u.activityCount} actions)`).join('; ') || 'None recorded'
+    }`,
+    `Timeline events: ${timeline.length}`,
+    `Material requests linked: ${materialRequests.length}`,
+    `Cash requests linked: ${cashRequests.length}`,
+    tags?.length ? `Tags: ${tags.map((t) => t.name).join(', ')}` : null,
+  ]
+    .filter(Boolean)
+    .join('\n');
+
   return {
-    ticket,
+    ticket: {
+      ...ticket,
+      tags,
+    },
     timeline,
     usersWorkedOn,
     resolutionTime,
     resolutionTimeFormatted,
-    totalActivities: timeline.length
+    totalActivities: timeline.length,
+    startedAt,
+    endedAt,
+    materialRequests,
+    cashRequests,
+    linkedRequests: [...materialRequests, ...cashRequests],
+    reportNarrative,
+    report: {
+      ticket_id: ticket.ticket_id,
+      title: ticket.title,
+      status: ticket.status,
+      priority: ticket.priority,
+      category: ticket.category,
+      customer_name: ticket.customer_name,
+      customer_code: ticket.customer_code,
+      project_name: ticket.project_name,
+      description: ticket.description,
+      assignee_name: ticket.assignee_name,
+      started_at: startedAt,
+      ended_at: endedAt,
+      resolution_time: resolutionTimeFormatted,
+      escalation_stage: stage,
+      workers: usersWorkedOn,
+      timeline,
+      material_requests: materialRequests,
+      cash_requests: cashRequests,
+      tags,
+      sla: {
+        response_due_at: ticket.response_due_at || null,
+        resolution_due_at: ticket.resolution_due_at || null,
+        first_response_at: ticket.first_response_at || null,
+        monitoring: ticket.sla_monitoring !== false,
+      },
+      narrative: reportNarrative,
+    },
   };
 }
 
@@ -1479,6 +2016,7 @@ module.exports = {
   setCustomerPIN,
   authenticateCustomer,
   getCustomerById,
+  ensureDefaultOrgProjectId,
   getCustomers,
   createTicket,
   updateTicketStaff,
@@ -1493,4 +2031,12 @@ module.exports = {
   searchTicketWithFullDetails,
   getTicketReport,
   searchTickets,
+  listTicketTags,
+  createTicketTag,
+  updateTicketTag,
+  deleteTicketTag,
+  getTagsForTicket,
+  addTagsToTicket,
+  removeTagFromTicket,
+  attachTagsToTickets,
 };

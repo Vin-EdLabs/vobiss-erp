@@ -10,6 +10,7 @@ import bcrypt from 'bcrypt';
 import crypto from 'crypto';
 import { initTicketingDB } from './db.ticketing.cjs';
 import { DEFAULT_TICKET_ESCALATION, normalizeTicketEscalationConfig } from './ticketEscalationConfig.js';
+import { DEFAULT_TICKET_SLA, normalizeTicketSlaConfig } from './ticketSlaConfig.js';
 import {
   SYSTEM_ROLES,
   migrateUserRoleConstraint,
@@ -1079,6 +1080,7 @@ const DEFAULT_WORKFLOW_CONFIG = {
     ],
   },
   ticket_escalation: DEFAULT_TICKET_ESCALATION,
+  ticket_sla: DEFAULT_TICKET_SLA,
 };
 
 export async function getWorkflowConfig() {
@@ -1087,19 +1089,47 @@ export async function getWorkflowConfig() {
       "SELECT value FROM settings WHERE key_name = 'workflow_config'"
     );
     if (result.rowCount === 0 || !result.rows[0].value) {
-      return { ...DEFAULT_WORKFLOW_CONFIG };
+      return {
+        ...DEFAULT_WORKFLOW_CONFIG,
+        ticket_escalation: normalizeTicketEscalationConfig(DEFAULT_TICKET_ESCALATION),
+        ticket_sla: normalizeTicketSlaConfig(DEFAULT_TICKET_SLA),
+      };
     }
     const parsed = JSON.parse(result.rows[0].value);
+    const rawMaterial = parsed.material || {};
+    const material = {
+      ...DEFAULT_WORKFLOW_CONFIG.material,
+      ...rawMaterial,
+      required_approvers_count: Math.max(
+        1,
+        parseInt(rawMaterial.required_approvers_count, 10) || 2
+      ),
+      eligible_approver_roles:
+        rawMaterial.eligible_approver_roles ||
+        DEFAULT_WORKFLOW_CONFIG.material.eligible_approver_roles,
+    };
+    const rawFinance = parsed.finance || {};
+    const finance = {
+      ...DEFAULT_WORKFLOW_CONFIG.finance,
+      ...rawFinance,
+      amount_thresholds:
+        rawFinance.amount_thresholds || DEFAULT_WORKFLOW_CONFIG.finance.amount_thresholds,
+    };
     return {
-      material: { ...DEFAULT_WORKFLOW_CONFIG.material, ...(parsed.material || {}) },
-      finance: { ...DEFAULT_WORKFLOW_CONFIG.finance, ...(parsed.finance || {}) },
+      material,
+      finance,
       ticket_escalation: normalizeTicketEscalationConfig(
         parsed.ticket_escalation || DEFAULT_WORKFLOW_CONFIG.ticket_escalation
       ),
+      ticket_sla: normalizeTicketSlaConfig(parsed.ticket_sla || DEFAULT_TICKET_SLA),
     };
   } catch (error) {
     console.error('Error fetching workflow config:', error.stack);
-    return { ...DEFAULT_WORKFLOW_CONFIG };
+    return {
+      ...DEFAULT_WORKFLOW_CONFIG,
+      ticket_escalation: normalizeTicketEscalationConfig(DEFAULT_TICKET_ESCALATION),
+      ticket_sla: normalizeTicketSlaConfig(DEFAULT_TICKET_SLA),
+    };
   }
 }
 
@@ -1118,23 +1148,37 @@ export async function updateWorkflowConfig(config) {
     'finance',
     'finance_manager',
   ];
+  const existing = await getWorkflowConfig();
+  const incomingMaterial = config.material || existing.material || {};
+  const requiredApprovers = Math.max(
+    1,
+    parseInt(incomingMaterial.required_approvers_count, 10) || 2
+  );
+  const roleSource = incomingMaterial.eligible_approver_roles || [];
+  const eligibleRoles = Array.isArray(roleSource)
+    ? roleSource.filter((r) => eligibleMaterialRoles.includes(r))
+    : DEFAULT_WORKFLOW_CONFIG.material.eligible_approver_roles;
+
+  const incomingFinance = config.finance || existing.finance || {};
+  const amountThresholds =
+    incomingFinance.amount_thresholds || DEFAULT_WORKFLOW_CONFIG.finance.amount_thresholds;
+
   const sanitized = {
     material: {
-      required_approvers_count: Math.max(1, parseInt(config.material?.required_approvers_count, 10) || 2),
-      eligible_approver_roles: Array.isArray(config.material?.eligible_approver_roles)
-        ? config.material.eligible_approver_roles.filter((r) => eligibleMaterialRoles.includes(r))
-        : DEFAULT_WORKFLOW_CONFIG.material.eligible_approver_roles,
+      required_approvers_count: requiredApprovers,
+      eligible_approver_roles:
+        eligibleRoles.length > 0 ? eligibleRoles : DEFAULT_WORKFLOW_CONFIG.material.eligible_approver_roles,
     },
     finance: {
-      amount_thresholds: Array.isArray(config.finance?.amount_thresholds)
-        ? config.finance.amount_thresholds
+      amount_thresholds: Array.isArray(amountThresholds)
+        ? amountThresholds
         : DEFAULT_WORKFLOW_CONFIG.finance.amount_thresholds,
     },
-    ticket_escalation: normalizeTicketEscalationConfig(config.ticket_escalation),
+    ticket_escalation: normalizeTicketEscalationConfig(
+      config.ticket_escalation ?? existing.ticket_escalation
+    ),
+    ticket_sla: normalizeTicketSlaConfig(config.ticket_sla ?? existing.ticket_sla),
   };
-  if (sanitized.material.eligible_approver_roles.length === 0) {
-    sanitized.material.eligible_approver_roles = DEFAULT_WORKFLOW_CONFIG.material.eligible_approver_roles;
-  }
   await updateSetting('workflow_config', JSON.stringify(sanitized));
   try {
     const { resyncOpenTicketEscalationTimers } = await import('./ticketEscalation.js');
@@ -1895,13 +1939,21 @@ export async function insertAuditLog(userId, action, ip = 'unknown', details = n
     actualIp = details || 'unknown';
     actualDetails = arguments[4] || null;
     try {
+      // SAVEPOINT so a failed audit insert does not abort the parent transaction
+      await client.query('SAVEPOINT audit_log_sp');
       await client.query(
         `INSERT INTO audit_logs (user_id, action, ip_address, details, timestamp)
          VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)`,
         [actualUserId, actualAction, actualIp, actualDetails ? JSON.stringify(actualDetails) : null]
       );
+      await client.query('RELEASE SAVEPOINT audit_log_sp');
       return;
     } catch (error) {
+      try {
+        await client.query('ROLLBACK TO SAVEPOINT audit_log_sp');
+      } catch (_) {
+        /* ignore */
+      }
       console.error('Audit log failed (transaction client):', error.message);
       return;
     }
@@ -2245,10 +2297,20 @@ export async function updateItem(itemId, itemData, userId, ip) {
         );
       }
     }
-    let auditDetails = { item_id: itemId, item_name, reason: update_reason };
+    let auditDetails = {
+      item_id: itemId,
+      item_name: name || item_name,
+      previous_item_name: item_name,
+      reason: update_reason,
+    };
     if (parsedQuantity !== prevQuantity) {
       auditDetails.old_quantity = prevQuantity;
       auditDetails.new_quantity = parsedQuantity;
+      auditDetails.quantity_changed = true;
+    }
+    if (name && name !== item_name) {
+      auditDetails.old_name = item_name;
+      auditDetails.new_name = name;
     }
     await insertAuditLog(client, userId, 'update_item', ip, auditDetails);
     await client.query('COMMIT');

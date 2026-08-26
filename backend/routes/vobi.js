@@ -7,6 +7,7 @@ import {
   getVobiActions,
   ensureVobiThread,
   postVobiMessage,
+  postVobiUserMessage,
   generateVobiReport,
   getPersonalDigest,
   getThreadSummary,
@@ -14,8 +15,24 @@ import {
   resolveUserChannel,
 } from '../services/vobiService.js';
 import { matchVobiIntent } from '../services/vobiIntents.js';
-import { askVobi, loadVobiConversationHistory } from '../services/geminiService.js';
+import { askVobi, loadVobiConversationHistory, mergeVobiHistories } from '../services/geminiService.js';
 import { invalidateAllCache } from '../services/vobiCache.js';
+import {
+  ensureVobiMemorySchema,
+  listMemories,
+  createMemory,
+  updateMemory,
+  deleteMemory,
+  clearAllMemories,
+  confirmMemory,
+  dismissMemory,
+  getMemorySettings,
+  setMemoryEnabled,
+  processMemoryAfterTurn,
+  tryForgetFromMessage,
+} from '../services/vobiMemory.js';
+import { resolvePageKnowledge, buildPageBriefingPrompt } from '../services/vobiPageKnowledge.js';
+import { searchVobiDocs } from '../services/vobiDocs.js';
 
 const router = express.Router();
 router.use(authenticateToken);
@@ -51,7 +68,15 @@ function commandPrompts(req) {
     'service-requests': 'What service requests are pending or in progress? Include customer/site names and links.',
     briefing: `Give me my personalized daily briefing as ${role}. What are the top 5 things needing attention? Include real names and markdown links.`,
     overview: 'Give me a 2-sentence operational overview of the most important things right now for my role. Include a link if useful.',
-    about: 'Introduce yourself as Vobi in a short briefing: what you help with now, using live data if useful.',
+    about:
+      'Introduce yourself as Vobi Intelligence (users can call you Vobi). Explain you were created by Vincent Acquah together with a team of developers in a development lab, and you continue to evolve through research and training. Briefly explain you keep useful personal context for this user, understand follow-ups, and work with authorized live Vobiss ERP data for their role (tickets, clients/sites, inventory, finance, HR, assets, field, requests). Do not teach a specific page unless they ask. Keep it warm, respectful, and concise.',
+    digest:
+      'Catch me up with a clear personal digest for my role: unread chat, mentions, and important threads since I was last active. Be concise and include links.',
+    'page-help':
+      'Explain the current page the user is viewing: how it works, main actions, common mistakes, and the best next step. Be practical so they do not need to ask a colleague. Use CURRENT PAGE CONTEXT and LIVE UI SNAPSHOT. Only for this Guide request.',
+    clients: 'Summarize clients and sites I can see — totals, notable statuses, and links. Use real names.',
+    audit:
+      'Using live audit details and deletion records, answer precisely. If they ask who deleted something, list recent deletions with who, what, and when. Include item names and old/new values when present. Link to /audit-logs.',
   };
 }
 
@@ -65,14 +90,15 @@ async function persistReply(userId, reply, extra = {}) {
   }
 }
 
-async function askFor(req, message, history) {
+async function askFor(req, message, history, pageContext = null) {
   const { role, position } = vobiIdentity(req);
-  return askVobi(message, req.user.id, role, position, history || []);
+  return askVobi(message, req.user.id, role, position, history || [], pageContext);
 }
 
 async function historyFor(req) {
-  if (Array.isArray(req.body?.history) && req.body.history.length) return req.body.history;
-  return loadVobiConversationHistory(req.user.id);
+  const clientHistory = Array.isArray(req.body?.history) ? req.body.history : [];
+  const dbHistory = await loadVobiConversationHistory(req.user.id);
+  return mergeVobiHistories(dbHistory, clientHistory);
 }
 
 async function cardsForIntent(userId, intent) {
@@ -236,15 +262,94 @@ router.post('/chat', vobiLimiter, async (req, res) => {
 
 router.post('/command', vobiLimiter, async (req, res) => {
   try {
+    await ensureVobiMemorySchema();
     const commandKey = String(req.body?.command || '').trim();
     const text = String(req.body?.text || req.body?.message || commandKey || '').trim();
     if (!text) return res.status(400).json({ error: 'text is required' });
 
+    // Forget intents are handled without a model call when possible
+    const forgetResult = await tryForgetFromMessage(req.user.id, text);
+    if (forgetResult) {
+      let channelId;
+      let messageId;
+      if (req.body?.persist === true || req.body?.persistUser === true) {
+        if (req.body?.persistUser === true) {
+          try {
+            await postVobiUserMessage(req.user.id, text);
+          } catch (e) {
+            console.warn('[vobi] persist user:', e.message);
+          }
+        }
+        const posted = await persistReply(req.user.id, forgetResult.reply, {
+          intent: 'forget_memory',
+          cardType: 'text',
+        });
+        channelId = posted.channelId;
+        messageId = posted.messageId;
+      }
+      return res.json({
+        intent: 'forget_memory',
+        reply: forgetResult.reply,
+        cards: [],
+        response: forgetResult.reply,
+        timestamp: new Date().toISOString(),
+        channelId,
+        messageId,
+        meta: { cardType: 'text', intent: 'forget_memory' },
+        memoryConfirmation: null,
+        memoryCandidates: [],
+      });
+    }
+
     const prompts = commandPrompts(req);
-    const intent = commandKey || matchVobiIntent(text);
-    const prompt = prompts[commandKey] || prompts[intent] || text;
+    let intent = commandKey || matchVobiIntent(text);
+    if (commandKey === 'digest' || intent === 'digest') intent = 'personal_digest';
+    let prompt = prompts[commandKey] || prompts[intent] || text;
+
+    const pathname = String(req.body?.pathname || '').trim() || null;
+    const pageGuide = req.body?.pageGuide || null;
+    const liveUi = req.body?.liveUi || null;
+    const wantsPageHelp =
+      commandKey === 'page-help' ||
+      intent === 'page_help' ||
+      /\b(help me with this page|guide me (on|through) this page|what can i do (on|here)|explain this page|how (do|does) this page)\b/i.test(
+        text
+      );
+
+    // Page context is ONLY attached for explicit Guide / page-help — not every question.
+    let pageContext = null;
+    if (wantsPageHelp) {
+      const pageKnowledge = pathname
+        ? resolvePageKnowledge(pathname, pageGuide)
+        : resolvePageKnowledge('/', pageGuide);
+      pageContext = { page: pageKnowledge, liveUi: liveUi || null };
+      prompt = buildPageBriefingPrompt(pageKnowledge, liveUi);
+
+      if (pageKnowledge?.doc_ids?.length) {
+        try {
+          const docSearch = searchVobiDocs(pageKnowledge.page_name || pageKnowledge.module, 2);
+          const hits = Array.isArray(docSearch?.results) ? docSearch.results : [];
+          if (hits.length) {
+            pageContext.related_docs = hits.map((h) => ({
+              id: h.id,
+              title: h.title,
+              excerpt: String(h.snippet || '').slice(0, 1200),
+            }));
+          }
+        } catch (_) {
+          /* ignore */
+        }
+      }
+    }
+
     const enriched = await enrichPrompt(req.user.id, prompt, intent);
-    const reply = await askFor(req, enriched, await historyFor(req));
+    let reply = await askFor(req, enriched, await historyFor(req), pageContext);
+    if (!String(reply || '').trim()) {
+      reply =
+        intent === 'audit'
+          ? 'I checked recent audit activity but could not format an answer. Please open [Audit Logs](/audit-logs).'
+          : "I couldn't produce an answer just now. Please try again.";
+    }
     const cards = await cardsForIntent(req.user.id, intent);
 
     let meta = { cardType: cards.length ? 'action_list' : 'text', intent };
@@ -262,10 +367,52 @@ router.post('/command', vobiLimiter, async (req, res) => {
 
     let channelId;
     let messageId;
-    if (req.body?.persist === true) {
-      const posted = await persistReply(req.user.id, reply, { ...meta, intent, cards });
-      channelId = posted.channelId;
-      messageId = posted.messageId;
+    // persist:true → assistant only (chat UI already saved the user turn)
+    // persistUser:true → also save the user turn (floating panel)
+    if (req.body?.persist === true || req.body?.persistUser === true) {
+      if (req.body?.persistUser === true) {
+        try {
+          await postVobiUserMessage(req.user.id, text);
+        } catch (e) {
+          console.warn('[vobi] persist user:', e.message);
+        }
+      }
+      if (req.body?.persist === true || req.body?.persistUser === true) {
+        const posted = await persistReply(req.user.id, reply, { ...meta, intent, cards });
+        channelId = posted.channelId;
+        messageId = posted.messageId;
+      }
+    }
+
+    // Extract / confirm memory candidates after the turn (user-scoped)
+    let memoryConfirmation = null;
+    let memoryCandidates = [];
+    try {
+      const memResult = await processMemoryAfterTurn(req.user.id, text, {
+        channelId,
+        messageId,
+      });
+      memoryConfirmation = memResult.confirmationPrompt || null;
+      memoryCandidates = memResult.memoryCandidates || [];
+      if (memoryConfirmation?.text) {
+        // Append a short confirmation ask if the model didn't already ask
+        if (!/remember that|keep it in context|would you like me to remember/i.test(reply)) {
+          reply = `${reply}\n\n${memoryConfirmation.text}`;
+          if (messageId && channelId) {
+            try {
+              await persistReply(req.user.id, memoryConfirmation.text, {
+                intent: 'memory_confirm',
+                cardType: 'memory_confirm',
+                memoryId: memoryConfirmation.memoryId,
+              });
+            } catch (_) {
+              /* ignore */
+            }
+          }
+        }
+      }
+    } catch (memErr) {
+      console.warn('[vobi] memory after turn:', memErr.message);
     }
 
     res.json({
@@ -276,11 +423,110 @@ router.post('/command', vobiLimiter, async (req, res) => {
       timestamp: new Date().toISOString(),
       channelId,
       messageId,
-      meta,
+      meta: {
+        ...meta,
+        memoryConfirmation,
+        memoryCandidates,
+      },
+      memoryConfirmation,
+      memoryCandidates,
     });
   } catch (e) {
     console.error('[vobi] command:', e);
     res.status(500).json({ error: 'Vobi is unavailable right now' });
+  }
+});
+
+/** ——— Persistent memory (always filtered by req.user.id) ——— */
+router.get('/memories', async (req, res) => {
+  try {
+    await ensureVobiMemorySchema();
+    const status = req.query.status ? String(req.query.status) : 'active';
+    const memories = await listMemories(req.user.id, { status: status === 'all' ? null : status });
+    const settings = await getMemorySettings(req.user.id);
+    res.json({ success: true, memories, settings });
+  } catch (e) {
+    console.error('[vobi] memories list:', e);
+    res.status(e.status || 500).json({ error: e.message || 'Failed to load memories' });
+  }
+});
+
+router.get('/memories/settings', async (req, res) => {
+  try {
+    const settings = await getMemorySettings(req.user.id);
+    res.json({ success: true, ...settings });
+  } catch (e) {
+    res.status(500).json({ error: 'Failed to load memory settings' });
+  }
+});
+
+router.put('/memories/settings', async (req, res) => {
+  try {
+    const enabled = Boolean(req.body?.memory_enabled ?? req.body?.enabled);
+    const settings = await setMemoryEnabled(req.user.id, enabled);
+    res.json({ success: true, ...settings });
+  } catch (e) {
+    res.status(500).json({ error: 'Failed to update memory settings' });
+  }
+});
+
+router.post('/memories', async (req, res) => {
+  try {
+    const memory = await createMemory(req.user.id, {
+      memory_type: req.body?.memory_type,
+      memory_content: req.body?.memory_content || req.body?.content,
+      importance: req.body?.importance || 'medium',
+      confidence: req.body?.confidence ?? 1,
+      status: 'active',
+    });
+    res.status(201).json({ success: true, memory });
+  } catch (e) {
+    res.status(e.status || 500).json({ error: e.message || 'Failed to create memory' });
+  }
+});
+
+router.patch('/memories/:id', async (req, res) => {
+  try {
+    const memory = await updateMemory(req.user.id, req.params.id, req.body || {});
+    res.json({ success: true, memory });
+  } catch (e) {
+    res.status(e.status || 500).json({ error: e.message || 'Failed to update memory' });
+  }
+});
+
+router.post('/memories/:id/confirm', async (req, res) => {
+  try {
+    const memory = await confirmMemory(req.user.id, req.params.id);
+    res.json({ success: true, memory });
+  } catch (e) {
+    res.status(e.status || 500).json({ error: e.message || 'Failed to confirm memory' });
+  }
+});
+
+router.post('/memories/:id/dismiss', async (req, res) => {
+  try {
+    const memory = await dismissMemory(req.user.id, req.params.id);
+    res.json({ success: true, memory });
+  } catch (e) {
+    res.status(e.status || 500).json({ error: e.message || 'Failed to dismiss memory' });
+  }
+});
+
+router.delete('/memories/:id', async (req, res) => {
+  try {
+    await deleteMemory(req.user.id, req.params.id);
+    res.json({ success: true });
+  } catch (e) {
+    res.status(e.status || 500).json({ error: e.message || 'Failed to delete memory' });
+  }
+});
+
+router.delete('/memories', async (req, res) => {
+  try {
+    const result = await clearAllMemories(req.user.id);
+    res.json({ success: true, ...result });
+  } catch (e) {
+    res.status(500).json({ error: 'Failed to clear memories' });
   }
 });
 

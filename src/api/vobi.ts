@@ -43,6 +43,34 @@ export interface VobiSummaryResponse {
   };
 }
 
+export interface VobiCommandMeta extends Record<string, unknown> {
+  cardType?: string;
+  threadSummary?: VobiThreadSummary;
+  digest?: VobiPersonalDigest;
+  memoryConfirmation?: VobiMemoryConfirmation | null;
+  memoryCandidates?: VobiMemory[];
+}
+
+export interface VobiMemory {
+  id: number;
+  memory_type: string;
+  memory_content: string;
+  source_channel_id?: string | null;
+  source_message_id?: string | null;
+  confidence: number;
+  importance: string;
+  status: string;
+  expiration_at?: string | null;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface VobiMemoryConfirmation {
+  memoryId: number;
+  text: string;
+  memory_content: string;
+}
+
 export interface VobiCommandResult {
   intent: string;
   reply: string;
@@ -52,6 +80,8 @@ export interface VobiCommandResult {
   meta?: VobiCommandMeta;
   channelId?: string;
   messageId?: string;
+  memoryConfirmation?: VobiMemoryConfirmation | null;
+  memoryCandidates?: VobiMemory[];
 }
 
 export interface VobiThreadSummary {
@@ -84,12 +114,6 @@ export interface VobiPersonalDigest {
   mentionedIn: VobiDigestThread[];
   activeThreads: VobiDigestThread[];
   systemEvents: VobiDigestThread[];
-}
-
-export interface VobiCommandMeta extends Record<string, unknown> {
-  cardType?: string;
-  threadSummary?: VobiThreadSummary;
-  digest?: VobiPersonalDigest;
 }
 
 async function vobiFetch(path: string, options: RequestInit = {}) {
@@ -161,7 +185,28 @@ export function getVobiChatInsight() {
   }>;
 }
 
-export function postVobiCommand(text: string, options?: { persist?: boolean; command?: string }) {
+export function postVobiCommand(
+  text: string,
+  options?: {
+    persist?: boolean;
+    persistUser?: boolean;
+    command?: string;
+    history?: Array<{ role: string; content: string }>;
+    pageContext?: {
+      pathname?: string;
+      pageGuide?: {
+        pageName: string;
+        actions: Array<{ label: string; hint: string; urgent?: boolean }>;
+      } | null;
+      liveUi?: {
+        title?: string;
+        headings?: string[];
+        buttons?: string[];
+        fields?: string[];
+      };
+    } | null;
+  }
+) {
   return vobiFetch('/command', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -169,6 +214,11 @@ export function postVobiCommand(text: string, options?: { persist?: boolean; com
       text,
       command: options?.command,
       persist: Boolean(options?.persist),
+      persistUser: Boolean(options?.persistUser),
+      history: options?.history || [],
+      pathname: options?.pageContext?.pathname,
+      pageGuide: options?.pageContext?.pageGuide || null,
+      liveUi: options?.pageContext?.liveUi || null,
     }),
   }) as Promise<VobiCommandResult>;
 }
@@ -191,4 +241,65 @@ export function generateVobiReport(period: 'today' | 'week' = 'today') {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ period }),
   }) as Promise<{ period: string; filename: string; contentType: string; body: string }>;
+}
+
+export function getVobiMemories(status: 'active' | 'pending' | 'all' = 'active') {
+  return vobiFetch(`/memories?status=${encodeURIComponent(status)}`) as Promise<{
+    success: boolean;
+    memories: VobiMemory[];
+    settings: { memory_enabled: boolean };
+  }>;
+}
+
+export function updateVobiMemorySettings(memory_enabled: boolean) {
+  return vobiFetch('/memories/settings', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ memory_enabled }),
+  }) as Promise<{ success: boolean; memory_enabled: boolean }>;
+}
+
+export function createVobiMemory(payload: {
+  memory_content: string;
+  memory_type?: string;
+  importance?: string;
+}) {
+  return vobiFetch('/memories', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  }) as Promise<{ success: boolean; memory: VobiMemory }>;
+}
+
+export function updateVobiMemory(
+  id: number,
+  patch: { memory_content?: string; memory_type?: string; status?: string; importance?: string }
+) {
+  return vobiFetch(`/memories/${id}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(patch),
+  }) as Promise<{ success: boolean; memory: VobiMemory }>;
+}
+
+export function confirmVobiMemory(id: number) {
+  return vobiFetch(`/memories/${id}/confirm`, { method: 'POST' }) as Promise<{
+    success: boolean;
+    memory: VobiMemory;
+  }>;
+}
+
+export function dismissVobiMemory(id: number) {
+  return vobiFetch(`/memories/${id}/dismiss`, { method: 'POST' }) as Promise<{
+    success: boolean;
+    memory: VobiMemory;
+  }>;
+}
+
+export function deleteVobiMemory(id: number) {
+  return vobiFetch(`/memories/${id}`, { method: 'DELETE' }) as Promise<{ success: boolean }>;
+}
+
+export function clearVobiMemories() {
+  return vobiFetch('/memories', { method: 'DELETE' }) as Promise<{ success: boolean; deleted: number }>;
 }

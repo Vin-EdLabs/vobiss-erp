@@ -48,15 +48,15 @@ const unitConfig: Record<TargetUnit, {
 };
 
 const statusColors: Record<string, string> = {
-  'NEW': 'bg-blue-200 text-blue-800',
+  'NEW': 'bg-blue-200 text-[var(--primary-hover)]',
   'OPEN': 'bg-yellow-200 text-yellow-800',
-  'IN_PROGRESS': 'bg-orange-200 text-orange-800',
+  'IN_PROGRESS': 'bg-orange-200 text-[var(--primary-hover)]',
 };
 
 const priorityColors: Record<string, string> = {
   'LOW': 'bg-green-200 text-green-800',
-  'NORMAL': 'bg-blue-200 text-blue-800',
-  'HIGH': 'bg-orange-200 text-orange-800',
+  'NORMAL': 'bg-blue-200 text-[var(--primary-hover)]',
+  'HIGH': 'bg-orange-200 text-[var(--primary-hover)]',
   'CRITICAL': 'bg-red-200 text-red-800',
 };
 
@@ -283,7 +283,7 @@ const EscalateTicket: React.FC = () => {
           <div className="bg-white rounded-xl border shadow-[var(--shadow-md)] p-5">
             <div className="flex items-center justify-between flex-wrap gap-4">
               <div className="flex items-center gap-3">
-                <Ticket className="w-8 h-8 text-indigo-600" />
+                <Ticket className="w-8 h-8 text-[var(--primary)]" />
                 <div>
                   <h1 className="text-xl font-bold text-gray-900">
                     {selectedTicket ? `Escalate #${selectedTicket.ticket_id}` : 'Ticket Escalation'}
@@ -296,7 +296,7 @@ const EscalateTicket: React.FC = () => {
 
               <button
                 onClick={() => setShowGuidelines(!showGuidelines)}
-                className="flex items-center gap-2 text-indigo-600 hover:text-indigo-800 text-sm font-medium"
+                className="flex items-center gap-2 text-[var(--primary)] hover:text-[var(--primary-hover)] text-sm font-medium"
               >
                 <Info className="w-5 h-5" />
                 Guidelines
@@ -305,8 +305,8 @@ const EscalateTicket: React.FC = () => {
             </div>
 
             {showGuidelines && (
-              <div className="mt-5 bg-indigo-50 rounded-lg p-5 text-sm text-gray-700 border border-indigo-100">
-                <h3 className="font-bold text-indigo-800 mb-3">Escalation Rules</h3>
+              <div className="mt-5 bg-[var(--accent-green-light)] rounded-lg p-5 text-sm text-gray-700 border border-[#e0c4a0]">
+                <h3 className="font-bold text-[var(--primary-hover)] mb-3">Escalation Rules</h3>
                 <ol className="list-decimal pl-5 space-y-1.5">
                   <li>Choose target team</li>
                   <li>Select responsible person</li>
@@ -330,14 +330,14 @@ const EscalateTicket: React.FC = () => {
                   placeholder="Search by ID, title, customer..."
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
-                  className="w-full pl-12 pr-4 py-3 border rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                  className="w-full pl-12 pr-4 py-3 border rounded-lg focus:ring-2 focus:ring-[var(--primary)]/40 focus:border-[var(--primary)]"
                 />
               </div>
             </div>
 
             {ticketsLoading ? (
               <div className="text-center py-20">
-                <div className="inline-block w-10 h-10 border-4 border-gray-200 border-t-indigo-600 rounded-full animate-spin"></div>
+                <div className="inline-block w-10 h-10 border-4 border-gray-200 border-t-[var(--primary)] rounded-full animate-spin"></div>
                 <p className="mt-4 text-gray-600">Loading tickets...</p>
               </div>
             ) : filteredTickets.length === 0 ? (
@@ -351,10 +351,10 @@ const EscalateTicket: React.FC = () => {
                   <button
                     key={t.ticket_id}
                     onClick={() => loadTicket(t.ticket_id)}
-                    className="text-left p-5 bg-gray-50 rounded-xl border hover:border-indigo-300 hover:shadow-md transition-all"
+                    className="text-left p-5 bg-gray-50 rounded-xl border hover:border-[#c4a882] hover:shadow-md transition-all"
                   >
                     <div className="flex justify-between items-start mb-3">
-                      <span className="font-mono font-bold text-indigo-700">#{t.ticket_id}</span>
+                      <span className="font-mono font-bold text-[var(--primary)]">#{t.ticket_id}</span>
                       <span className={`px-3 py-1 rounded-full text-xs font-bold ${priorityColors[t.priority] || 'bg-gray-200 text-gray-800'}`}>
                         {t.priority}
                       </span>
@@ -362,7 +362,7 @@ const EscalateTicket: React.FC = () => {
                     <h3 className="font-medium text-gray-900 mb-3 line-clamp-2">{t.title}</h3>
                     <div className="text-sm text-gray-600 space-y-1.5">
                       <p>{t.customer_name}</p>
-                      <p>Current Unit: <span className="font-medium text-indigo-700">{t.current_unit}</span></p>
+                      <p>Current Unit: <span className="font-medium text-[var(--primary)]">{t.current_unit}</span></p>
                       <p>Assigned: {t.assignee_name}</p>
                     </div>
                   </button>
@@ -376,7 +376,7 @@ const EscalateTicket: React.FC = () => {
         {!paramTicketId && selectedTicket && (
           <button
             onClick={() => setSelectedTicket(null)}
-            className="flex items-center gap-2 text-indigo-600 hover:text-indigo-800 mb-6 text-sm font-medium"
+            className="flex items-center gap-2 text-[var(--primary)] hover:text-[var(--primary-hover)] mb-6 text-sm font-medium"
           >
             <ArrowLeft className="w-4 h-4" />
             Back to list
@@ -390,7 +390,7 @@ const EscalateTicket: React.FC = () => {
             <div className="lg:col-span-1">
               <div className="bg-white rounded-xl border shadow-[var(--shadow-md)] p-6 sticky top-6">
                 <h2 className="font-bold text-gray-900 mb-5 flex items-center gap-2 text-lg">
-                  <Ticket className="w-6 h-6 text-indigo-600" />
+                  <Ticket className="w-6 h-6 text-[var(--primary)]" />
                   Ticket #{selectedTicket.ticket_id}
                 </h2>
                 <dl className="space-y-4 text-sm">
@@ -404,11 +404,11 @@ const EscalateTicket: React.FC = () => {
                   </div>
                   <div>
                     <dt className="text-gray-500">Current Unit</dt>
-                    <dd className="font-medium mt-1 text-indigo-700">{selectedTicket.current_unit}</dd>
+                    <dd className="font-medium mt-1 text-[var(--primary)]">{selectedTicket.current_unit}</dd>
                   </div>
                   <div>
                     <dt className="text-gray-500">→ Will move to</dt>
-                    <dd className="font-bold text-indigo-700 mt-1">{currentUnit.label}</dd>
+                    <dd className="font-bold text-[var(--primary)] mt-1">{currentUnit.label}</dd>
                   </div>
                   <div>
                     <dt className="text-gray-500">Priority</dt>
@@ -449,9 +449,9 @@ const EscalateTicket: React.FC = () => {
                             type="button"
                             onClick={() => setTargetUnit(k)}
                             className={`p-5 rounded-xl border-2 flex flex-col items-center gap-3 transition-all
-                              ${selected ? 'border-indigo-600 bg-indigo-50 shadow-sm' : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'}`}
+                              ${selected ? 'border-[var(--primary)] bg-[var(--accent-green-light)] shadow-sm' : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'}`}
                           >
-                            <div className="text-indigo-600">{cfg.icon}</div>
+                            <div className="text-[var(--primary)]">{cfg.icon}</div>
                             <p className="font-semibold">{cfg.label}</p>
                           </button>
                         );
@@ -467,7 +467,7 @@ const EscalateTicket: React.FC = () => {
                     <select
                       value={selectedAssignee}
                       onChange={e => setSelectedAssignee(e.target.value ? Number(e.target.value) : '')}
-                      className="w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                      className="w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-[var(--primary)]/40 focus:border-[var(--primary)]"
                       required
                     >
                       <option value="">{teamMembers.length === 0 ? 'No members' : 'Select member...'}</option>
@@ -490,7 +490,7 @@ const EscalateTicket: React.FC = () => {
                       onChange={e => setReason(e.target.value)}
                       rows={4}
                       required
-                      className="w-full px-4 py-3 border rounded-lg resize-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                      className="w-full px-4 py-3 border rounded-lg resize-none focus:ring-2 focus:ring-[var(--primary)]/40 focus:border-[var(--primary)]"
                       placeholder="Explain why escalation is needed..."
                     />
                   </div>
@@ -504,7 +504,7 @@ const EscalateTicket: React.FC = () => {
                       value={description}
                       onChange={e => setDescription(e.target.value)}
                       rows={3}
-                      className="w-full px-4 py-3 border rounded-lg resize-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                      className="w-full px-4 py-3 border rounded-lg resize-none focus:ring-2 focus:ring-[var(--primary)]/40 focus:border-[var(--primary)]"
                       placeholder="Extra context or instructions..."
                     />
                   </div>
@@ -526,7 +526,7 @@ const EscalateTicket: React.FC = () => {
                   <button
                     type="submit"
                     disabled={submitting || !selectedAssignee || !reason.trim() || teamMembers.length === 0}
-                    className="w-full py-4 bg-indigo-600 text-white rounded-lg font-bold hover:bg-indigo-700 disabled:opacity-50 transition text-base"
+                    className="w-full py-4 bg-[var(--primary)] text-white rounded-lg font-bold hover:bg-[var(--primary-hover)] disabled:opacity-50 transition text-base"
                   >
                     {submitting ? 'Escalating...' : `Escalate to ${currentUnit.label}`}
                   </button>

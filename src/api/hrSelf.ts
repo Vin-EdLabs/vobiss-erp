@@ -43,6 +43,13 @@ export const hrSelfApi = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ latitude, longitude }),
     }),
+  /** Clock in without GPS — date is always Accra today; time is HH:MM. */
+  manualClockIn: (time: string) =>
+    selfFetch('/attendance/manual-clock-in', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ time }),
+    }),
   clockOut: (latitude: number, longitude: number) =>
     selfFetch('/attendance/clock-out', {
       method: 'POST',

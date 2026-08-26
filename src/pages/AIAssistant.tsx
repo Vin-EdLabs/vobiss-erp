@@ -720,6 +720,12 @@ const AIAssistant: React.FC = () => {
   const handleSend = async () => {
     if (!input.trim()) return;
     const userMessage = input.trim();
+    if (/^\/\/node$/i.test(userMessage)) {
+      setInput('');
+      window.dispatchEvent(new CustomEvent('staff:open-manual-clock-in'));
+      inputRef.current?.focus();
+      return;
+    }
     addMessage(userMessage, true);
     setInput('');
     setLoading(true);

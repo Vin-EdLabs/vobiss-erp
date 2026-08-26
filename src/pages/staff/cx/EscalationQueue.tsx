@@ -51,11 +51,11 @@ export default function EscalationQueue({
   }, [load]);
 
   return (
-    <div className="min-h-full bg-gradient-to-br from-slate-50 via-white to-indigo-50 p-6">
+    <div className="min-h-full bg-gradient-to-br from-slate-50 via-white to-[#f5ebe0]/40 p-6">
       <div className="mx-auto max-w-6xl">
         <div className="mb-8 flex flex-wrap items-end justify-between gap-4">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-widest text-indigo-600">Escalation queue</p>
+            <p className="text-xs font-semibold uppercase tracking-widest text-[var(--primary)]">Escalation queue</p>
             <h1 className="text-3xl font-bold text-slate-900">{title}</h1>
             <p className="mt-1 text-slate-600">{subtitle}</p>
           </div>
@@ -103,7 +103,7 @@ export default function EscalationQueue({
                     <tr key={t.ticket_id} className="border-t border-slate-100 hover:bg-slate-50/50">
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-2 font-medium text-slate-900">
-                          <Ticket className="h-4 w-4 text-indigo-500" />
+                          <Ticket className="h-4 w-4 text-[var(--primary)]" />
                           {t.ticket_id}
                         </div>
                         <p className="mt-0.5 max-w-xs truncate text-xs text-slate-500">{t.title}</p>
@@ -143,7 +143,7 @@ export default function EscalationQueue({
                           />
                           <Link
                             to={`${detailBasePath}/${t.ticket_id}`}
-                            className="text-sm font-semibold text-indigo-600 hover:text-indigo-800"
+                            className="text-sm font-semibold text-[var(--primary)] hover:text-[var(--primary-hover)]"
                           >
                             View
                           </Link>

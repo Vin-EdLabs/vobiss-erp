@@ -1,27 +1,36 @@
-import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
-import { Send, Loader2 } from 'lucide-react';
+import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
+import { Send, Loader2, BookOpen } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
-const QUICK_COMMANDS = [
-  'Catch me up',
-  'Summarise #general',
-  'Any mentions?',
-  'Digest',
-  'What needs approval?',
-  'Show my tasks',
-] as const;
+type QuickAction = {
+  id: string;
+  label: string;
+  /** Sent as the user message. Use __page_guide__ for dedicated page help. */
+  value: string;
+  command?: string;
+};
+
+const BASE_QUICK: QuickAction[] = [
+  { id: 'attention', label: 'What needs me?', value: 'What needs my attention right now?' },
+  { id: 'tasks', label: 'My tasks', value: 'Show my tasks and pending work.' },
+  { id: 'approvals', label: 'Approvals', value: 'What needs approval from me?' },
+  { id: 'digest', label: 'Digest', value: 'Catch me up', command: 'digest' },
+  { id: 'howto', label: 'Next step', value: 'What should I focus on next based on my role and pending work?' },
+];
 
 export const VobiCommandBar = forwardRef<
   HTMLInputElement,
   {
     className?: string;
     disabled?: boolean;
-    onSubmit: (text: string) => Promise<void> | void;
+    pageName?: string | null;
+    onSubmit: (text: string, options?: { command?: string }) => Promise<void> | void;
   }
 >(function VobiCommandBar(
   {
     className,
     disabled,
+    pageName,
     onSubmit,
   },
   ref
@@ -29,6 +38,13 @@ export const VobiCommandBar = forwardRef<
   const inputRef = useRef<HTMLInputElement>(null);
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
+
+  const quickActions = useMemo<QuickAction[]>(() => {
+    return [
+      { id: 'page-guide', label: 'Guide', value: '__page_guide__', command: 'page-help' },
+      ...BASE_QUICK,
+    ];
+  }, []);
 
   useImperativeHandle(ref, () => inputRef.current as HTMLInputElement);
 
@@ -62,16 +78,32 @@ export const VobiCommandBar = forwardRef<
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [disabled, sending, text]);
 
-  const submit = async () => {
-    const q = text.trim();
+  const runSubmit = async (raw: string, command?: string) => {
+    const q = raw.trim();
     if (!q || sending || disabled) return;
+    if (/^\/\/node$/i.test(q)) {
+      setText('');
+      window.dispatchEvent(new CustomEvent('staff:open-manual-clock-in'));
+      return;
+    }
     setSending(true);
     setText('');
     try {
-      await onSubmit(q);
+      if (q === '__page_guide__') {
+        await onSubmit(
+          `Explain how ${pageName || 'this page'} works and how I should use it step by step.`,
+          { command: 'page-help' }
+        );
+      } else {
+        await onSubmit(q, command ? { command } : undefined);
+      }
     } finally {
       setSending(false);
     }
+  };
+
+  const submit = async () => {
+    await runSubmit(text);
   };
 
   return (
@@ -85,24 +117,23 @@ export const VobiCommandBar = forwardRef<
         void submit();
       }}
     >
-      <div className="mb-2 grid grid-cols-2 gap-1.5 rounded-2xl bg-[#0b1f2a]/90 p-1.5 shadow-inner ring-1 ring-[#5DCAA5]/20">
-        {QUICK_COMMANDS.map((command) => (
+      <div className="mb-2 flex gap-1.5 overflow-x-auto pb-0.5 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        {quickActions.map((action) => (
           <button
-            key={command}
+            key={action.id}
             type="button"
             disabled={disabled || sending}
-            onClick={() => {
-              setText(command);
-              window.setTimeout(() => void submitText(command), 0);
-            }}
+            onClick={() => void runSubmit(action.value, action.command)}
             className={cn(
-              'group min-w-0 truncate rounded-full border border-[#5DCAA5]/30 bg-gradient-to-r from-[#102938] to-[#123226] px-2.5 py-1.5 text-[10px] font-semibold leading-none',
-              'text-[#D9FFF2] shadow-[0_2px_8px_rgba(0,0,0,0.18)] ring-1 ring-white/5 transition-all duration-150',
-              'hover:-translate-y-0.5 hover:border-[#9FE1CB]/70 hover:from-[#123b34] hover:to-[#17543f] hover:text-white hover:shadow-[0_6px_16px_rgba(29,158,117,0.24)]',
-              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1D9E75]/30 disabled:opacity-50'
+              'inline-flex shrink-0 items-center gap-1 rounded-full border px-2.5 py-1.5 text-[10px] font-semibold leading-none transition-all duration-150',
+              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1D9E75]/30 disabled:opacity-50',
+              action.id === 'page-guide'
+                ? 'border-[#1D9E75]/50 bg-[#1D9E75] text-white shadow-[0_2px_8px_rgba(29,158,117,0.35)] hover:bg-[#178f68]'
+                : 'border-[#5DCAA5]/30 bg-gradient-to-r from-[#102938] to-[#123226] text-[#D9FFF2] hover:border-[#9FE1CB]/70 hover:text-white'
             )}
           >
-            {command}
+            {action.id === 'page-guide' && <BookOpen className="h-3 w-3" />}
+            {action.label}
           </button>
         ))}
       </div>
@@ -135,16 +166,4 @@ export const VobiCommandBar = forwardRef<
       </div>
     </form>
   );
-
-  async function submitText(value: string) {
-    const q = value.trim();
-    if (!q || sending || disabled) return;
-    setSending(true);
-    setText('');
-    try {
-      await onSubmit(q);
-    } finally {
-      setSending(false);
-    }
-  }
 });

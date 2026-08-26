@@ -318,7 +318,7 @@ const ActivitiesTable: React.FC = () => {
             <button
               onClick={() => document.getElementById('json-import-input')?.click()}
               disabled={!!importProgress}
-              className="flex items-center gap-3 px-6 py-4 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 disabled:opacity-60 text-white font-bold rounded-2xl shadow-lg transition-all transform hover:scale-105"
+              className="flex items-center gap-3 px-6 py-4 bg-gradient-to-r from-[var(--primary)] to-[var(--primary-hover)] hover:from-[var(--primary-hover)] hover:to-[#5c3a1e] disabled:opacity-60 text-white font-bold rounded-2xl shadow-lg transition-all transform hover:scale-105"
             >
               <Upload className="w-6 h-6" />
               <span className="hidden sm:inline">
@@ -392,7 +392,7 @@ const ActivitiesTable: React.FC = () => {
             <h3 className="text-2xl font-bold text-gray-900 mb-6">Importing Sites...</h3>
             <div className="w-full bg-gray-200 rounded-full h-6 overflow-hidden mb-4">
               <div
-                className="bg-gradient-to-r from-purple-600 to-indigo-600 h-full transition-all duration-500"
+                className="bg-gradient-to-r from-[var(--primary)] to-[var(--primary-hover)] h-full transition-all duration-500"
                 style={{ width: `${(importProgress.done / importProgress.total) * 100}%` }}
               />
             </div>
@@ -525,7 +525,7 @@ const ActivitiesTable: React.FC = () => {
                               <div className="col-span-2 mt-6 flex gap-3">
                                 <button 
                                   onClick={() => startEdit(act)} 
-                                  className="flex items-center gap-2 px-5 py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-2xl shadow-lg transition"
+                                  className="flex items-center gap-2 px-5 py-3 bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white font-bold rounded-2xl shadow-lg transition"
                                 >
                                   <Edit2 className="w-5 h-5" />
                                   Edit
@@ -638,7 +638,7 @@ const ActivitiesTable: React.FC = () => {
                       <div className="flex gap-3">
                         <button 
                           onClick={() => startEdit(act)} 
-                          className="flex items-center gap-2 px-5 py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow-lg transition text-sm"
+                          className="flex items-center gap-2 px-5 py-3 bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white font-bold rounded-xl shadow-lg transition text-sm"
                         >
                           <Edit2 className="w-4 h-4" />
                           Edit

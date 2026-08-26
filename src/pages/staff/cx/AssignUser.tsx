@@ -21,7 +21,7 @@ const AssignUser: React.FC = () => {
   return (
     <div className="min-h-screen bg-[#F8FAFC] p-6 md:p-10 flex items-center justify-center">
       <div className="max-w-xl w-full">
-        <button onClick={() => navigate(-1)} className="flex items-center gap-2 text-slate-400 hover:text-blue-600 font-bold text-xs uppercase tracking-widest mb-6 transition-colors">
+        <button onClick={() => navigate(-1)} className="flex items-center gap-2 text-slate-400 hover:text-[var(--primary)] font-bold text-xs uppercase tracking-widest mb-6 transition-colors">
           <ArrowLeft className="w-4 h-4" /> Cancel Assignment
         </button>
 
@@ -32,7 +32,7 @@ const AssignUser: React.FC = () => {
               <h2 className="text-3xl font-black tracking-tight">Assign Manager</h2>
               <p className="text-slate-400 mt-2 font-medium">Link a CX Staff member to a Customer Site.</p>
             </div>
-            <div className="absolute -right-10 -top-10 w-40 h-40 bg-blue-600/20 rounded-full blur-3xl"></div>
+            <div className="absolute -right-10 -top-10 w-40 h-40 bg-[var(--primary)]/20 rounded-full blur-3xl"></div>
           </div>
 
           <form onSubmit={handleAssign} className="p-10 space-y-6">
@@ -64,7 +64,7 @@ const AssignUser: React.FC = () => {
             <button 
               type="submit" 
               disabled={loading}
-              className="w-full py-4 bg-blue-600 hover:bg-blue-700 text-white rounded-2xl font-black text-lg tracking-tight transition-all shadow-lg shadow-blue-200 flex items-center justify-center gap-2 disabled:opacity-50"
+              className="w-full py-4 bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white rounded-2xl font-black text-lg tracking-tight transition-all shadow-lg shadow-[#8b5a2b]/20 flex items-center justify-center gap-2 disabled:opacity-50"
             >
               {loading ? (
                 <div className="h-6 w-6 border-2 border-white border-t-transparent rounded-full animate-spin"></div>

@@ -290,7 +290,7 @@ const CustomersPage: React.FC = () => {
               <button
                 type="submit"
                 disabled={loading || !customerName.trim() || !email.trim() || !phone.trim() || !location.trim()}
-                className="px-8 py-3 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-xl shadow transition disabled:opacity-50"
+                className="px-8 py-3 bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white font-medium rounded-xl shadow transition disabled:opacity-50"
               >
                 {loading ? 'Creating...' : 'Create Organization'}
               </button>
@@ -332,7 +332,7 @@ const CustomersPage: React.FC = () => {
                       <td className="px-6 py-4 whitespace-nowrap font-mono font-medium text-gray-900">{cust.customer_code}</td>
                       <td className="px-6 py-4 font-medium text-gray-900">{cust.customer_name}</td>
                       <td className="px-6 py-4">
-                        <div className="font-mono text-blue-600 text-sm">{cust.project_code}</div>
+                        <div className="font-mono text-[var(--primary)] text-sm">{cust.project_code}</div>
                         <div className="text-sm text-gray-500">{cust.project_name}</div>
                       </td>
                       <td className="px-6 py-4 text-sm">
@@ -351,7 +351,7 @@ const CustomersPage: React.FC = () => {
                       <td className="px-6 py-4 whitespace-nowrap text-sm">
                         <button
                           onClick={() => openDetailsModal(cust)}
-                          className="text-blue-600 hover:text-blue-800 font-medium"
+                          className="text-[var(--primary)] hover:text-[var(--primary-hover)] font-medium"
                         >
                           View Details
                         </button>
@@ -396,7 +396,7 @@ const CustomersPage: React.FC = () => {
                     <div>
                       <div className="text-sm font-semibold text-gray-600">Project</div>
                       <div className="text-lg mt-1">
-                        <span className="font-mono text-blue-600">{selectedCustomer.project_code}</span> —{' '}
+                        <span className="font-mono text-[var(--primary)]">{selectedCustomer.project_code}</span> —{' '}
                         {selectedCustomer.project_name}
                       </div>
                     </div>
@@ -483,7 +483,7 @@ const CustomersPage: React.FC = () => {
           )}
 
         {/* Help Box */}
-        <div className="mt-12 bg-blue-50 border border-blue-200 rounded-2xl p-6 text-blue-800">
+        <div className="mt-12 bg-[var(--accent-green-light)] border border-[#e0c4a0] rounded-2xl p-6 text-[var(--primary-hover)]">
           <h3 className="font-semibold flex items-center mb-3">
             <svg className="w-6 h-6 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />

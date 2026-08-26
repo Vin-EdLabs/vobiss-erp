@@ -10,7 +10,7 @@ import {
   Globe, CircleAlert, AlertCircle, Search, Network, LayoutDashboard,
   Briefcase, CalendarDays, CalendarCheck, CalendarOff, Wallet, ClipboardCheck, FolderOpen, PanelLeftClose, PanelLeft, Landmark, ShieldCheck
 } from 'lucide-react';
-import { getRequests, getLowStockItems, getNotifications, getWorkspace } from '../api';
+import { getRequests, getLowStockItems, getNotifications, getWorkspace, cxApi } from '../api';
 import { resolvePrimaryRole, normalizeMenuRole, userHasAnyRole, formatRoleLabel, isHrStaff, SYSTEM_ADMIN_LABEL } from '../config/roles';
 import { getMyProjectUnits, getProjectRequestDashboard, type ProjectUnit } from '../api/project';
 import { getChatUnreadTotal } from '../api/chat';
@@ -20,6 +20,76 @@ import { useQuery } from '@tanstack/react-query';
 import { hrSelfApi } from '@/api/hrSelf';
 import { hrApi } from '@/api/hr';
 import { UserAvatar } from '@/components/UserAvatar';
+
+const OPEN_TICKET_STATUSES = new Set(['NEW', 'OPEN', 'IN_PROGRESS', 'ON_HOLD']);
+
+type TicketAttentionCounts = {
+  noc: number;
+  ip: number;
+  tx: number;
+  cx: number;
+  ro: number;
+  noc_manager: number;
+  director: number;
+  escalate: number;
+  mine: number;
+};
+
+const EMPTY_TICKET_COUNTS: TicketAttentionCounts = {
+  noc: 0,
+  ip: 0,
+  tx: 0,
+  cx: 0,
+  ro: 0,
+  noc_manager: 0,
+  director: 0,
+  escalate: 0,
+  mine: 0,
+};
+
+function ticketAssigneeId(ticket: any): number | null {
+  const raw = ticket?.assigned_to?.id ?? ticket?.assigned_to ?? ticket?.assignee_id ?? null;
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+function ticketNeedsAttention(ticket: any, userId?: number | null): boolean {
+  if (!OPEN_TICKET_STATUSES.has(String(ticket?.status || '').toUpperCase())) return false;
+  const assignee = ticketAssigneeId(ticket);
+  if (!assignee) return true;
+  return !!userId && assignee === userId;
+}
+
+function computeTicketAttentionCounts(tickets: any[], userId?: number | null): TicketAttentionCounts {
+  const counts = { ...EMPTY_TICKET_COUNTS };
+  for (const ticket of tickets || []) {
+    if (!ticketNeedsAttention(ticket, userId)) continue;
+    const stage = String(ticket?.escalation_stage || 'noc').toLowerCase();
+    const assignee = ticketAssigneeId(ticket);
+    if (userId && assignee === userId) counts.mine += 1;
+
+    if (stage === 'ip') counts.ip += 1;
+    else if (stage === 'tx' || stage === 'ts') counts.tx += 1;
+    else if (stage === 'ro' || stage === 'relationship_officer') counts.ro += 1;
+    else if (stage === 'noc_manager' || stage === 'noc-manager') counts.noc_manager += 1;
+    else if (stage === 'director' || stage === 'cto') counts.director += 1;
+    else counts.noc += 1;
+
+    counts.cx += 1;
+  }
+  counts.escalate = counts.ro + counts.noc_manager + counts.director;
+  return counts;
+}
+
+/** Numeric attention pill — cream on brown sidebar */
+const SIDEBAR_COUNT_PILL =
+  'mr-1 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-[#f3e6d4] px-1 text-[10px] font-bold text-[#3c2210]';
+const SIDEBAR_COUNT_PILL_SUB =
+  'ml-2 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-[#f3e6d4] px-1 text-[10px] font-bold text-[#3c2210]';
+const SIDEBAR_COUNT_DOT = 'absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-[#f3e6d4]';
+/** Soft role/label chips that match the brown system */
+const SIDEBAR_LABEL_BADGE = 'bg-[#f3e6d4]/15 text-[#f3e6d4]';
+const SIDEBAR_ALERT_BADGE = 'bg-[#f3e6d4] text-[#3c2210]';
 
 function filterSidebarMenu(items: any[], query: string) {
   const q = query.trim().toLowerCase();
@@ -152,6 +222,7 @@ const Sidebar = ({
   const searchRef = useRef<HTMLInputElement>(null);
   const [projectUnits, setProjectUnits] = useState<ProjectUnit[]>([]);
   const [projectUnitCounts, setProjectUnitCounts] = useState<Record<string, number>>({});
+  const [ticketAttention, setTicketAttention] = useState<TicketAttentionCounts>(EMPTY_TICKET_COUNTS);
   const [canCreateProjectRequest, setCanCreateProjectRequest] = useState(false);
   const hrMeQ = useQuery({
     queryKey: ['hr-self', 'me'],
@@ -243,6 +314,29 @@ const Sidebar = ({
     loadChatUnread();
     window.addEventListener('chat:unread-changed', loadChatUnread);
     return () => window.removeEventListener('chat:unread-changed', loadChatUnread);
+  }, [user?.id]);
+
+  useEffect(() => {
+    if (!user?.id) {
+      setTicketAttention(EMPTY_TICKET_COUNTS);
+      return;
+    }
+    const loadTicketAttention = async () => {
+      try {
+        const res = await cxApi.getAllTickets();
+        const list = res?.data || res?.tickets || (Array.isArray(res) ? res : []);
+        setTicketAttention(computeTicketAttentionCounts(list, Number(user.id)));
+      } catch {
+        setTicketAttention(EMPTY_TICKET_COUNTS);
+      }
+    };
+    loadTicketAttention();
+    const interval = setInterval(loadTicketAttention, 15000);
+    window.addEventListener('staff:tickets-changed', loadTicketAttention as EventListener);
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('staff:tickets-changed', loadTicketAttention as EventListener);
+    };
   }, [user?.id]);
 
   useEffect(() => {
@@ -425,7 +519,7 @@ const Sidebar = ({
             isOpen: isReportsOpen,
             onToggle: () => setIsReportsOpen((prev) => !prev),
             badge: 'Reports',
-            badgeColor: 'bg-indigo-100 text-indigo-800',
+            badgeColor: SIDEBAR_LABEL_BADGE,
             subItems: reportSubItems,
           }
         : null;
@@ -459,7 +553,7 @@ const Sidebar = ({
       isOpen: true,
       onToggle: () => {},
       badge: pendingCount > 0 ? String(pendingCount) : undefined,
-      badgeColor: 'bg-red-100 text-red-800',
+      badgeColor: SIDEBAR_ALERT_BADGE,
       notificationCount: pendingCount,
       subItems: approvalSubItems,
     };
@@ -489,15 +583,20 @@ const Sidebar = ({
       isOpen: isSettingsOpen,
       onToggle: () => setIsSettingsOpen((prev) => !prev),
       badge: 'System',
-      badgeColor: 'bg-purple-100 text-purple-800',
+      badgeColor: SIDEBAR_LABEL_BADGE,
       subItems: [
         { icon: UserCheck, label: 'Roles & Permissions', path: '/users' },
+        { icon: Users2, label: 'Manage Clients', path: '/admin/clients' },
         { icon: Network, label: 'Units Configuration', path: '/project-request/admin/units' },
         { icon: AuditIcon, label: 'Audit Logs', path: '/audit-logs' },
         { icon: Sliders, label: 'System Configuration', path: '/configuration' },
         { icon: Landmark, label: 'Realm', path: '/realm' },
         { icon: Bell, label: 'System Messages', path: '/system-messages' },
         { icon: Settings, label: 'System Settings', path: '/settings' },
+        // Hidden archive — System Admin account only (not shown to ordinary operators)
+        ...(isAdminSuper
+          ? [{ icon: ShieldCheck, label: 'Vobi Vault', path: '/admin/vobi-vault' }]
+          : []),
       ],
     };
 
@@ -542,18 +641,21 @@ const Sidebar = ({
       isCollapsible: true,
       isOpen: isCXOpen,
       onToggle: () => setIsCXOpen(prev => !prev),
-      badge: 'Live',
-      badgeColor: 'bg-green-100 text-green-800',
+      badge: ticketAttention.cx > 0 ? String(ticketAttention.cx) : undefined,
+      badgeColor: SIDEBAR_ALERT_BADGE,
+      notificationCount: ticketAttention.cx,
       subItems: [
         { icon: BarChart3,   label: 'CX Dashboard',          path: '/staff/cx/dashboard' },
-        { icon: Building2,   label: 'Projects & Sites',      path: '/staff/cx/projects' },
-        { icon: Users2,      label: 'Customer Organizations', path: '/staff/cx/customers' },
-        { icon: Ticket,      label: 'Master Ticket Queue',   path: '/staff/cx/tickets' },
+        { icon: Building2,   label: 'Projects',              path: '/staff/cx/projects' },
+        { icon: MapPin,      label: 'Sites',                 path: '/staff/cx/sites' },
+        { icon: Users2,      label: 'Clients',               path: '/staff/cx/clients' },
+        { icon: Ticket,      label: 'Master Ticket Queue',   path: '/staff/cx/tickets', notificationCount: ticketAttention.cx },
         { icon: FilePlus,    label: 'Create Staff Ticket',   path: '/staff/cx/create-ticket' },
-        { icon: CircleAlert, label: 'Ticket Escalation',     path: '/staff/cx/escalate' },
-        { icon: Headset,     label: 'Assign Support',        path: '/staff/cx/assign' },
+        { icon: CircleAlert, label: 'Ticket Escalation',     path: '/staff/cx/escalate', notificationCount: ticketAttention.escalate },
+        { icon: Headset,     label: 'Assign Support',        path: '/staff/cx/assign', notificationCount: ticketAttention.cx },
         { icon: User,        label: 'User Work History',     path: '/staff/cx/user-work-history' },
         { icon: Search,      label: 'Ticket Search',         path: '/staff/cx/ticket-search' },
+        { icon: Tags,        label: 'Ticket Tags',           path: '/staff/cx/tags' },
       ]
     };
 
@@ -563,10 +665,11 @@ const Sidebar = ({
       isCollapsible: true,
       isOpen: isCXOpen,
       onToggle: () => setIsCXOpen((prev) => !prev),
-      badge: 'R.O',
-      badgeColor: 'bg-amber-100 text-amber-800',
+      badge: ticketAttention.ro > 0 ? String(ticketAttention.ro) : 'R.O',
+      badgeColor: ticketAttention.ro > 0 ? SIDEBAR_ALERT_BADGE : SIDEBAR_LABEL_BADGE,
+      notificationCount: ticketAttention.ro,
       subItems: [
-        { icon: Ticket, label: 'R.O Ticket Queue', path: '/staff/ro/escalations' },
+        { icon: Ticket, label: 'R.O Ticket Queue', path: '/staff/ro/escalations', notificationCount: ticketAttention.ro },
         { icon: FilePlus, label: 'Create Ticket', path: '/staff/cx/create-ticket' },
       ],
     };
@@ -577,10 +680,11 @@ const Sidebar = ({
       isCollapsible: true,
       isOpen: isNOCOpen,
       onToggle: () => setIsNOCOpen((prev) => !prev),
-      badge: 'Mgr',
-      badgeColor: 'bg-orange-100 text-orange-800',
+      badge: ticketAttention.noc_manager > 0 ? String(ticketAttention.noc_manager) : 'Mgr',
+      badgeColor: ticketAttention.noc_manager > 0 ? SIDEBAR_ALERT_BADGE : SIDEBAR_LABEL_BADGE,
+      notificationCount: ticketAttention.noc_manager,
       subItems: [
-        { icon: Ticket, label: 'Manager Escalations', path: '/staff/noc-manager/escalations' },
+        { icon: Ticket, label: 'Manager Escalations', path: '/staff/noc-manager/escalations', notificationCount: ticketAttention.noc_manager },
       ],
     };
 
@@ -590,14 +694,15 @@ const Sidebar = ({
       isCollapsible: true,
       isOpen: isCXOpen,
       onToggle: () => setIsCXOpen((prev) => !prev),
-      badge: 'Exec',
-      badgeColor: 'bg-red-100 text-red-800',
+      badge: ticketAttention.director > 0 ? String(ticketAttention.director) : 'Exec',
+      badgeColor: ticketAttention.director > 0 ? SIDEBAR_ALERT_BADGE : SIDEBAR_LABEL_BADGE,
+      notificationCount: ticketAttention.director,
       subItems: [
-        { icon: Ticket, label: 'Executive Escalations', path: '/staff/director/escalations' },
+        { icon: Ticket, label: 'Executive Escalations', path: '/staff/director/escalations', notificationCount: ticketAttention.director },
       ],
     };
 
-    /** Directors / CTO â€” all service requests in one queue (no per-unit links). */
+    /** Directors / CTO — all service requests in one queue (no per-unit links). */
     const directorProjectRequestsSection = {
       icon: Network,
       label: 'Service Requests',
@@ -605,7 +710,7 @@ const Sidebar = ({
       isOpen: isProjectRequestOpen,
       onToggle: () => setIsProjectRequestOpen((p) => !p),
       badge: (projectUnitCounts.project || 0) > 0 ? String(projectUnitCounts.project) : undefined,
-      badgeColor: 'bg-red-100 text-red-800',
+      badgeColor: SIDEBAR_ALERT_BADGE,
       subItems: [
         {
           icon: FileText,
@@ -616,34 +721,38 @@ const Sidebar = ({
       ],
     };
 
-    /** Directors / CTO â€” unified ticket access (no CX, NOC, IP, or Field queues). */
+    /** Directors / CTO — unified ticket access (no CX, NOC, IP, or Field queues). */
     const directorTicketsSection = {
       icon: Ticket,
       label: 'Tickets',
       isCollapsible: true,
       isOpen: isCXOpen,
       onToggle: () => setIsCXOpen((prev) => !prev),
+      badge: ticketAttention.cx > 0 ? String(ticketAttention.cx) : undefined,
+      badgeColor: SIDEBAR_ALERT_BADGE,
+      notificationCount: ticketAttention.cx,
       subItems: [
-        { icon: Ticket, label: 'All Tickets', path: '/staff/cx/tickets' },
+        { icon: Ticket, label: 'All Tickets', path: '/staff/cx/tickets', notificationCount: ticketAttention.cx },
         { icon: Search, label: 'Search for Tickets', path: '/staff/cx/ticket-search' },
         { icon: User, label: 'User Work History', path: '/staff/cx/user-work-history' },
       ],
     };
 
-    // NOC Section â€” first point of action for all new tickets
+    // NOC Section — first point of action for all new tickets
     const nocSection = {
       icon: Ticket,
       label: 'NOC Ticketing',
       isCollapsible: true,
       isOpen: isNOCOpen,
       onToggle: () => setIsNOCOpen(prev => !prev),
-      badge: 'Live',
-      badgeColor: 'bg-green-100 text-green-800',
+      badge: ticketAttention.noc > 0 ? String(ticketAttention.noc) : undefined,
+      badgeColor: SIDEBAR_ALERT_BADGE,
+      notificationCount: ticketAttention.noc,
       subItems: [
         { icon: Home,        label: 'Dashboard',             path: '/staff/noc/dashboard' },
-        { icon: Ticket,      label: 'NOC Ticket Queue',      path: '/staff/noc/tickets' },
+        { icon: Ticket,      label: 'NOC Ticket Queue',      path: '/staff/noc/tickets', notificationCount: ticketAttention.noc },
         { icon: FilePlus,    label: 'Create Ticket',         path: '/staff/cx/create-ticket' },
-        { icon: CircleAlert, label: 'NOC Escalation',        path: '/staff/cx/escalate' },
+        { icon: CircleAlert, label: 'NOC Escalation',        path: '/staff/cx/escalate', notificationCount: ticketAttention.escalate },
       ]
     };
 
@@ -654,11 +763,14 @@ const Sidebar = ({
       isCollapsible: true,
       isOpen: isIPOpen,
       onToggle: () => setIsIPOpen(prev => !prev),
-      badge: 'Live',
-      badgeColor: 'bg-indigo-100 text-indigo-800',
+      badge: ticketAttention.ip > 0 ? String(ticketAttention.ip) : undefined,
+      badgeColor: SIDEBAR_ALERT_BADGE,
+      notificationCount: ticketAttention.ip,
       subItems: [
-        { icon: Ticket,      label: 'IP Ticket Queue',       path: '/staff/ip/tickets' },
-        { icon: CircleAlert, label: 'IP Escalation',         path: '/staff/cx/escalate' },
+        { icon: Home,        label: 'Dashboard',             path: '/staff/ip/dashboard' },
+        { icon: Ticket,      label: 'IP Ticket Queue',       path: '/staff/ip/tickets', notificationCount: ticketAttention.ip },
+        { icon: FilePlus,    label: 'Create Ticket',         path: '/staff/cx/create-ticket' },
+        { icon: CircleAlert, label: 'IP Escalation',         path: '/staff/cx/escalate', notificationCount: ticketAttention.escalate },
       ]
     };
 
@@ -669,11 +781,14 @@ const Sidebar = ({
       isCollapsible: true,
       isOpen: isFieldEngOpen,
       onToggle: () => setIsFieldEngOpen(prev => !prev),
-      badge: 'Live',
-      badgeColor: 'bg-purple-100 text-purple-800',
+      badge: ticketAttention.tx > 0 ? String(ticketAttention.tx) : undefined,
+      badgeColor: SIDEBAR_ALERT_BADGE,
+      notificationCount: ticketAttention.tx,
       subItems: [
-        { icon: Ticket,      label: 'TS Ticket Queue',       path: '/staff/field/tickets' },
-        { icon: CircleAlert, label: 'TS Escalation',         path: '/staff/cx/escalate' },
+        { icon: Home,        label: 'Dashboard',             path: '/staff/field/dashboard' },
+        { icon: Ticket,      label: 'TS Ticket Queue',       path: '/staff/field/tickets', notificationCount: ticketAttention.tx },
+        { icon: FilePlus,    label: 'Create Ticket',         path: '/staff/cx/create-ticket' },
+        { icon: CircleAlert, label: 'TS Escalation',         path: '/staff/cx/escalate', notificationCount: ticketAttention.escalate },
       ]
     };
 
@@ -684,8 +799,8 @@ const Sidebar = ({
       isCollapsible: true,
       isOpen: isCustomerOpen,
       onToggle: () => setIsCustomerOpen(prev => !prev),
-      badge: 'Live',
-      badgeColor: 'bg-purple-100 text-purple-800',
+      badge: undefined,
+      badgeColor: SIDEBAR_LABEL_BADGE,
       subItems: [
         { icon: Home,      label: 'Dashboard',         path: '/customer/dashboard' },
         { icon: FilePlus,  label: 'Create Ticket',     path: '/customer/create-ticket' },
@@ -720,7 +835,7 @@ const Sidebar = ({
       isOpen: isHrOpen,
       onToggle: () => setIsHrOpen((p) => !p),
       badge: hrAttentionCount > 0 ? String(hrAttentionCount) : undefined,
-      badgeColor: 'bg-red-100 text-red-800',
+      badgeColor: SIDEBAR_ALERT_BADGE,
       notificationCount: hrAttentionCount,
       subItems: [
         { icon: LayoutDashboard, label: 'HR Dashboard', path: '/hr/dashboard' },
@@ -744,7 +859,7 @@ const Sidebar = ({
       isOpen: isMyHrOpen,
       onToggle: () => setIsMyHrOpen((p) => !p),
       badge: myHrAttentionCount > 0 ? String(myHrAttentionCount) : undefined,
-      badgeColor: 'bg-red-100 text-red-800',
+      badgeColor: SIDEBAR_ALERT_BADGE,
       notificationCount: myHrAttentionCount,
       subItems: [
         { icon: CalendarCheck, label: 'Attendance', path: '/hr-self/attendance' },
@@ -762,7 +877,7 @@ const Sidebar = ({
       isOpen: isHrOpen,
       onToggle: () => setIsHrOpen((p) => !p),
       badge: hrAttentionCount > 0 ? String(hrAttentionCount) : undefined,
-      badgeColor: 'bg-red-100 text-red-800',
+      badgeColor: SIDEBAR_ALERT_BADGE,
       notificationCount: hrAttentionCount,
       subItems: [
         { icon: Users, label: 'Employees', path: '/hr/employees' },
@@ -825,7 +940,7 @@ const Sidebar = ({
             isOpen: isProjectRequestOpen,
             onToggle: () => setIsProjectRequestOpen((p) => !p),
             badge: projectRequestBadgeCount > 0 ? String(projectRequestBadgeCount) : undefined,
-            badgeColor: 'bg-red-100 text-red-800',
+            badgeColor: SIDEBAR_ALERT_BADGE,
             subItems: projectSubItems,
           }
         : null;
@@ -1165,7 +1280,7 @@ const Sidebar = ({
                         <>
                           <span className="flex-1">{item.label}</span>
                           {(item.notificationCount ?? 0) > 0 ? (
-                            <span className="mr-1 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-sky-500 px-1 text-[10px] font-bold text-white">
+                            <span className={SIDEBAR_COUNT_PILL}>
                               {item.notificationCount > 99 ? '99+' : item.notificationCount}
                             </span>
                           ) : item.badge ? (
@@ -1177,7 +1292,7 @@ const Sidebar = ({
                         </>
                       )}
                       {compact && (item.notificationCount ?? 0) > 0 && (
-                        <span className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-sky-400" />
+                        <span className={SIDEBAR_COUNT_DOT} />
                       )}
                     </div>
 
@@ -1211,7 +1326,7 @@ const Sidebar = ({
                                 <SubIcon className={`mr-2.5 h-3.5 w-3.5 flex-shrink-0 ${subActive ? 'text-[var(--sidebar-active-border)]' : ''}`} />
                                 <span className="flex-1">{sub.label}</span>
                                 {(sub.notificationCount ?? 0) > 0 && (
-                                  <span className="ml-2 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-sky-500 px-1 text-[10px] font-bold text-white">
+                                  <span className={SIDEBAR_COUNT_PILL_SUB}>
                                     {sub.notificationCount > 99 ? '99+' : sub.notificationCount}
                                   </span>
                                 )}
@@ -1242,7 +1357,7 @@ const Sidebar = ({
                     <>
                       <span className="flex-1">{item.label}</span>
                       {(item.notificationCount ?? 0) > 0 && (
-                        <span className="ml-2 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-sky-500 px-1 text-[10px] font-bold text-white">
+                        <span className={SIDEBAR_COUNT_PILL_SUB}>
                           {item.notificationCount > 99 ? '99+' : item.notificationCount}
                         </span>
                       )}
@@ -1250,7 +1365,7 @@ const Sidebar = ({
                     </>
                   )}
                   {compact && (item.notificationCount ?? 0) > 0 && (
-                    <span className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-sky-400" />
+                    <span className={SIDEBAR_COUNT_DOT} />
                   )}
                 </Link>
               );

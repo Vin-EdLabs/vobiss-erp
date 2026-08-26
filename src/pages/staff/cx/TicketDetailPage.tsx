@@ -12,6 +12,8 @@ import { useAuth } from '../../../context/AuthContext';
 import { RecordChatButton } from '@/components/chat/RecordChatButton';
 import { staffCxTicketPath, toFullTicketNumber } from '@/lib/ticketPaths';
 import { vobiAmbientStore } from '@/stores/vobiAmbientStore';
+import { TicketTagsEditor } from '@/components/tickets/TicketTagsEditor';
+import { TicketFullReportPanel } from '@/components/tickets/TicketFullReportPanel';
 
 interface MaterialRequest {
   id: number;
@@ -45,6 +47,9 @@ interface Ticket {
   contact_phone?: string;
   project_name: string;
   project_id?: string;
+  site_name?: string;
+  site_code?: string;
+  site?: { id?: number; site_name?: string; site_code?: string; connection_status?: string } | null;
   source?: 'portal' | 'email' | 'phone';
   description?: string;
   creator_name?: string;
@@ -54,6 +59,7 @@ interface Ticket {
   chat_channel_id?: string | null;
   attachments?: any;
   timeline?: TimelineEntry[];
+  tags?: { id: number; name: string; color: string }[];
 }
 
 interface TeamMember {
@@ -136,7 +142,7 @@ const ManualEmailForm: React.FC<{ ticketId: string; customerEmail: string }> = (
       <button
         onClick={handleSend}
         disabled={sending || !message.trim()}
-        className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+        className="w-full px-4 py-2 bg-[var(--primary)] text-white rounded-lg text-sm font-medium hover:bg-[var(--primary-hover)] disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
       >
         <Mail className="w-4 h-4" />
         {sending ? 'Sending...' : 'Send Email'}
@@ -306,11 +312,15 @@ const TicketDetailPage: React.FC = () => {
         customer_email: fullTicketInfo.customer_email || fullTicketInfo.contact_email,
         customer_phone: fullTicketInfo.customer_phone || fullTicketInfo.contact_phone,
         project_name: fullTicketInfo.project_name || 'General',
+        site_name: fullTicketInfo.site_name || fullTicketInfo.site?.site_name,
+        site_code: fullTicketInfo.site_code || fullTicketInfo.site?.site_code,
+        site: fullTicketInfo.site || null,
         description: fullTicketInfo.description || 'No description provided.',
         creator_name: fullTicketInfo.creator_name || 'Unknown',
         assignee_name: fullTicketInfo.assignee_name,
         created_at: fullTicketInfo.created_at || new Date().toISOString(),
         attachments: fullTicketInfo.attachments,
+        tags: Array.isArray(fullTicketInfo.tags) ? fullTicketInfo.tags : [],
         timeline: timeline.map((entry: any) => ({
           action: entry.action,
           message: entry.message,
@@ -497,9 +507,9 @@ const TicketDetailPage: React.FC = () => {
   const getStatusColor = (status: string) => {
     const s = status?.toUpperCase() || '';
     switch (s) {
-      case 'NEW': return 'bg-blue-100 text-blue-700 border-blue-200';
+      case 'NEW': return 'bg-blue-100 text-blue-700 border-[#e0c4a0]';
       case 'OPEN': return 'bg-yellow-100 text-yellow-700 border-yellow-200';
-      case 'IN_PROGRESS': return 'bg-purple-100 text-purple-700 border-purple-200';
+      case 'IN_PROGRESS': return 'bg-[var(--accent-green-light)] text-[var(--primary)] border-[#e0c4a0]';
       case 'RESOLVED': return 'bg-green-100 text-green-700 border-green-200';
       case 'CLOSED': return 'bg-gray-100 text-gray-700 border-gray-200';
       default: return 'bg-slate-100 text-slate-600 border-slate-200';
@@ -510,9 +520,9 @@ const TicketDetailPage: React.FC = () => {
     const p = priority?.toUpperCase() || '';
     switch (p) {
       case 'URGENT': return 'bg-red-500';
-      case 'HIGH': return 'bg-orange-500';
+      case 'HIGH': return 'bg-[var(--accent-green-light)]';
       case 'MEDIUM': return 'bg-yellow-500';
-      case 'LOW': return 'bg-blue-500';
+      case 'LOW': return 'bg-[var(--accent-green-light)]';
       default: return 'bg-slate-400';
     }
   };
@@ -537,9 +547,9 @@ const TicketDetailPage: React.FC = () => {
 
   if (loading || loadingTeam) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-indigo-50 flex items-center justify-center">
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-[#f5ebe0]/40 flex items-center justify-center">
         <div className="text-center">
-          <RefreshCw className="w-10 h-10 text-indigo-600 animate-spin mx-auto mb-4" />
+          <RefreshCw className="w-10 h-10 text-[var(--primary)] animate-spin mx-auto mb-4" />
           <p className="text-slate-600 text-sm">Loading ticket details...</p>
         </div>
       </div>
@@ -548,14 +558,14 @@ const TicketDetailPage: React.FC = () => {
 
   if (error || !ticket) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-indigo-50 flex items-center justify-center p-6">
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-[#f5ebe0]/40 flex items-center justify-center p-6">
         <div className="max-w-md w-full bg-white rounded-3xl shadow-xl p-10 text-center border border-slate-100">
           <AlertCircle className="w-16 h-16 text-rose-500 mx-auto mb-6" />
           <h2 className="text-2xl font-bold text-slate-800 mb-3">Ticket Not Found</h2>
           <p className="text-slate-600 mb-8">{error || 'The ticket you are looking for does not exist.'}</p>
           <button
             onClick={() => navigate(backPath)}
-            className="px-8 py-3 bg-blue-600 text-white font-semibold rounded-xl hover:bg-blue-700 transition shadow-lg shadow-blue-200/50"
+            className="px-8 py-3 bg-[var(--primary)] text-white font-semibold rounded-xl hover:bg-[var(--primary-hover)] transition shadow-lg shadow-[#8b5a2b]/25"
           >
             {backLabel}
           </button>
@@ -569,12 +579,12 @@ const TicketDetailPage: React.FC = () => {
     : [];
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-indigo-50">
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-[#f5ebe0]/40">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="mb-6">
           <button
             onClick={() => navigate(backPath)}
-            className="flex items-center gap-2 text-indigo-600 hover:text-indigo-800 text-sm font-medium mb-4 group"
+            className="flex items-center gap-2 text-[var(--primary)] hover:text-[var(--primary-hover)] text-sm font-medium mb-4 group"
           >
             <ArrowLeft className="w-4 h-4 group-hover:-translate-x-1 transition-transform" />
             {backLabel}
@@ -594,6 +604,39 @@ const TicketDetailPage: React.FC = () => {
                   </div>
                 </div>
                 <p className="text-sm text-slate-500 font-mono">{ticket.ticket_id}</p>
+                <div className="mt-3">
+                  <TicketTagsEditor
+                    ticketId={ticket.ticket_id}
+                    initialTags={ticket.tags || []}
+                    onChange={(tags) => setTicket((prev) => (prev ? { ...prev, tags } : prev))}
+                    onMutated={() => {
+                      void (async () => {
+                        try {
+                          const data = await cxApi.getTicketDetails(ticketRouteId);
+                          const detailData = data.data || data;
+                          const timeline = detailData.timeline || [];
+                          setTicket((prev) =>
+                            prev
+                              ? {
+                                  ...prev,
+                                  timeline: timeline.map((entry: any) => ({
+                                    action: entry.action,
+                                    message: entry.message,
+                                    visibility: entry.visibility || 'public',
+                                    actor_role: entry.actor_role || 'Staff',
+                                    actor_name: entry.actor_name || 'Unknown',
+                                    created_at: entry.created_at,
+                                  })),
+                                }
+                              : prev
+                          );
+                        } catch {
+                          /* ignore soft refresh errors */
+                        }
+                      })();
+                    }}
+                  />
+                </div>
               </div>
               <RecordChatButton
                 recordType="ticket"
@@ -608,7 +651,7 @@ const TicketDetailPage: React.FC = () => {
           <div className="lg:col-span-2 space-y-6">
             <div className="bg-white rounded-2xl shadow-[var(--shadow-md)] border border-slate-200 p-6">
               <h2 className="text-lg font-bold text-slate-900 mb-4 flex items-center gap-2">
-                <User className="w-5 h-5 text-indigo-600" />
+                <User className="w-5 h-5 text-[var(--primary)]" />
                 Customer Information
               </h2>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -639,8 +682,15 @@ const TicketDetailPage: React.FC = () => {
                   </div>
                 )}
                 <div>
-                  <p className="text-sm text-slate-500 mb-1">Project</p>
-                  <p className="text-base font-semibold text-slate-900">{ticket.project_name}</p>
+                  <p className="text-sm text-slate-500 mb-1">Site</p>
+                  <p className="text-base font-semibold text-slate-900">
+                    {ticket.site_name || ticket.site?.site_name || ticket.project_name || '—'}
+                    {(ticket.site_code || ticket.site?.site_code) && (
+                      <span className="ml-2 rounded bg-[var(--accent-green-light)] px-2 py-0.5 font-mono text-xs text-[var(--primary)]">
+                        {ticket.site_code || ticket.site?.site_code}
+                      </span>
+                    )}
+                  </p>
                 </div>
                 <div>
                   <p className="text-sm text-slate-500 mb-1 flex items-center gap-1">
@@ -653,7 +703,7 @@ const TicketDetailPage: React.FC = () => {
 
             <div className="bg-white rounded-2xl shadow-[var(--shadow-md)] border border-slate-200 p-6">
               <h2 className="text-lg font-bold text-slate-900 mb-4 flex items-center gap-2">
-                <FileText className="w-5 h-5 text-indigo-600" />
+                <FileText className="w-5 h-5 text-[var(--primary)]" />
                 Description
               </h2>
               <p className="text-slate-700 whitespace-pre-wrap">{ticket.description}</p>
@@ -662,7 +712,7 @@ const TicketDetailPage: React.FC = () => {
             {attachments.length > 0 && (
               <div className="bg-white rounded-2xl shadow-[var(--shadow-md)] border border-slate-200 p-6">
                 <h2 className="text-lg font-bold text-slate-900 mb-4 flex items-center gap-2">
-                  <ImageIcon className="w-5 h-5 text-indigo-600" />
+                  <ImageIcon className="w-5 h-5 text-[var(--primary)]" />
                   Attachments
                 </h2>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -673,7 +723,7 @@ const TicketDetailPage: React.FC = () => {
                       <div
                         key={idx}
                         onClick={() => setSelectedImage(imagePath)}
-                        className="relative aspect-square rounded-lg overflow-hidden border-2 border-slate-200 hover:border-indigo-500 cursor-pointer group"
+                        className="relative aspect-square rounded-lg overflow-hidden border-2 border-slate-200 hover:border-[var(--primary)] cursor-pointer group"
                       >
                         <img
                           src={imagePath}
@@ -693,11 +743,13 @@ const TicketDetailPage: React.FC = () => {
               </div>
             )}
 
+            <TicketFullReportPanel ticketId={ticket.ticket_id} status={ticket.status} />
+
             {linkedRequests.length > 0 && (
               <div className="bg-white rounded-2xl shadow-[var(--shadow-md)] border border-slate-200 p-6">
                 <h2 className="text-lg font-bold text-slate-900 mb-4 flex items-center gap-2">
-                  <FileText className="w-5 h-5 text-indigo-600" />
-                  Linked Material Requests
+                  <FileText className="w-5 h-5 text-[var(--primary)]" />
+                  Linked Requests
                 </h2>
                 <div className="overflow-x-auto">
                   <table className="min-w-full divide-y divide-gray-200">
@@ -728,9 +780,9 @@ const TicketDetailPage: React.FC = () => {
               </div>
             )}
 
-            <div className="bg-gradient-to-r from-indigo-50 to-purple-50 rounded-xl p-5 border border-indigo-200">
+            <div className="bg-gradient-to-r from-[var(--accent-green-light)] to-[#f8f1e8] rounded-xl p-5 border border-[#e0c4a0]">
               <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2">
-                <UserCheck className="w-5 h-5 text-indigo-600" />
+                <UserCheck className="w-5 h-5 text-[var(--primary)]" />
                 Update Status
               </h3>
               <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
@@ -739,7 +791,7 @@ const TicketDetailPage: React.FC = () => {
                   const disabled = updatingStatus || isCurrent ||
                     (ticket.status === 'CLOSED' && status !== 'REOPEN');
 
-                  let btnStyle = "bg-indigo-600 hover:bg-indigo-700 text-white";
+                  let btnStyle = "bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white";
                   if (status === 'RESOLVED') btnStyle = "bg-green-600 hover:bg-green-700 text-white";
                   if (status === 'CLOSED') btnStyle = "bg-red-600 hover:bg-red-700 text-white";
                   if (status === 'REOPEN') btnStyle = "bg-amber-600 hover:bg-amber-700 text-white";
@@ -766,7 +818,7 @@ const TicketDetailPage: React.FC = () => {
 
             <div className="bg-white rounded-2xl shadow-[var(--shadow-md)] border border-slate-200 p-6">
               <h2 className="text-lg font-bold text-slate-900 mb-4 flex items-center gap-2">
-                <Clock className="w-5 h-5 text-indigo-600" />
+                <Clock className="w-5 h-5 text-[var(--primary)]" />
                 Timeline
               </h2>
               <div className="space-y-4">
@@ -775,7 +827,7 @@ const TicketDetailPage: React.FC = () => {
                     <div key={idx} className="flex gap-4 pb-4 border-b border-slate-100 last:border-0">
                       <div className="flex-shrink-0">
                         <div className={`w-10 h-10 rounded-full flex items-center justify-center text-white font-bold text-sm ${
-                          entry.visibility === 'public' ? 'bg-teal-600' : 'bg-indigo-600'
+                          entry.visibility === 'public' ? 'bg-teal-600' : 'bg-[var(--primary)]'
                         }`}>
                           {entry.actor_name?.[0]?.toUpperCase() || '?'}
                         </div>
@@ -790,7 +842,7 @@ const TicketDetailPage: React.FC = () => {
                           )}
                         </div>
                         <p className="text-sm text-slate-700">{entry.message}</p>
-                        <span className="text-xs text-indigo-600 font-medium">{entry.action.replace('_', ' ')}</span>
+                        <span className="text-xs text-[var(--primary)] font-medium">{entry.action.replace('_', ' ')}</span>
                       </div>
                     </div>
                   ))
@@ -802,20 +854,20 @@ const TicketDetailPage: React.FC = () => {
 
             <div className="bg-white rounded-2xl shadow-[var(--shadow-md)] border border-slate-200 p-6">
               <h2 className="text-lg font-bold text-slate-900 mb-4 flex items-center gap-2">
-                <MessageSquare className="w-5 h-5 text-indigo-600" />
+                <MessageSquare className="w-5 h-5 text-[var(--primary)]" />
                 Add Comment
               </h2>
               <textarea
                 value={comment}
                 onChange={(e) => setComment(e.target.value)}
                 placeholder="Add a comment or update..."
-                className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none resize-none"
+                className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-[var(--primary)]/40 focus:border-[var(--primary)] outline-none resize-none"
                 rows={4}
               />
               <button
                 onClick={handleAddComment}
                 disabled={!comment.trim() || submitting}
-                className="mt-3 px-6 py-2 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                className="mt-3 px-6 py-2 bg-[var(--primary)] text-white rounded-lg font-medium hover:bg-[var(--primary-hover)] disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
               >
                 <Send className="w-4 h-4" />
                 Post Comment
@@ -832,7 +884,7 @@ const TicketDetailPage: React.FC = () => {
                   <select
                     disabled={assigningTicketId === ticket.ticket_id}
                     onChange={(e) => assignTicket(parseInt(e.target.value) || '')}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-[var(--primary)]/40 focus:border-[var(--primary)] outline-none"
                     defaultValue=""
                   >
                     <option value="" disabled>Select team member</option>
@@ -858,7 +910,7 @@ const TicketDetailPage: React.FC = () => {
                 </div>
                 <button
                   onClick={() => navigate(`/staff/cx/escalate/${ticket.ticket_id}`)}
-                  className="w-full px-4 py-2 bg-orange-600 text-white rounded-lg text-sm font-medium hover:bg-orange-700"
+                  className="w-full px-4 py-2 bg-[var(--primary)] text-white rounded-lg text-sm font-medium hover:bg-[var(--primary-hover)]"
                 >
                   Ticket Escalation
                 </button>
@@ -866,9 +918,9 @@ const TicketDetailPage: React.FC = () => {
             </div>
 
             {(ticket.customer_email || ticket.contact_email) && (
-              <div className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-xl p-5 border border-blue-100">
+              <div className="bg-gradient-to-r from-[var(--accent-green-light)] to-[#f8f1e8] rounded-xl p-5 border border-blue-100">
                 <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2">
-                  <Mail className="w-5 h-5 text-blue-600" />
+                  <Mail className="w-5 h-5 text-[var(--primary)]" />
                   Send Email to Customer
                 </h3>
                 <ManualEmailForm ticketId={ticket.ticket_id} customerEmail={ticket.customer_email || ticket.contact_email!} />
@@ -908,7 +960,7 @@ const TicketDetailPage: React.FC = () => {
             <div className="flex gap-3">
               <button
                 onClick={() => handleAcknowledge(true)}
-                className="flex-1 px-4 py-2 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700"
+                className="flex-1 px-4 py-2 bg-[var(--primary)] text-white rounded-lg font-medium hover:bg-[var(--primary-hover)]"
               >
                 Yes, Acknowledge
               </button>
@@ -959,7 +1011,7 @@ const TicketDetailPage: React.FC = () => {
                 <textarea
                   value={reason}
                   onChange={e => setReason(e.target.value)}
-                  className="w-full h-32 p-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400 outline-none resize-none text-sm"
+                  className="w-full h-32 p-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-[var(--primary)]/40 focus:border-[var(--primary)] outline-none resize-none text-sm"
                   placeholder="Enter details here..."
                 />
               </div>

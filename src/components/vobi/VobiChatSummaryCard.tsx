@@ -81,19 +81,65 @@ export function VobiThreadSummaryCard({ summary }: { summary: VobiThreadSummary 
 }
 
 export function VobiDigestCard({ digest }: { digest: VobiPersonalDigest }) {
-  const threadCount = digest.mentionedIn.length + digest.activeThreads.length + digest.systemEvents.length;
+  const mentionCount = digest.mentionedIn.length;
+  const activeCount = digest.activeThreads.length;
+  const eventCount = digest.systemEvents.length;
+  const threadCount = mentionCount + activeCount + eventCount;
+  const empty = threadCount === 0 && digest.totalUnread === 0;
+
   return (
-    <div className="mt-2 overflow-hidden rounded-[10px] border border-black/10 border-l-4 border-l-[#1D9E75] bg-white text-slate-900 shadow-sm">
-      <div className="p-3">
-        <p className="text-[12px] font-semibold">
-          Since your last login — {threadCount} thread{threadCount === 1 ? '' : 's'} updated
-        </p>
-        <p className="mt-0.5 text-[10px] text-slate-500">{digest.totalUnread} unread message{digest.totalUnread === 1 ? '' : 's'}</p>
-        <DigestSection title="You were mentioned in" items={digest.mentionedIn} tone="text-cyan-700" />
-        <DigestSection title="Active threads" items={digest.activeThreads} tone="text-blue-700" />
-        <DigestSection title="System events" items={digest.systemEvents} tone="text-amber-700" />
+    <div className="mb-2 overflow-hidden rounded-[12px] border border-[#1D9E75]/25 bg-gradient-to-br from-white via-white to-[#f0faf6] text-slate-900 shadow-sm ring-1 ring-[#1D9E75]/10">
+      <div className="border-b border-[#1D9E75]/15 bg-[#1D9E75]/[0.06] px-3 py-2.5">
+        <div className="flex items-start justify-between gap-2">
+          <div>
+            <p className="text-[12px] font-semibold tracking-tight text-slate-900">Your digest</p>
+            <p className="mt-0.5 text-[10px] text-slate-500">
+              {empty
+                ? 'You are caught up'
+                : `${threadCount} thread${threadCount === 1 ? '' : 's'} · ${digest.totalUnread} unread`}
+            </p>
+          </div>
+          <span className="shrink-0 rounded-full bg-[#1D9E75] px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide text-white">
+            Summary
+          </span>
+        </div>
+        {!empty && (
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {mentionCount > 0 && (
+              <span className="rounded-full bg-cyan-50 px-2 py-0.5 text-[10px] font-medium text-cyan-700">
+                {mentionCount} mention{mentionCount === 1 ? '' : 's'}
+              </span>
+            )}
+            {activeCount > 0 && (
+              <span className="rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-medium text-blue-700">
+                {activeCount} active
+              </span>
+            )}
+            {eventCount > 0 && (
+              <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-700">
+                {eventCount} event{eventCount === 1 ? '' : 's'}
+              </span>
+            )}
+          </div>
+        )}
       </div>
-      <Link to="/chat" className="block border-t border-slate-100 bg-slate-50/70 px-3 py-2 text-center text-[11px] font-semibold text-[#0f7b59] hover:bg-emerald-50">
+      <div className="p-3 pt-2">
+        {empty ? (
+          <p className="text-[11px] leading-snug text-slate-500">
+            No unread mentions or busy threads right now. Ask Vobi about your tasks or approvals anytime.
+          </p>
+        ) : (
+          <>
+            <DigestSection title="Mentions" items={digest.mentionedIn} tone="text-cyan-700" />
+            <DigestSection title="Active threads" items={digest.activeThreads} tone="text-blue-700" />
+            <DigestSection title="System events" items={digest.systemEvents} tone="text-amber-700" />
+          </>
+        )}
+      </div>
+      <Link
+        to="/chat"
+        className="block border-t border-[#1D9E75]/15 bg-[#1D9E75]/[0.04] px-3 py-2 text-center text-[11px] font-semibold text-[#0f7b59] transition hover:bg-[#1D9E75]/10"
+      >
         Open chat →
       </Link>
     </div>
@@ -111,15 +157,23 @@ function DigestSection({
 }) {
   if (!items.length) return null;
   return (
-    <div className="mt-2">
+    <div className="mt-2 first:mt-0">
       <p className={cn('text-[10px] font-bold uppercase tracking-wide', tone)}>{title}</p>
       <div className="mt-1 space-y-1">
         {items.slice(0, 4).map((item) => {
           const url = item.channelId ? `/chat?channel=${item.channelId}` : item.dmId ? `/chat?dm=${item.dmId}` : '/chat';
+          const preview = item.lastMessage?.body
+            ? `${item.lastMessage.sender}: ${String(item.lastMessage.body).slice(0, 72)}${item.lastMessage.body.length > 72 ? '…' : ''}`
+            : null;
           return (
-            <Link key={`${item.channelId || item.dmId}-${item.channelName}`} to={url} className="block rounded-md px-1 py-1 text-[11px] leading-snug text-slate-700 hover:bg-slate-50">
-              · {item.channelName} — {item.unreadCount} new
-              {item.lastMessage?.sender ? ` (${item.lastMessage.sender}: ${item.lastMessage.body})` : ''}
+            <Link
+              key={`${item.channelId || item.dmId}-${item.channelName}`}
+              to={url}
+              className="block rounded-lg border border-transparent px-2 py-1.5 text-[11px] leading-snug text-slate-700 transition hover:border-slate-100 hover:bg-slate-50"
+            >
+              <span className="font-medium text-slate-800">{item.channelName}</span>
+              <span className="text-slate-400"> · {item.unreadCount} new</span>
+              {preview && <p className="mt-0.5 line-clamp-2 text-[10px] text-slate-500">{preview}</p>}
             </Link>
           );
         })}

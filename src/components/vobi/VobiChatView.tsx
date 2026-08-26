@@ -1,12 +1,16 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { Loader2 } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useLocation } from 'react-router-dom';
+import { Brain, Loader2 } from 'lucide-react';
 import { getChannelMessages, sendChannelMessage, type ChatMessage } from '@/api/chat';
 import { postVobiCommand } from '@/api/vobi';
-import type { VobiCommandMeta } from '@/api/vobi';
+import type { VobiCommandMeta, VobiMemoryConfirmation } from '@/api/vobi';
 import { VobiMessageCard } from './VobiMessageCard';
 import { VobiMessage } from './VobiMessage';
 import { VobiDigestCard, VobiThreadSummaryCard } from './VobiChatSummaryCard';
 import { VobiCommandBar } from './VobiCommandBar';
+import { VobiMemoryConfirmButtons, VobiMemoryPanel } from './VobiMemoryPanel';
+import { buildVobiPageContext } from '@/lib/vobiPageContext';
+import { getVobiPageGuide } from '@/lib/vobiPageGuides';
 import { useAuth } from '@/context/AuthContext';
 
 function formatTime(value: string | Date) {
@@ -33,9 +37,12 @@ function wait(ms: number) {
 
 export function VobiChatView({ channelId }: { channelId: string }) {
   const { user } = useAuth();
+  const location = useLocation();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(true);
   const [thinking, setThinking] = useState(false);
+  const [memoryOpen, setMemoryOpen] = useState(false);
+  const [pendingConfirm, setPendingConfirm] = useState<VobiMemoryConfirmation | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -57,18 +64,31 @@ export function VobiChatView({ channelId }: { channelId: string }) {
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, thinking]);
+  }, [messages, thinking, pendingConfirm]);
 
   useEffect(() => {
     inputRef.current?.focus();
   }, [channelId]);
 
-  const handleSubmit = async (text: string) => {
+  const handleSubmit = async (text: string, options?: { command?: string }) => {
     setThinking(true);
+    setPendingConfirm(null);
     try {
+      const history = messages.slice(-24).map((m) => ({
+        role: m.message_type === 'vobi' || m.sender_id == null ? 'assistant' : 'user',
+        content: m.body || '',
+      }));
       await sendChannelMessage(channelId, text);
-      await wait(850);
-      await postVobiCommand(text, { persist: true });
+      await wait(400);
+      const isPageHelp = options?.command === 'page-help';
+      const result = await postVobiCommand(text, {
+        persist: true,
+        history,
+        command: options?.command,
+        pageContext: isPageHelp ? buildVobiPageContext(location.pathname) : null,
+      });
+      const confirm = result.memoryConfirmation || result.meta?.memoryConfirmation || null;
+      setPendingConfirm(confirm);
       await load();
     } finally {
       setThinking(false);
@@ -76,11 +96,27 @@ export function VobiChatView({ channelId }: { channelId: string }) {
   };
 
   const postAboutPrompt = async () => {
-    await handleSubmit('about vobi');
+    await handleSubmit('about vobi', { command: 'about' });
   };
 
+  const pageName = useMemo(
+    () => getVobiPageGuide(location.pathname)?.pageName || 'This page',
+    [location.pathname]
+  );
+
   return (
-    <div className="flex h-full min-h-0 flex-col bg-[var(--color-background-primary)]">
+    <div className="relative flex h-full min-h-0 flex-col bg-[var(--color-background-primary)]">
+      <VobiMemoryPanel open={memoryOpen} onClose={() => setMemoryOpen(false)} />
+      <div className="flex shrink-0 items-center justify-end gap-2 border-b border-[var(--color-border-tertiary)] px-3 py-1.5">
+        <button
+          type="button"
+          onClick={() => setMemoryOpen(true)}
+          className="inline-flex items-center gap-1 rounded-full border border-[#1D9E75]/35 px-2.5 py-1 text-[11px] font-medium text-[#1D9E75] hover:bg-[#1D9E75]/10"
+        >
+          <Brain className="h-3 w-3" />
+          Memory
+        </button>
+      </div>
       <div className="vobi-fiber-bg flex-1 overflow-y-auto p-4">
         {loading && (
           <div className="flex justify-center py-8">
@@ -96,7 +132,10 @@ export function VobiChatView({ channelId }: { channelId: string }) {
               draggable={false}
             />
             <p className="mt-2 text-sm font-medium text-[var(--color-text-primary)]">
-              Vobi
+              Vobi Intelligence
+            </p>
+            <p className="mt-1 max-w-[240px] text-[11px] text-[var(--color-text-tertiary)]">
+              Ask about your work. Use Guide only for a page walkthrough.
             </p>
             <button
               type="button"
@@ -111,6 +150,16 @@ export function VobiChatView({ channelId }: { channelId: string }) {
           {messages.map((m) => (
             <VobiChatMessage key={m.id} message={m} userInitials={initialsFor(user)} />
           ))}
+          {pendingConfirm?.memoryId != null && (
+            <div className="ml-9 max-w-[82%] rounded-xl border border-[#1D9E75]/25 bg-[var(--color-background-secondary)] px-3 py-2">
+              <p className="text-[11px] text-[var(--color-text-secondary)]">Save to memory?</p>
+              <VobiMemoryConfirmButtons
+                memoryId={pendingConfirm.memoryId}
+                memoryContent={pendingConfirm.memory_content}
+                onDone={() => setPendingConfirm(null)}
+              />
+            </div>
+          )}
           {thinking && <TypingBubble />}
         </div>
         <div ref={bottomRef} />
@@ -118,6 +167,7 @@ export function VobiChatView({ channelId }: { channelId: string }) {
       <VobiCommandBar
         ref={inputRef}
         disabled={thinking}
+        pageName={pageName}
         onSubmit={handleSubmit}
       />
     </div>
@@ -134,6 +184,7 @@ function VobiChatMessage({
   if (message.message_type === 'vobi') {
     const meta = (message as ChatMessage & { meta?: VobiCommandMeta & { cards?: unknown[] } }).meta;
     const cards = Array.isArray(meta?.cards) ? meta.cards : undefined;
+    const memoryId = meta?.memoryConfirmation?.memoryId ?? (meta as { memoryId?: number })?.memoryId;
     return (
       <div className="flex items-start gap-2">
         <span className="flex h-7 w-7 shrink-0 items-center justify-center overflow-hidden rounded-full bg-[#111827] ring-1 ring-[#1D9E75]/35">
@@ -146,16 +197,15 @@ function VobiChatMessage({
         </span>
         <div className="max-w-[82%]">
           <div className="rounded-[14px_14px_14px_3px] bg-[var(--color-background-secondary)] px-[13px] py-2.5 text-[13px] leading-[1.5] text-[var(--color-text-primary)]">
+            {meta?.digest && <VobiDigestCard digest={meta.digest} />}
+            {meta?.threadSummary && <VobiThreadSummaryCard summary={meta.threadSummary} />}
             <VobiMessage content={message.body} />
-            {meta?.threadSummary && (
-              <VobiThreadSummaryCard summary={meta.threadSummary} />
-            )}
-            {meta?.digest && (
-              <VobiDigestCard digest={meta.digest} />
-            )}
             {cards?.map((item) => (
               <VobiMessageCard key={(item as { id: string }).id} item={item as never} />
             ))}
+            {typeof memoryId === 'number' && meta?.cardType === 'memory_confirm' && (
+              <VobiMemoryConfirmButtons memoryId={memoryId} />
+            )}
           </div>
           <div className="mt-1 text-[11px] text-[var(--color-text-tertiary)]">
             {formatTime(message.created_at)}
@@ -164,7 +214,7 @@ function VobiChatMessage({
       </div>
     );
   }
-  if (message.message_type === 'user') {
+  if (message.message_type === 'user' || message.message_type === 'text') {
     return (
       <div className="flex justify-end gap-2">
         <div className="max-w-[78%] text-right">

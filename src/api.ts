@@ -1121,6 +1121,24 @@ export interface WorkflowConfig {
     enabled: boolean;
     stages: TicketEscalationStage[];
   };
+  ticket_sla?: {
+    enabled: boolean;
+    priorities: {
+      critical: TicketSlaPriorityRule;
+      high: TicketSlaPriorityRule;
+      medium: TicketSlaPriorityRule;
+      low: TicketSlaPriorityRule;
+    };
+  };
+}
+
+export type TicketSlaUnit = 'minutes' | 'hours' | 'days';
+
+export interface TicketSlaPriorityRule {
+  first_response_value: number;
+  first_response_unit: TicketSlaUnit;
+  resolution_value: number;
+  resolution_unit: TicketSlaUnit;
 }
 
 export const getWorkflowConfig = async (): Promise<WorkflowConfig> => {
@@ -1397,14 +1415,37 @@ export interface CustomerProfile {
   id: number;
   customer_code: string;
   name: string;
+  company_name?: string;
   email: string | null;
   phone: string | null;
-  project: {
+  location?: string | null;
+  status?: string;
+  project?: {
     id: number;
     code: string;
     name: string;
   };
+  sites?: CustomerSite[];
   created_at: string;
+}
+
+export interface CustomerSite {
+  id: number;
+  site_code: string;
+  site_name: string;
+  site_address?: string | null;
+  region?: string | null;
+  bandwidth?: string | null;
+  service_type?: string | null;
+  ip_address?: string | null;
+  connection_status?: string | null;
+  ticket_count?: number;
+  last_tickets?: Array<{
+    ticket_id: string;
+    title: string;
+    status: string;
+    created_at: string;
+  }>;
 }
 
 // Login customer using customer_code and 5-digit PIN
@@ -1427,6 +1468,58 @@ export const loginCustomer = async (customerCode: string, pin: string): Promise<
   } catch (error: any) {
     throw new Error(error.message || 'Login failed. Please try again.');
   }
+};
+
+/** Email + password login for client portal */
+export const loginClientByEmail = async (
+  email: string,
+  password: string
+): Promise<{ token: string; profile: CustomerProfile }> => {
+  const response = await fetch(`${API_URL}/customer/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, password }),
+  });
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    throw new Error(err.error || 'Invalid email or password');
+  }
+  const data = await response.json();
+  return { token: data.token, profile: data.profile || data.client };
+};
+
+export const changeClientPassword = async (
+  current_password: string,
+  new_password: string
+): Promise<void> => {
+  const token = localStorage.getItem('customer_token');
+  if (!token) throw new Error('Not authenticated');
+  const response = await fetch(`${API_URL}/customer/auth/change-password`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ current_password, new_password }),
+  });
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    throw new Error(err.error || 'Failed to change password');
+  }
+};
+
+export const getCustomerSites = async (): Promise<CustomerSite[]> => {
+  const token = localStorage.getItem('customer_token');
+  if (!token) throw new Error('Not authenticated');
+  const response = await fetch(`${API_URL}/customer/sites`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    throw new Error(err.error || 'Failed to load sites');
+  }
+  const data = await response.json();
+  return Array.isArray(data?.data) ? data.data : Array.isArray(data) ? data : [];
 };
 
 // Save customer session (token + profile) to localStorage
@@ -1460,7 +1553,12 @@ export const getCustomerProfile = async (): Promise<CustomerProfile> => {
       throw new Error(err.error || 'Failed to load profile');
     }
 
-    return await response.json();
+    const data = await response.json();
+    const profile = data.customer || data.client || data;
+    if (!Array.isArray(profile.sites) && Array.isArray(data.sites)) {
+      profile.sites = data.sites;
+    }
+    return profile;
   } catch (error: any) {
     throw new Error(error.message || 'Network error');
   }
@@ -1487,9 +1585,13 @@ const getCustomerToken = (): string => {
 
 // Create a new support ticket
 export const createCustomerTicket = async (
-  formData: FormData
+  formData: FormData,
+  siteId?: number | string | null
 ): Promise<{ ticket_id: string; title?: string; status?: string }> => {
   const token = getCustomerToken();
+  if (siteId !== undefined && siteId !== null && !formData.has('site_id')) {
+    formData.append('site_id', String(siteId));
+  }
 
   const response = await fetch(`${API_URL}/customer/tickets`, {
     method: 'POST',
@@ -1641,11 +1743,22 @@ export const cxApi = {
     status?: string;
     project_id?: number;
     escalation_stage?: string;
+    tag_ids?: number[] | string;
+    tag_ids_any?: number[] | string;
   }): Promise<any> => {
     const q = new URLSearchParams();
     if (params?.status) q.set('status', params.status);
     if (params?.project_id) q.set('project_id', String(params.project_id));
     if (params?.escalation_stage) q.set('escalation_stage', params.escalation_stage);
+    if (params?.tag_ids) {
+      q.set('tag_ids', Array.isArray(params.tag_ids) ? params.tag_ids.join(',') : String(params.tag_ids));
+    }
+    if (params?.tag_ids_any) {
+      q.set(
+        'tag_ids_any',
+        Array.isArray(params.tag_ids_any) ? params.tag_ids_any.join(',') : String(params.tag_ids_any)
+      );
+    }
     const suffix = q.toString() ? `?${q.toString()}` : '';
     const response = await apiFetch(`${API_URL}/cx/tickets${suffix}`);
     return await response.json();
@@ -1673,12 +1786,82 @@ export const cxApi = {
     priority?: string;
     assigned_to?: number;
     route_to_unit?: string;
+    tag_ids?: number[];
+    site_id?: number | null;
   }): Promise<any> => {
     const response = await apiFetch(`${API_URL}/cx/tickets`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
     });
+    return await response.json();
+  },
+
+  getTags: async (): Promise<any> => {
+    const response = await apiFetch(`${API_URL}/cx/tags`);
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      throw new Error(err.error || 'Failed to load tags');
+    }
+    return await response.json();
+  },
+
+  createTag: async (data: { name: string; color: string }): Promise<any> => {
+    const response = await apiFetch(`${API_URL}/cx/tags`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      throw new Error(err.error || 'Failed to create tag');
+    }
+    return await response.json();
+  },
+
+  updateTag: async (id: number | string, data: { name?: string; color?: string }): Promise<any> => {
+    const response = await apiFetch(`${API_URL}/cx/tags/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      throw new Error(err.error || 'Failed to update tag');
+    }
+    return await response.json();
+  },
+
+  deleteTag: async (id: number | string): Promise<any> => {
+    const response = await apiFetch(`${API_URL}/cx/tags/${id}`, { method: 'DELETE' });
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      throw new Error(err.error || 'Failed to delete tag');
+    }
+    return await response.json();
+  },
+
+  addTicketTags: async (ticketId: string, tag_ids: number[]): Promise<any> => {
+    const response = await apiFetch(`${API_URL}/cx/tickets/${ticketId}/tags`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tag_ids }),
+    });
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      throw new Error(err.error || 'Failed to add tags');
+    }
+    return await response.json();
+  },
+
+  removeTicketTag: async (ticketId: string, tagId: number | string): Promise<any> => {
+    const response = await apiFetch(`${API_URL}/cx/tickets/${ticketId}/tags/${tagId}`, {
+      method: 'DELETE',
+    });
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      throw new Error(err.error || 'Failed to remove tag');
+    }
     return await response.json();
   },
 
@@ -1717,13 +1900,185 @@ export const cxApi = {
     return await response.json();
   },
 
-  // Get customers
+  // Get customers (legacy)
   getCustomers: async (projectId?: number): Promise<any[]> => {
     let url = `${API_URL}/cx/customers`;
     if (projectId) {
       url += `?project_id=${projectId}`;
     }
     const response = await apiFetch(url);
+    return await response.json();
+  },
+
+  // Clients (customers table; UI label = Client)
+  getClients: async (params?: {
+    status?: string;
+    search?: string;
+    page?: number;
+    limit?: number;
+  }): Promise<any> => {
+    const q = new URLSearchParams();
+    if (params?.status) q.set('status', params.status);
+    if (params?.search) q.set('search', params.search);
+    if (params?.page) q.set('page', String(params.page));
+    if (params?.limit) q.set('limit', String(params.limit));
+    const suffix = q.toString() ? `?${q.toString()}` : '';
+    const response = await apiFetch(`${API_URL}/cx/clients${suffix}`);
+    return await response.json();
+  },
+
+  createClient: async (data: {
+    company_name: string;
+    contact_person?: string;
+    email: string;
+    phone: string;
+    location: string;
+    status?: string;
+    site_ids?: number[];
+  }): Promise<any> => {
+    const response = await apiFetch(`${API_URL}/cx/clients`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      throw new Error(err.error || 'Failed to create client');
+    }
+    return await response.json();
+  },
+
+  getClient: async (id: number | string): Promise<any> => {
+    const response = await apiFetch(`${API_URL}/cx/clients/${id}`);
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      throw new Error(err.error || 'Failed to load client');
+    }
+    return await response.json();
+  },
+
+  updateClient: async (id: number | string, data: Record<string, unknown>): Promise<any> => {
+    const response = await apiFetch(`${API_URL}/cx/clients/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      throw new Error(err.error || 'Failed to update client');
+    }
+    return await response.json();
+  },
+
+  resetClientPassword: async (
+    id: number | string,
+    data?: { new_password?: string; reset_to_code?: boolean; generate?: boolean }
+  ): Promise<any> => {
+    const response = await apiFetch(`${API_URL}/cx/clients/${id}/reset-password`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data || { reset_to_code: true }),
+    });
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      throw new Error(err.error || 'Failed to reset password');
+    }
+    return await response.json();
+  },
+
+  getClientSites: async (clientId: number | string): Promise<any> => {
+    const response = await apiFetch(`${API_URL}/cx/clients/${clientId}/sites`);
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      throw new Error(err.error || 'Failed to load sites');
+    }
+    return await response.json();
+  },
+
+  createClientSite: async (clientId: number | string, data: Record<string, unknown>): Promise<any> => {
+    const response = await apiFetch(`${API_URL}/cx/clients/${clientId}/sites`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      throw new Error(err.error || 'Failed to create site');
+    }
+    return await response.json();
+  },
+
+  updateClientSite: async (
+    clientId: number | string,
+    siteId: number | string,
+    data: Record<string, unknown>
+  ): Promise<any> => {
+    const response = await apiFetch(`${API_URL}/cx/clients/${clientId}/sites/${siteId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      throw new Error(err.error || 'Failed to update site');
+    }
+    return await response.json();
+  },
+
+  getAllSites: async (params?: {
+    client_id?: number;
+    unassigned?: boolean;
+    connection_status?: string;
+    region?: string;
+    search?: string;
+  }): Promise<any> => {
+    const q = new URLSearchParams();
+    if (params?.client_id) q.set('client_id', String(params.client_id));
+    if (params?.unassigned) q.set('unassigned', 'true');
+    if (params?.connection_status) q.set('connection_status', params.connection_status);
+    if (params?.region) q.set('region', params.region);
+    if (params?.search) q.set('search', params.search);
+    const suffix = q.toString() ? `?${q.toString()}` : '';
+    const response = await apiFetch(`${API_URL}/cx/sites${suffix}`);
+    return await response.json();
+  },
+
+  createSite: async (data: Record<string, unknown>): Promise<any> => {
+    const response = await apiFetch(`${API_URL}/cx/sites`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      throw new Error(err.error || 'Failed to create site');
+    }
+    return await response.json();
+  },
+
+  updateSite: async (siteId: number | string, data: Record<string, unknown>): Promise<any> => {
+    const response = await apiFetch(`${API_URL}/cx/sites/${siteId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      throw new Error(err.error || 'Failed to update site');
+    }
+    return await response.json();
+  },
+
+  linkClientSites: async (clientId: number | string, siteIds: number[]): Promise<any> => {
+    const response = await apiFetch(`${API_URL}/cx/clients/${clientId}/sites`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ site_ids: siteIds }),
+    });
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      throw new Error(err.error || 'Failed to link sites');
+    }
     return await response.json();
   },
 

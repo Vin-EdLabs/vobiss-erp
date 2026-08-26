@@ -1,13 +1,17 @@
 // src/pages/customer/Login.tsx
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { loginCustomer, saveCustomerSession } from '../../api';
-import { Eye, EyeOff } from 'lucide-react';
+import { loginClientByEmail, loginCustomer, saveCustomerSession } from '../../api';
+import { Eye, EyeOff, Mail } from 'lucide-react';
 import { applyTheme, readStoredTheme } from '@/lib/theme';
+import { CustomerThemeToggle } from '../../components/customer/CustomerThemeToggle';
 
 const Login: React.FC = () => {
   const [customerCode, setCustomerCode] = useState('');
   const [pin, setPin] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [loginMode, setLoginMode] = useState<'email' | 'pin'>('email');
   const [showPin, setShowPin] = useState(false);
   const [rememberMe, setRememberMe] = useState(false);
   const [showForgotInfo, setShowForgotInfo] = useState(false);
@@ -16,10 +20,7 @@ const Login: React.FC = () => {
   const navigate = useNavigate();
 
   useEffect(() => {
-    applyTheme('light', { persist: false });
-    return () => {
-      applyTheme(readStoredTheme(), { persist: false });
-    };
+    applyTheme(readStoredTheme());
   }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -28,22 +29,27 @@ const Login: React.FC = () => {
     setLoading(true);
 
     try {
-      const data = await loginCustomer(customerCode.trim(), pin.trim());
+      const data = loginMode === 'email'
+        ? await loginClientByEmail(email.trim(), password)
+        : await loginCustomer(customerCode.trim(), pin.trim());
       saveCustomerSession(data);
       navigate('/customer/dashboard');
     } catch (err: any) {
-      setError(err.message || 'Invalid Customer ID or PIN. Please try again.');
+      setError(err.message || 'Unable to sign in. Please check your credentials.');
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="min-h-dvh flex items-center justify-center bg-gray-50 py-12 px-4 sm:px-6 lg:px-8" style={{ colorScheme: 'light' }}>
-      <div className="w-full max-w-5xl bg-white rounded-3xl shadow-2xl overflow-hidden flex flex-col lg:flex-row">
+    <div className="flex min-h-dvh items-center justify-center bg-[var(--content-bg)] px-4 py-12 sm:px-6 lg:px-8">
+      <div className="absolute right-4 top-4 sm:right-6 sm:top-6">
+        <CustomerThemeToggle />
+      </div>
+      <div className="flex w-full max-w-5xl overflow-hidden rounded-3xl border border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow-md)] flex-col lg:flex-row">
         
         {/* Left Side - Brand Section (desktop only) */}
-        <div className="hidden lg:flex lg:w-1/2 bg-gradient-to-br from-indigo-600 via-purple-600 to-pink-600 p-12 flex-col justify-between relative overflow-hidden">
+        <div className="hidden lg:flex lg:w-1/2 bg-gradient-to-br from-[#5c3a1e] via-[#8b5a2b] to-[#a67c52] p-12 flex-col justify-between relative overflow-hidden">
           {/* Decorative lines */}
           <div className="absolute inset-0 pointer-events-none overflow-hidden">
             <div className="absolute top-0 left-1/4 w-px h-full bg-gradient-to-b from-transparent via-white/20 to-transparent" />
@@ -63,19 +69,19 @@ const Login: React.FC = () => {
               </div>
 
               <div className="text-white">
-                <h2 className="text-4xl font-bold mb-4">Customer Portal</h2>
-                <p className="text-xl text-indigo-100 mb-3">
+                <h2 className="mb-4 text-4xl font-bold">Client Portal</h2>
+                <p className="mb-3 text-xl text-white/90">
                   Real-time support • Ticket tracking • Direct team access
                 </p>
-                <p className="text-indigo-200 leading-relaxed">
+                <p className="leading-relaxed text-white/75">
                   View ticket status, receive updates, upload files, and communicate securely with your dedicated support team.
                 </p>
               </div>
             </div>
 
-            <div className="bg-white/10 backdrop-blur-sm rounded-xl p-4 border border-white/20 shadow-[var(--shadow-md)]">
+            <div className="rounded-xl border border-white/20 bg-white/10 p-4 shadow-[var(--shadow-md)] backdrop-blur-sm">
               <p className="text-sm text-white/90">
-                🔒 End-to-end encrypted • Access restricted to verified customers only
+                End-to-end encrypted • Access restricted to verified clients only
               </p>
             </div>
           </div>
@@ -91,14 +97,14 @@ const Login: React.FC = () => {
                 alt="Vobiss"
                 className="h-20 w-auto mx-auto mb-6 object-contain"
               />
-              <h2 className="text-3xl font-bold text-gray-900 mb-2">Customer Portal</h2>
-              <p className="text-gray-600">Sign in to track your support tickets</p>
+              <h2 className="mb-2 text-3xl font-bold text-[var(--text-primary)]">Client Portal</h2>
+              <p className="text-[var(--text-muted)]">Sign in to track your support tickets</p>
             </div>
 
             {/* Desktop-only title */}
             <div className="hidden lg:block mb-10">
-              <h2 className="text-3xl font-bold text-gray-900 mb-2">Welcome Back</h2>
-              <p className="text-gray-600">Sign in with your Customer ID and PIN</p>
+              <h2 className="mb-2 text-3xl font-bold text-[var(--text-primary)]">Welcome Back</h2>
+              <p className="text-[var(--text-muted)]">Sign in to manage your sites and support tickets</p>
             </div>
 
             {/* Error message */}
@@ -111,15 +117,45 @@ const Login: React.FC = () => {
               </div>
             )}
 
+            <div className="mb-6 grid grid-cols-2 rounded-xl bg-[var(--surface-secondary)] p-1">
+              <button type="button" onClick={() => { setLoginMode('email'); setError(null); }} className={`rounded-lg px-3 py-2.5 text-sm font-semibold transition ${loginMode === 'email' ? 'bg-[var(--surface)] text-[var(--primary)] shadow-sm' : 'text-[var(--text-muted)]'}`}>
+                Email + Password
+              </button>
+              <button type="button" onClick={() => { setLoginMode('pin'); setError(null); }} className={`rounded-lg px-3 py-2.5 text-sm font-semibold transition ${loginMode === 'pin' ? 'bg-[var(--surface)] text-[var(--primary)] shadow-sm' : 'text-[var(--text-muted)]'}`}>
+                Client Code + PIN
+              </button>
+            </div>
+
             <form onSubmit={handleSubmit} className="space-y-6" autoComplete="on">
+              {loginMode === 'email' ? (
+                <>
+                  <div>
+                    <label htmlFor="email" className="mb-2 block text-sm font-medium text-[var(--text-secondary)]">Email Address</label>
+                    <div className="relative">
+                      <Mail className="absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-[var(--text-muted)]" />
+                      <input id="email" type="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@company.com" className="block w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] py-3.5 pl-11 pr-4 text-[var(--text-primary)] focus:border-transparent focus:outline-none focus:ring-2 focus:ring-[var(--primary)]" required autoFocus disabled={loading} />
+                    </div>
+                  </div>
+                  <div>
+                    <label htmlFor="password" className="mb-2 block text-sm font-medium text-[var(--text-secondary)]">Password</label>
+                    <div className="relative">
+                      <input id="password" type={showPin ? 'text' : 'password'} autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Enter your password" className="block w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] py-3.5 pl-4 pr-14 text-[var(--text-primary)] focus:border-transparent focus:outline-none focus:ring-2 focus:ring-[var(--primary)]" required disabled={loading} />
+                      <button type="button" onClick={() => setShowPin(!showPin)} className="absolute inset-y-0 right-0 flex items-center pr-4">
+                        {showPin ? <EyeOff className="h-5 w-5 text-[var(--text-muted)]" /> : <Eye className="h-5 w-5 text-[var(--text-muted)]" />}
+                      </button>
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <>
               {/* Customer ID */}
               <div>
-                <label htmlFor="customerCode" className="block text-sm font-medium text-gray-700 mb-2">
-                  Customer ID
+                <label htmlFor="customerCode" className="mb-2 block text-sm font-medium text-[var(--text-secondary)]">
+                  Client ID
                 </label>
                 <div className="relative">
-                  <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
-                    <svg className="h-5 w-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-4">
+                    <svg className="h-5 w-5 text-[var(--text-muted)]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V8a2 2 0 00-2-2h-5m-4 0V5a2 2 0 114 0v1m-4 0a2 2 0 104 0m-5 8a2 2 0 100-4 2 2 0 000 4zm6 0a2 2 0 100-4 2 2 0 000 4z" />
                     </svg>
                   </div>
@@ -129,8 +165,8 @@ const Login: React.FC = () => {
                     autoComplete="username"
                     value={customerCode}
                     onChange={(e) => setCustomerCode(e.target.value)}
-                    placeholder="e.g., CUST-00001"
-                    className="block w-full pl-11 pr-4 py-3.5 border border-gray-300 rounded-xl text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all"
+                    placeholder="e.g., CW-00001"
+                    className="block w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] py-3.5 pl-11 pr-4 text-[var(--text-primary)] placeholder:text-[var(--text-muted)] transition-all focus:border-transparent focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
                     required
                     autoFocus
                     disabled={loading}
@@ -138,14 +174,13 @@ const Login: React.FC = () => {
                 </div>
               </div>
 
-              {/* PIN */}
               <div>
-                <label htmlFor="pin" className="block text-sm font-medium text-gray-700 mb-2">
+                <label htmlFor="pin" className="mb-2 block text-sm font-medium text-[var(--text-secondary)]">
                   5-Digit PIN
                 </label>
                 <div className="relative">
-                  <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
-                    <svg className="h-5 w-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-4">
+                    <svg className="h-5 w-5 text-[var(--text-muted)]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 11c0 3.517-1.009 6.799-2.753 9.571-3.283-2.448-5.247-6.203-5.247-10.071C4 6.728 7.299 3.5 12 3.5s8 3.228 8 7.5c0 3.868-2.164 7.623-5.247 10.071C13.009 17.799 12 14.517 12 11z" />
                     </svg>
                   </div>
@@ -157,27 +192,29 @@ const Login: React.FC = () => {
                     placeholder="•••••"
                     maxLength={5}
                     inputMode="numeric"
-                    className="block w-full pl-11 pr-14 py-3.5 border border-gray-300 rounded-xl text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent font-mono text-xl tracking-widest transition-all"
+                    className="block w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] py-3.5 pl-11 pr-14 font-mono text-xl tracking-widest text-[var(--text-primary)] placeholder:text-[var(--text-muted)] transition-all focus:border-transparent focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
                     required
                     disabled={loading}
                   />
                   <button
                     type="button"
                     onClick={() => setShowPin(!showPin)}
-                    className="absolute inset-y-0 right-0 pr-4 flex items-center"
+                    className="absolute inset-y-0 right-0 flex items-center pr-4"
                   >
-                    {showPin ? <EyeOff className="h-5 w-5 text-gray-500 hover:text-gray-700" /> : <Eye className="h-5 w-5 text-gray-500 hover:text-gray-700" />}
+                    {showPin ? <EyeOff className="h-5 w-5 text-[var(--text-muted)] hover:text-[var(--text-primary)]" /> : <Eye className="h-5 w-5 text-[var(--text-muted)] hover:text-[var(--text-primary)]" />}
                   </button>
                 </div>
               </div>
+                </>
+              )}
 
-              {/* Remember me + Forgot PIN */}
+              {/* Remember me + credential help */}
               <div className="flex items-center justify-between">
                 <div className="flex items-center">
                   <input
                     id="remember-me"
                     type="checkbox"
-                    className="h-4 w-4 border-gray-300 rounded text-indigo-600 focus:ring-indigo-500"
+                    className="h-4 w-4 border-gray-300 rounded text-[var(--primary)] focus:ring-[var(--primary)]"
                     checked={rememberMe}
                     onChange={(e) => setRememberMe(e.target.checked)}
                   />
@@ -190,26 +227,26 @@ const Login: React.FC = () => {
                   type="button"
                   onClick={() => setShowForgotInfo(!showForgotInfo)}
                   className={`text-sm font-medium ${
-                    showForgotInfo ? 'text-indigo-700' : 'text-indigo-600 hover:text-indigo-700'
+                    showForgotInfo ? 'text-[var(--primary)]' : 'text-[var(--primary)] hover:text-[var(--primary)]'
                   } transition-colors`}
                 >
-                  {showForgotInfo ? 'Hide info' : 'Forgot PIN?'}
+                  {showForgotInfo ? 'Hide info' : loginMode === 'email' ? 'Forgot password?' : 'Forgot PIN?'}
                 </button>
               </div>
 
               {showForgotInfo && (
-                <div className="bg-indigo-50 border border-indigo-100 rounded-xl p-4 text-sm space-y-3">
+                <div className="bg-[var(--accent-green-light)] border border-[#e0c4a0] rounded-xl p-4 text-sm space-y-3">
                   <div className="flex items-start gap-2">
-                    <svg className="h-5 w-5 text-indigo-600 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <svg className="h-5 w-5 text-[var(--primary)] flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                     </svg>
-                    <p className="text-indigo-800">
-                      Please contact your account manager or email support to reset your PIN.
+                    <p className="text-[var(--primary-hover)]">
+                      Please contact your account manager or email support to reset your {loginMode === 'email' ? 'password' : 'PIN'}.
                     </p>
                   </div>
                   <a
                     href="mailto:support@vobiss.com?subject=Customer PIN Reset Request"
-                    className="inline-flex items-center px-4 py-2 text-sm font-medium text-indigo-700 bg-indigo-100 hover:bg-indigo-200 rounded-lg transition-colors"
+                    className="inline-flex items-center px-4 py-2 text-sm font-medium text-[var(--primary)] bg-[var(--accent-green-light)] hover:bg-[#e8d5bc] rounded-lg transition-colors"
                   >
                     <svg className="h-4 w-4 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
@@ -221,8 +258,8 @@ const Login: React.FC = () => {
 
               <button
                 type="submit"
-                disabled={loading || !customerCode.trim() || pin.length !== 5}
-                className="w-full flex items-center justify-center py-3.5 px-4 border border-transparent rounded-xl text-base font-semibold text-white bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-60 disabled:cursor-not-allowed transition-all shadow-lg hover:shadow-xl"
+                disabled={loading || (loginMode === 'email' ? !email.trim() || !password : !customerCode.trim() || pin.length !== 5)}
+                className="w-full flex items-center justify-center py-3.5 px-4 border border-transparent rounded-xl text-base font-semibold text-white bg-gradient-to-r from-[var(--primary)] to-[var(--primary-hover)] hover:from-[var(--primary-hover)] hover:to-[#5c3a1e] focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[var(--primary)] disabled:opacity-60 disabled:cursor-not-allowed transition-all shadow-lg hover:shadow-xl"
               >
                 {loading ? (
                   <>
@@ -240,7 +277,7 @@ const Login: React.FC = () => {
 
             <div className="mt-8 text-center text-sm text-gray-500">
               <p>Having trouble? Reach out to</p>
-              <a href="mailto:support@vobiss.com" className="text-indigo-600 font-medium hover:underline">
+              <a href="mailto:support@vobiss.com" className="text-[var(--primary)] font-medium hover:underline">
                 support@vobiss.com
               </a>
             </div>

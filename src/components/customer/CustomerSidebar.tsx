@@ -7,8 +7,7 @@ import {
   FilePlus,
   Settings,
   LogOut,
-  Bell,
-  X,
+  MapPinned,
 } from 'lucide-react';
 import { logoutCustomer } from '../../api';
 import { API_URL } from '@/lib/api';
@@ -23,7 +22,6 @@ const CustomerSidebar: React.FC = () => {
   const navigate = useNavigate();
   const [customer, setCustomer] = useState<CustomerInfo | null>(null);
   const [loading, setLoading] = useState(true);
-  const [showNotif, setShowNotif] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
 
   useEffect(() => {
@@ -61,21 +59,14 @@ const CustomerSidebar: React.FC = () => {
 
   const handleLogout = async () => {
     setIsLoggingOut(true);
-    await new Promise((r) => setTimeout(r, 1000));
+    await new Promise((r) => setTimeout(r, 400));
     logoutCustomer();
     navigate('/customer/login');
   };
 
-  const notifications = [
-    { id: 1, title: 'Welcome back!', message: 'Your support portal is ready.', time: 'Just now', read: false },
-    { id: 2, title: 'New Feature', message: 'You can now track ticket progress in real-time.', time: '1 hour ago', read: false },
-    { id: 3, title: 'Tip', message: 'Use the search bar to quickly find tickets.', time: '2 hours ago', read: true },
-  ];
-
-  const unreadCount = notifications.filter((n) => !n.read).length;
-
   const menuItems = [
     { icon: Home, label: 'Dashboard', path: '/customer/dashboard' },
+    { icon: MapPinned, label: 'My Sites', path: '/customer/sites' },
     { icon: Ticket, label: 'My Tickets', path: '/customer/tickets' },
     { icon: FilePlus, label: 'Create Ticket', path: '/customer/create-ticket' },
     { icon: Settings, label: 'Profile & Settings', path: '/customer/profile' },
@@ -86,156 +77,55 @@ const CustomerSidebar: React.FC = () => {
   if (loading || !customer) return null;
 
   return (
-    <>
-      {/* Desktop Sidebar */}
-      <aside className="hidden md:block fixed inset-y-0 left-0 z-50 w-64 bg-white shadow-2xl border-r border-gray-200">
-        <div className="flex flex-col h-full">
-
-          {/* Header */}
-          <div className="relative flex items-center justify-between px-6 py-7 bg-gradient-to-b from-blue-50 to-white border-b border-gray-200">
-            <div className="flex items-center space-x-4">
-              <img src="/vobiss-logo.png" alt="Vobiss" className="h-14 w-14 object-contain drop-shadow-md" />
-              <div>
-                <h1 className="text-2xl font-bold text-gray-900 tracking-tight">Vobiss</h1>
-                <p className="text-sm font-medium text-blue-600">Customer Portal</p>
-              </div>
-            </div>
-
-            {/* Notification Bell */}
-            <button
-              onClick={() => setShowNotif(!showNotif)}
-              className="relative p-3 rounded-xl hover:bg-gray-100 transition-all duration-200"
-            >
-              <Bell className="h-6 w-6 text-gray-700" />
-              {unreadCount > 0 && (
-                <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs font-bold rounded-full h-6 w-6 flex items-center justify-center animate-pulse shadow-lg">
-                  {unreadCount > 99 ? '99+' : unreadCount}
-                </span>
-              )}
-            </button>
-          </div>
-
-          {/* User Info */}
-          {customer && (
-            <div className="px-6 py-4 border-b border-gray-200 bg-gray-50">
-              <p className="text-sm font-semibold text-gray-900">{customer.name}</p>
-              <p className="text-xs text-gray-500 font-mono mt-1">{customer.customer_code}</p>
-            </div>
-          )}
-
-          {/* Navigation */}
-          <nav className="flex-1 px-4 py-6 space-y-1 overflow-y-auto no-scrollbar">
-            {menuItems.map((item) => {
-              const Icon = item.icon;
-              const active = isActive(item.path);
-
-              return (
-                <Link
-                  key={item.path}
-                  to={item.path}
-                  className={`flex items-center px-4 py-3 text-sm font-medium rounded-lg transition-all duration-200 group ${
-                    active
-                      ? 'bg-blue-50 text-blue-700 border-r-4 border-blue-700 shadow-sm'
-                      : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
-                  }`}
-                >
-                  <Icon className={`h-5 w-5 mr-3 flex-shrink-0 transition-colors ${
-                    active ? 'text-blue-700' : 'text-gray-500 group-hover:text-gray-700'
-                  }`} />
-                  <span className="flex-1">{item.label}</span>
-                  {active && <div className="w-1.5 h-1.5 bg-blue-600 rounded-full ml-3" />}
-                </Link>
-              );
-            })}
-          </nav>
-
-          {/* Logout */}
-          <div className="px-4 py-4 border-t border-gray-200">
-            <button
-              onClick={handleLogout}
-              disabled={isLoggingOut}
-              className={`w-full flex items-center px-4 py-3 text-sm font-medium rounded-lg transition-all duration-200 ${
-                isLoggingOut
-                  ? 'bg-gray-100 text-gray-500 cursor-not-allowed'
-                  : 'text-red-600 hover:bg-red-50'
-              }`}
-            >
-              {isLoggingOut ? (
-                <div className="animate-spin rounded-full h-5 w-5 border-t-2 border-b-2 border-red-600 mr-3"></div>
-              ) : (
-                <LogOut className="h-5 w-5 mr-3" />
-              )}
-              <span>{isLoggingOut ? 'Logging out...' : 'Logout'}</span>
-            </button>
-          </div>
-
-          {/* Footer */}
-          <div className="px-6 py-4 border-t border-gray-200 text-center text-xs text-gray-500">
-            <p>Version 2.4 — January 2026</p>
-            <p className="mt-2 text-blue-600 font-medium">Secure • Fast • Always Here</p>
+    <aside className="fixed inset-y-0 left-0 z-50 hidden w-64 border-r border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow-md)] md:block">
+      <div className="flex h-full flex-col">
+        <div className="flex items-center gap-3 border-b border-[var(--border)] bg-[var(--surface-secondary)] px-5 py-6">
+          <img src="/vobiss-logo.png" alt="Vobiss" className="h-12 w-12 object-contain" />
+          <div>
+            <h1 className="text-xl font-bold tracking-tight text-[var(--text-primary)]">Vobiss</h1>
+            <p className="text-sm font-medium text-[var(--primary)]">Client Portal</p>
           </div>
         </div>
-      </aside>
 
-      {/* Notification Panel */}
-      {showNotif && (
-        <>
-          {/* Backdrop */}
-          <div
-            className="fixed inset-0 z-40 bg-black/5 backdrop-blur-sm transition-opacity duration-300"
-            onClick={() => setShowNotif(false)}
-          />
+        <div className="border-b border-[var(--border)] px-5 py-4">
+          <p className="truncate text-sm font-semibold text-[var(--text-primary)]">{customer.name}</p>
+          <p className="mt-1 font-mono text-xs text-[var(--text-muted)]">{customer.customer_code}</p>
+        </div>
 
-          {/* Panel */}
-          <div className="fixed top-20 left-64 z-50 w-96">
-            <div className="bg-white rounded-xl shadow-2xl border border-gray-200 overflow-hidden animate-in slide-in-from-top duration-300">
-              <div className="flex items-center justify-between px-6 py-4 bg-gray-50 border-b border-gray-200">
-                <h3 className="text-lg font-semibold text-gray-800">Notifications</h3>
-                <button
-                  onClick={() => setShowNotif(false)}
-                  className="p-2 rounded-lg hover:bg-gray-200 transition"
-                >
-                  <X className="h-5 w-5 text-gray-600" />
-                </button>
-              </div>
+        <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-5">
+          {menuItems.map((item) => {
+            const Icon = item.icon;
+            const active = isActive(item.path);
+            return (
+              <Link
+                key={item.path}
+                to={item.path}
+                className={`flex items-center rounded-xl px-3 py-2.5 text-sm font-medium transition ${
+                  active
+                    ? 'bg-[var(--accent-green-light)] text-[var(--primary)]'
+                    : 'text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] hover:text-[var(--text-primary)]'
+                }`}
+              >
+                <Icon className={`mr-3 h-5 w-5 shrink-0 ${active ? 'text-[var(--primary)]' : ''}`} />
+                {item.label}
+              </Link>
+            );
+          })}
+        </nav>
 
-              <div className="max-h-96 overflow-y-auto">
-                {notifications.length === 0 ? (
-                  <div className="text-center py-12 text-gray-500">
-                    <Bell className="h-10 w-10 mx-auto mb-3 text-gray-300" />
-                    <p>No new notifications</p>
-                  </div>
-                ) : (
-                  notifications.map((notif) => (
-                    <div
-                      key={notif.id}
-                      className={`px-6 py-4 border-b border-gray-100 hover:bg-gray-50 transition cursor-pointer ${
-                        !notif.read ? 'bg-blue-50/30' : ''
-                      }`}
-                    >
-                      <p className="font-medium text-gray-900">{notif.title}</p>
-                      <p className="mt-1 text-sm text-gray-600">{notif.message}</p>
-                      <p className="mt-2 text-xs text-gray-400">{notif.time}</p>
-                    </div>
-                  ))
-                )}
-              </div>
-            </div>
-          </div>
-        </>
-      )}
-
-      {/* Hide scrollbar but allow scrolling */}
-      <style jsx global>{`
-        .no-scrollbar {
-          -ms-overflow-style: none;
-          scrollbar-width: none;
-        }
-        .no-scrollbar::-webkit-scrollbar {
-          display: none;
-        }
-      `}</style>
-    </>
+        <div className="border-t border-[var(--border)] p-3">
+          <button
+            type="button"
+            onClick={handleLogout}
+            disabled={isLoggingOut}
+            className="flex w-full items-center rounded-xl px-3 py-2.5 text-sm font-medium text-red-600 transition hover:bg-red-50 disabled:opacity-60 dark:hover:bg-red-950/30"
+          >
+            <LogOut className="mr-3 h-5 w-5" />
+            {isLoggingOut ? 'Logging out…' : 'Logout'}
+          </button>
+        </div>
+      </div>
+    </aside>
   );
 };
 

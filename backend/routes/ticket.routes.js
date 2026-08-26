@@ -10,7 +10,9 @@ import {
   createTicket,
   getTicketsForCustomer,
   getTicketById,
-  getTicketTimeline
+  getTicketTimeline,
+  getCustomerById,
+  ensureDefaultOrgProjectId,
 } from '../db.ticketing.cjs';
 import { getRealtimeIo } from '../realtime/channels.js';
 import { postTicketSystemMessage } from '../services/chatSystemMessage.js';
@@ -76,7 +78,8 @@ router.post(
         title,
         category = 'general',
         priority = 'normal',
-        description
+        description,
+        site_id,
       } = req.body;
 
       if (!title?.trim()) {
@@ -84,6 +87,20 @@ router.post(
       }
       if (!description?.trim()) {
         return res.status(400).json({ error: 'Description is required' });
+      }
+
+      let resolvedSiteId = site_id ? parseInt(site_id, 10) : null;
+      const { listSitesForClient } = await import('../db.clients.cjs');
+      const sites = await listSitesForClient(req.customer.id);
+      if (sites.length > 0) {
+        if (!resolvedSiteId) {
+          return res.status(400).json({ error: 'Please select which site has the issue.' });
+        }
+        if (!sites.some((s) => s.id === resolvedSiteId)) {
+          return res.status(400).json({ error: 'Selected site does not belong to your account.' });
+        }
+      } else {
+        resolvedSiteId = resolvedSiteId || null;
       }
 
       const attachmentsData = [];
@@ -110,9 +127,19 @@ router.post(
         }
       }
 
+      // Tickets require project_id (FK). Resolve from JWT, then DB, then default org project.
+      let projectId = req.customer.project_id ? Number(req.customer.project_id) : null;
+      if (!projectId) {
+        const customerRow = await getCustomerById(req.customer.id);
+        projectId = customerRow?.project_id ? Number(customerRow.project_id) : null;
+      }
+      if (!projectId) {
+        projectId = await ensureDefaultOrgProjectId();
+      }
+
       const ticket = await createTicket(
         {
-          project_id: req.customer.project_id,
+          project_id: projectId,
           customer_id: req.customer.id,
           title: title.trim(),
           category: category.trim(),
@@ -120,7 +147,8 @@ router.post(
           priority: priority.trim(),
           status: 'NEW',
           source: 'portal',
-          attachments: attachmentsData.length > 0 ? attachmentsData : null
+          attachments: attachmentsData.length > 0 ? attachmentsData : null,
+          site_id: resolvedSiteId,
         },
         null,
         req.customer.id,

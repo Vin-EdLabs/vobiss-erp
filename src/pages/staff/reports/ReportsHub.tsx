@@ -26,7 +26,7 @@ const ALL_REPORTS: ReportCard[] = [
       'Pending and completed tickets, resolution times, staff activity, and visual analytics.',
     path: '/staff/reports/tickets',
     icon: Ticket,
-    accent: 'from-indigo-500 to-violet-600',
+    accent: 'from-[var(--primary)] to-[var(--primary-hover)]',
     roles: TICKET_REPORT_ROLES,
   },
   {
@@ -44,7 +44,7 @@ const ALL_REPORTS: ReportCard[] = [
       'Project, TS, IP, and NOC service requests with stage, status, customer, site, and value summaries.',
     path: '/staff/reports/service-requests',
     icon: Network,
-    accent: 'from-cyan-500 to-blue-700',
+    accent: 'from-[#8b5a2b] to-[#5c3a1e]',
     roles: SERVICE_REQUEST_REPORT_ROLES,
   },
   {
@@ -99,10 +99,10 @@ export default function ReportsHub() {
   );
 
   return (
-    <div className="min-h-full bg-gradient-to-br from-slate-50 via-white to-indigo-50/50 p-6">
+    <div className="min-h-full bg-gradient-to-br from-slate-50 via-white to-[#f5ebe0]/50 p-6">
       <div className="mx-auto max-w-5xl">
         <div className="mb-10">
-          <p className="text-xs font-semibold uppercase tracking-widest text-indigo-600">
+          <p className="text-xs font-semibold uppercase tracking-widest text-[var(--primary)]">
             Report System
           </p>
           <h1 className="mt-1 text-3xl font-bold text-slate-900">Reports</h1>
@@ -121,7 +121,7 @@ export default function ReportsHub() {
               <Link
                 key={card.path}
                 to={card.path}
-                className="group relative overflow-hidden rounded-2xl border border-slate-200 bg-white p-6 shadow-[var(--shadow-md)] transition hover:border-indigo-200 hover:shadow-[var(--shadow-md)]"
+                className="group relative overflow-hidden rounded-2xl border border-slate-200 bg-white p-6 shadow-[var(--shadow-md)] transition hover:border-[#e0c4a0] hover:shadow-[var(--shadow-md)]"
               >
                 <div
                   className={`mb-4 inline-flex rounded-xl bg-gradient-to-br ${card.accent} p-3 text-white shadow`}
@@ -130,7 +130,7 @@ export default function ReportsHub() {
                 </div>
                 <h2 className="text-lg font-semibold text-slate-900">{card.title}</h2>
                 <p className="mt-2 text-sm text-slate-600">{card.description}</p>
-                <span className="mt-4 inline-flex items-center gap-1 text-sm font-medium text-indigo-600 transition-all group-hover:gap-2">
+                <span className="mt-4 inline-flex items-center gap-1 text-sm font-medium text-[var(--primary)] transition-all group-hover:gap-2">
                   Open report
                   <ChevronRight className="h-4 w-4" />
                 </span>
@@ -141,7 +141,7 @@ export default function ReportsHub() {
 
         <div className="mt-10 rounded-2xl border border-slate-200 bg-white/80 p-5 shadow-[var(--shadow-md)]">
           <div className="flex items-start gap-3">
-            <BarChart3 className="mt-0.5 h-5 w-5 text-indigo-500" />
+            <BarChart3 className="mt-0.5 h-5 w-5 text-[var(--primary)]" />
             <div className="text-sm text-slate-600">
               <p className="font-medium text-slate-800">Tip</p>
               <p className="mt-1">

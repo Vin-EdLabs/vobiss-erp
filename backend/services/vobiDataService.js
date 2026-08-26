@@ -7,6 +7,7 @@ import {
   ticketRecordLink,
   serviceRequestLink,
 } from './vobiRoles.js';
+import { isSystemAdminAccount } from '../roles.js';
 
 const OPEN_TICKET = `status NOT IN ('RESOLVED', 'CLOSED')`;
 const CASH_PENDING_FINANCE = `status IN ('pending', 'supervisor_approved')`;
@@ -61,21 +62,34 @@ function withTicketLinks(rows = []) {
 
 async function resolveUserContext(userId, role, position) {
   const uid = Number.parseInt(String(userId), 10) || 0;
-  if (role && position !== undefined && position !== null) {
-    return { userId: uid, role, position };
-  }
   const rows = await safeQuery(
-    `SELECT role, main_role, position, units, unit
+    `SELECT first_name, last_name, role, main_role, position, units, unit, username
        FROM users WHERE id = $1 AND deleted_at IS NULL`,
     [uid]
   );
   const u = rows[0] || {};
+  const first = String(u.first_name || '').trim();
+  const last = String(u.last_name || '').trim();
+  const fullName = [first, last].filter(Boolean).join(' ') || u.username || 'Colleague';
   return {
     userId: uid,
     role: role || u.main_role || u.role || 'user',
     position: position ?? u.position ?? null,
     units: u.units,
     unit: u.unit,
+    username: u.username || null,
+    first_name: first || fullName.split(' ')[0] || 'there',
+    last_name: last || null,
+    full_name: fullName,
+    preferred_name: first || fullName.split(' ')[0] || 'there',
+    is_system_admin: isSystemAdminAccount({
+      username: u.username,
+      full_name: fullName,
+      first_name: first,
+      last_name: last,
+      role: u.role,
+      main_role: u.main_role,
+    }),
   };
 }
 
@@ -215,6 +229,46 @@ async function fetchGlobalData() {
       ip: MODULE_LINKS.tickets_ip,
       tx: MODULE_LINKS.tickets_tx,
     },
+  };
+
+  // Clients + sites (CX registry)
+  const [clientCount, siteCount, recentClients, recentSites] = await Promise.all([
+    safeCount(`SELECT COUNT(*) FROM customers WHERE deleted_at IS NULL`),
+    safeCount(`SELECT COUNT(*) FROM customer_sites`),
+    safeQuery(`
+      SELECT c.id, c.customer_name AS company_name, c.customer_code, c.status, c.contact_person,
+             (SELECT COUNT(*)::int FROM customer_sites s WHERE s.customer_id = c.id) AS site_count
+        FROM customers c
+       WHERE c.deleted_at IS NULL
+       ORDER BY c.updated_at DESC NULLS LAST, c.created_at DESC
+       LIMIT 12
+    `),
+    safeQuery(`
+      SELECT s.id, s.site_code, s.site_name, s.region, s.connection_status,
+             c.customer_name AS client_name, c.customer_code
+        FROM customer_sites s
+        LEFT JOIN customers c ON c.id = s.customer_id
+       ORDER BY s.updated_at DESC NULLS LAST, s.id DESC
+       LIMIT 12
+    `),
+  ]);
+
+  data.clients = {
+    total: clientCount,
+    recent: recentClients.map((row) => ({
+      ...row,
+      link: `/staff/cx/clients/${row.id}`,
+    })),
+    links: { list: '/staff/cx/clients', sites: '/staff/cx/sites', admin: '/admin/clients' },
+  };
+
+  data.sites = {
+    total: siteCount,
+    recent: recentSites.map((row) => ({
+      ...row,
+      link: '/staff/cx/sites',
+    })),
+    links: { list: '/staff/cx/sites' },
   };
 
   const serviceRequests = await safeQuery(`
@@ -447,19 +501,41 @@ async function fetchGlobalData() {
     safeCount(`SELECT COUNT(*) FROM users WHERE deleted_at IS NULL AND COALESCE(status, 'active') = 'active'`),
     safeCount(`SELECT COUNT(DISTINCT user_id) FROM audit_logs WHERE LOWER(action) LIKE '%login%' AND timestamp >= NOW() - INTERVAL '24 hours'`),
     safeQuery(`
-      SELECT al.action, al.timestamp AS created_at,
-             TRIM(BOTH FROM COALESCE(NULLIF(TRIM(COALESCE(u.first_name, '') || ' ' || COALESCE(u.last_name, '')), ''), u.username, 'System')) AS user_name
+      SELECT al.id, al.action, al.timestamp AS created_at, al.details,
+             TRIM(BOTH FROM COALESCE(NULLIF(TRIM(COALESCE(u.first_name, '') || ' ' || COALESCE(u.last_name, '')), ''), u.username, 'System')) AS user_name,
+             u.username
         FROM audit_logs al
         LEFT JOIN users u ON al.user_id = u.id
        ORDER BY al.timestamp DESC
-       LIMIT 10
+       LIMIT 25
     `),
   ]);
 
   data.system = {
     total_users: totalUsers,
     active_last_24h: activeUsers,
-    recent_audit: recentAudit,
+    recent_audit: recentAudit.map((row) => ({
+      id: row.id,
+      action: row.action,
+      created_at: row.created_at,
+      user_name: row.user_name,
+      username: row.username,
+      details: row.details || {},
+      link: MODULE_LINKS.audit,
+      // Human-readable hint for inventory updates
+      summary:
+        row.action === 'update_item' && row.details
+          ? [
+              row.details.item_name || row.details.new_name || `item #${row.details.item_id}`,
+              row.details.old_quantity !== undefined
+                ? `qty ${row.details.old_quantity} → ${row.details.new_quantity}`
+                : null,
+              row.details.reason ? `reason: ${row.details.reason}` : null,
+            ]
+              .filter(Boolean)
+              .join(' · ')
+          : null,
+    })),
     links: { users: MODULE_LINKS.users, audit: MODULE_LINKS.audit },
   };
 
@@ -646,8 +722,22 @@ function stripPayroll(hr) {
   };
 }
 
-function filterDataByRole(globalData, role, position) {
-  const access = getRoleAccess(role, position);
+function accessOptsFromCtx(ctx = {}) {
+  return {
+    units: ctx.units,
+    unit: ctx.unit,
+    username: ctx.username,
+    full_name: ctx.full_name,
+    first_name: ctx.first_name,
+    last_name: ctx.last_name,
+    role: ctx.role,
+    main_role: ctx.role,
+    isSystemAdmin: Boolean(ctx.is_system_admin),
+  };
+}
+
+function filterDataByRole(globalData, role, position, ctx = {}) {
+  const access = getRoleAccess(role, position, accessOptsFromCtx(ctx));
   const allowPayroll = canSeePayroll(access);
 
   if (access.sees_everything) {
@@ -665,12 +755,16 @@ function filterDataByRole(globalData, role, position) {
 
   if (modules.has('tickets')) {
     filtered.tickets = globalData.tickets;
+    filtered.clients = globalData.clients;
+    filtered.sites = globalData.sites;
   } else {
     if (modules.has('tickets_cx')) {
       filtered.tickets_cx = {
         open: globalData.tickets?.open_details?.filter((t) => t.queue === 'cx') || [],
         links: MODULE_LINKS.tickets_cx,
       };
+      filtered.clients = globalData.clients;
+      filtered.sites = globalData.sites;
     }
     if (modules.has('tickets_noc')) {
       filtered.tickets_noc = {
@@ -692,6 +786,11 @@ function filterDataByRole(globalData, role, position) {
     }
   }
 
+  if (modules.has('clients') || modules.has('service_requests')) {
+    filtered.clients = filtered.clients || globalData.clients;
+    filtered.sites = filtered.sites || globalData.sites;
+  }
+
   if (modules.has('service_requests')) filtered.service_requests = globalData.service_requests;
   if (modules.has('hr') || access.hr_full_access) {
     filtered.hr = allowPayroll ? globalData.hr : stripPayroll(globalData.hr);
@@ -700,32 +799,55 @@ function filterDataByRole(globalData, role, position) {
   if (modules.has('field')) filtered.field = globalData.field;
   if (modules.has('chat')) filtered.chat = globalData.chat;
   if (modules.has('users')) filtered.system = globalData.system;
-  if (modules.has('audit')) filtered.audit = globalData.system?.recent_audit;
+  if (modules.has('audit')) {
+    filtered.audit = globalData.system?.recent_audit;
+    if (!filtered.system) filtered.system = { recent_audit: globalData.system?.recent_audit, links: globalData.system?.links };
+    else filtered.system = { ...filtered.system, recent_audit: globalData.system?.recent_audit };
+  }
+  if (modules.has('inventory') && globalData.system?.recent_audit) {
+    const invActions = new Set(['update_item', 'create_item', 'delete_item', 'issue_item', 'create_category', 'update_category', 'delete_category']);
+    filtered.recent_inventory_changes = globalData.system.recent_audit.filter((a) => invActions.has(String(a.action || '').toLowerCase()));
+  }
+
+  if (access.scoped_to_units) {
+    filtered.access_note =
+      'Vobi access for this admin is limited to their assigned unit/department. System-wide data is not available.';
+  }
 
   return filtered;
 }
 
 export async function getVobiSystemData(userId, role, position) {
   const ctx = await resolveUserContext(userId, role, position);
-  const access = getRoleAccess(ctx.role, ctx.position);
+  const access = getRoleAccess(ctx.role, ctx.position, accessOptsFromCtx(ctx));
 
   const [globalData, userData] = await Promise.all([
     fetchGlobalData(),
     fetchUserData(ctx.userId),
   ]);
 
-  const roleFilteredData = filterDataByRole(globalData, ctx.role, ctx.position);
+  const roleFilteredData = filterDataByRole(globalData, ctx.role, ctx.position, ctx);
 
   return {
     generated_at: globalData.generated_at,
     role_context: {
       role: ctx.role,
       position: ctx.position,
+      first_name: ctx.first_name,
+      last_name: ctx.last_name,
+      full_name: ctx.full_name,
+      preferred_name: ctx.preferred_name,
+      units: access.units || [],
       access_key: access.key,
+      is_system_admin: Boolean(ctx.is_system_admin),
       sees_everything: Boolean(access.sees_everything),
+      scoped_to_units: Boolean(access.scoped_to_units),
       can_see_payroll: canSeePayroll(access),
       modules: access.modules,
       description: access.description,
+      access_note: access.scoped_to_units
+        ? 'This admin is limited to assigned units/departments — not company-wide Vobi access.'
+        : null,
     },
     system: roleFilteredData,
     my_work: userData,

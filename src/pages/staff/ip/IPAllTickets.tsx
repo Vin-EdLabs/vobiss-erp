@@ -449,9 +449,9 @@ const IPAllTickets: React.FC = () => {
   const getStatusColor = (status: string) => {
     const s = status?.toUpperCase() || '';
     switch (s) {
-      case 'NEW': return { bg: 'bg-blue-100', text: 'text-blue-700', border: 'border-blue-200' };
+      case 'NEW': return { bg: 'bg-blue-100', text: 'text-blue-700', border: 'border-[#e0c4a0]' };
       case 'OPEN': return { bg: 'bg-yellow-100', text: 'text-yellow-700', border: 'border-yellow-200' };
-      case 'IN_PROGRESS': return { bg: 'bg-purple-100', text: 'text-purple-700', border: 'border-purple-200' };
+      case 'IN_PROGRESS': return { bg: 'bg-amber-100', text: 'text-amber-800', border: 'border-amber-200' };
       case 'RESOLVED': return { bg: 'bg-green-100', text: 'text-green-700', border: 'border-green-200' };
       case 'CLOSED': return { bg: 'bg-gray-100', text: 'text-gray-700', border: 'border-gray-200' };
       default: return { bg: 'bg-slate-100', text: 'text-slate-600', border: 'border-slate-200' };
@@ -462,9 +462,9 @@ const IPAllTickets: React.FC = () => {
     const p = priority?.toUpperCase() || '';
     switch (p) {
       case 'URGENT': return { dot: 'bg-red-500', text: 'text-red-600' };
-      case 'HIGH': return { dot: 'bg-orange-500', text: 'text-orange-600' };
+      case 'HIGH': return { dot: 'bg-[var(--accent-green-light)]', text: 'text-[var(--primary)]' };
       case 'MEDIUM': return { dot: 'bg-yellow-500', text: 'text-yellow-600' };
-      case 'LOW': return { dot: 'bg-blue-500', text: 'text-blue-600' };
+      case 'LOW': return { dot: 'bg-[var(--accent-green-light)]', text: 'text-[var(--primary)]' };
       default: return { dot: 'bg-slate-400', text: 'text-slate-600' };
     }
   };
@@ -498,9 +498,9 @@ const IPAllTickets: React.FC = () => {
 
   if (loading || loadingTeam) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-indigo-50 flex items-center justify-center">
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-[#f5ebe0]/40 flex items-center justify-center">
         <div className="text-center">
-          <RefreshCw className="w-10 h-10 text-indigo-600 animate-spin mx-auto mb-4" />
+          <RefreshCw className="w-10 h-10 text-[var(--primary)] animate-spin mx-auto mb-4" />
           <p className="text-slate-600 text-sm">Loading IP tickets...</p>
         </div>
       </div>
@@ -509,7 +509,7 @@ const IPAllTickets: React.FC = () => {
 
   if (error) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-indigo-50 flex items-center justify-center">
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-[#f5ebe0]/40 flex items-center justify-center">
         <div className="text-center max-w-md">
           <AlertCircle className="w-12 h-12 text-red-500 mx-auto mb-4" />
           <h3 className="text-lg font-semibold text-slate-800 mb-2">Error loading tickets</h3>
@@ -521,13 +521,13 @@ const IPAllTickets: React.FC = () => {
 
   return (
     <>
-      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-indigo-50 text-xs">
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-[#f5ebe0]/40 text-xs">
         <div className="p-3 md:p-4 max-w-[1700px] mx-auto">
           {/* Header */}
           <div className="mb-4">
             <button
               onClick={() => navigate('/staff/ip')}
-              className="flex items-center gap-1 text-indigo-600 hover:text-indigo-800 text-xs font-medium mb-2 group"
+              className="flex items-center gap-1 text-[var(--primary)] hover:text-[var(--primary-hover)] text-xs font-medium mb-2 group"
             >
               <ArrowLeft className="w-3 h-3 group-hover:-translate-x-1 transition-transform" />
               Back to IP Dashboard
@@ -542,7 +542,7 @@ const IPAllTickets: React.FC = () => {
               <div className="flex items-center gap-2">
                 <button
                   onClick={() => navigate('/staff/ip/create-ticket')}
-                  className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-medium hover:bg-blue-700 flex items-center gap-1 shadow-sm"
+                  className="px-3 py-1.5 bg-[var(--primary)] text-white rounded-lg text-xs font-medium hover:bg-[var(--primary-hover)] flex items-center gap-1 shadow-sm"
                 >
                   <Plus className="w-3 h-3" /> New Ticket
                 </button>
@@ -569,7 +569,7 @@ const IPAllTickets: React.FC = () => {
                     placeholder="ID, customer, project, email, phone..."
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
-                    className="pl-8 pr-3 py-1.5 w-full bg-white border border-slate-300 rounded-lg text-xs focus:ring-2 focus:ring-indigo-500/30 outline-none"
+                    className="pl-8 pr-3 py-1.5 w-full bg-white border border-slate-300 rounded-lg text-xs focus:ring-2 focus:ring-[var(--primary)]/30 outline-none"
                   />
                 </div>
               </div>
@@ -612,7 +612,7 @@ const IPAllTickets: React.FC = () => {
                     setStatusFilter('all');
                     setPriorityFilter('all');
                   }}
-                  className="text-indigo-600 hover:text-indigo-800 text-xs font-medium"
+                  className="text-[var(--primary)] hover:text-[var(--primary-hover)] text-xs font-medium"
                 >
                   Clear filters
                 </button>
@@ -624,7 +624,7 @@ const IPAllTickets: React.FC = () => {
           <div className="bg-white rounded-lg shadow-[var(--shadow-md)] border border-slate-200 overflow-hidden">
             <div className="overflow-x-auto">
               <table className="w-full">
-                <thead className="bg-gradient-to-r from-slate-800 to-indigo-800 text-white text-xs uppercase tracking-wider">
+                <thead className="bg-gradient-to-r from-[#5c3a1e] to-[#4a2c16] text-white text-xs uppercase tracking-wider">
                   <tr>
                     <th className="px-3 py-2.5 text-left font-medium">Ticket ID</th>
                     <th className="px-3 py-2.5 text-left font-medium">Source</th>
@@ -644,14 +644,14 @@ const IPAllTickets: React.FC = () => {
                     return (
                       <tr
                         key={ticket.ticket_id}
-                        className={`hover:bg-indigo-50/50 transition-colors cursor-pointer ${idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/30'}`}
+                        className={`hover:bg-[var(--accent-green-light)]/50 transition-colors cursor-pointer ${idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/30'}`}
                         onClick={(e) => {
                           if ((e.target as HTMLElement).closest('select, button')) return;
                           navigate(`/staff/ip/tickets/${ticket.ticket_id}`);
                         }}
                       >
                         <td className="px-3 py-2.5">
-                          <span className="font-mono bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full text-xs font-bold">
+                          <span className="font-mono bg-[var(--accent-green-light)] text-[var(--primary)] px-2 py-0.5 rounded-full text-xs font-bold">
                             #{ticket.ticket_id}
                           </span>
                         </td>
@@ -706,7 +706,7 @@ const IPAllTickets: React.FC = () => {
                             </select>
                             <button
                               onClick={() => navigate(`/staff/ip/tickets/${ticket.ticket_id}`)}
-                              className="px-2.5 py-1 bg-gradient-to-r from-indigo-600 to-purple-600 text-white text-xs font-bold rounded hover:from-indigo-700 hover:to-purple-700 transition"
+                              className="px-2.5 py-1 bg-gradient-to-r from-[var(--primary)] to-[var(--primary-hover)] text-white text-xs font-bold rounded hover:from-[var(--primary-hover)] hover:to-[#5c3a1e] transition"
                             >
                               <Eye className="w-3.5 h-3.5" />
                             </button>
@@ -770,10 +770,10 @@ const IPAllTickets: React.FC = () => {
             className="bg-white rounded-2xl shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col text-sm transform transition-all"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="bg-gradient-to-r from-slate-800 to-indigo-800 text-white p-5 flex items-center justify-between">
+            <div className="bg-gradient-to-r from-[#5c3a1e] to-[#4a2c16] text-white p-5 flex items-center justify-between">
               <div>
                 <h2 className="text-lg font-bold">Ticket #{selectedTicket.ticket_id}</h2>
-                <p className="text-indigo-200 text-xs mt-1">
+                <p className="text-[#e8d5bc] text-xs mt-1">
                   Created by: <strong>{selectedTicket.creator_name || 'Unknown'}</strong> • {formatFullDate(selectedTicket.created_at)}
                 </p>
               </div>
@@ -788,15 +788,15 @@ const IPAllTickets: React.FC = () => {
             <div className="flex-1 overflow-y-auto p-5 space-y-6 bg-gradient-to-br from-slate-50 to-white">
               {modalLoading ? (
                 <div className="flex items-center justify-center h-full min-h-[200px]">
-                  <RefreshCw className="w-8 h-8 text-indigo-600 animate-spin mr-4" />
+                  <RefreshCw className="w-8 h-8 text-[var(--primary)] animate-spin mr-4" />
                   <p className="text-slate-600 text-sm">Loading details...</p>
                 </div>
               ) : (
                 <>
                   {/* Title */}
-                  <div className="bg-gradient-to-r from-indigo-100 to-purple-100 rounded-xl p-5 border border-indigo-200">
+                  <div className="bg-gradient-to-r from-[var(--accent-green-light)] to-[#e8d5bc] rounded-xl p-5 border border-[#e0c4a0]">
                     <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
-                      <MessageSquare className="w-5 h-5 text-indigo-700" />
+                      <MessageSquare className="w-5 h-5 text-[var(--primary)]" />
                       Ticket Title
                     </h3>
                     <p className="mt-2 text-slate-800 text-base">{selectedTicket.title}</p>
@@ -806,7 +806,7 @@ const IPAllTickets: React.FC = () => {
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <div className="bg-white rounded-xl p-4 shadow-md border border-slate-100 shadow-[var(--shadow-md)]">
                       <h3 className="font-semibold text-slate-800 mb-3 flex items-center gap-2 text-sm">
-                        <User className="w-4 h-4 text-indigo-600" /> Customer Details
+                        <User className="w-4 h-4 text-[var(--primary)]" /> Customer Details
                       </h3>
                       <div className="space-y-2 text-xs">
                         <p><span className="font-medium">Name:</span> {selectedTicket.customer_name}</p>
@@ -817,7 +817,7 @@ const IPAllTickets: React.FC = () => {
 
                     <div className="bg-white rounded-xl p-4 shadow-md border border-slate-100 shadow-[var(--shadow-md)]">
                       <h3 className="font-semibold text-slate-800 mb-3 flex items-center gap-2 text-sm">
-                        <MessageSquare className="w-4 h-4 text-indigo-600" /> Project Details
+                        <MessageSquare className="w-4 h-4 text-[var(--primary)]" /> Project Details
                       </h3>
                       <div className="space-y-2 text-xs">
                         <p><span className="font-medium">Name:</span> {selectedTicket.project_name}</p>
@@ -831,7 +831,7 @@ const IPAllTickets: React.FC = () => {
 
                     <div className="bg-white rounded-xl p-4 shadow-md border border-slate-100 shadow-[var(--shadow-md)]">
                       <h3 className="font-semibold text-slate-800 mb-3 flex items-center gap-2 text-sm">
-                        <Clock className="w-4 h-4 text-indigo-600" /> Status & Priority
+                        <Clock className="w-4 h-4 text-[var(--primary)]" /> Status & Priority
                       </h3>
                       <div className="space-y-2 text-xs">
                         <p>
@@ -853,9 +853,9 @@ const IPAllTickets: React.FC = () => {
                   </div>
 
                   {/* Status Update Section */}
-                  <div className="bg-gradient-to-r from-indigo-50 to-purple-50 rounded-xl p-4 border border-indigo-200 shadow-md">
+                  <div className="bg-gradient-to-r from-[var(--accent-green-light)] to-[#f8f1e8] rounded-xl p-4 border border-[#e0c4a0] shadow-md">
                     <h3 className="font-bold text-slate-800 mb-3 flex items-center gap-2">
-                      <UserCheck className="w-5 h-5 text-indigo-600" />
+                      <UserCheck className="w-5 h-5 text-[var(--primary)]" />
                       Update Status
                     </h3>
                     <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
@@ -864,7 +864,7 @@ const IPAllTickets: React.FC = () => {
                         const disabled = updatingStatus || isCurrent || 
                           (selectedTicket.status === 'CLOSED' && status !== 'REOPEN');
 
-                        let btnStyle = "bg-indigo-600 hover:bg-indigo-700 text-white";
+                        let btnStyle = "bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white";
                         if (status === 'RESOLVED') btnStyle = "bg-green-600 hover:bg-green-700 text-white";
                         if (status === 'CLOSED') btnStyle = "bg-red-600 hover:bg-red-700 text-white";
                         if (status === 'REOPEN') btnStyle = "bg-amber-600 hover:bg-amber-700 text-white";
@@ -892,7 +892,7 @@ const IPAllTickets: React.FC = () => {
                   {/* Description */}
                   <div className="bg-white rounded-xl p-4 shadow-md border border-slate-100 shadow-[var(--shadow-md)]">
                     <h3 className="font-bold text-slate-800 mb-3 flex items-center gap-2 text-sm">
-                      <MessageSquare className="w-4 h-4 text-indigo-600" /> Description
+                      <MessageSquare className="w-4 h-4 text-[var(--primary)]" /> Description
                     </h3>
                     <p className="text-slate-700 whitespace-pre-wrap text-xs">{selectedTicket.description}</p>
                   </div>
@@ -900,14 +900,14 @@ const IPAllTickets: React.FC = () => {
                   {/* Timeline */}
                   <div className="bg-white rounded-xl p-4 shadow-md border border-slate-100 shadow-[var(--shadow-md)]">
                     <h3 className="font-bold text-slate-800 mb-3 flex items-center gap-2 text-sm">
-                      <Calendar className="w-4 h-4 text-indigo-600" /> Timeline
+                      <Calendar className="w-4 h-4 text-[var(--primary)]" /> Timeline
                     </h3>
                     {selectedTicket.timeline && selectedTicket.timeline.length > 0 ? (
                       <div className="space-y-4">
                         {selectedTicket.timeline.map((entry, idx) => (
                           <div key={idx} className="flex gap-3">
                             <div className={`w-8 h-8 rounded-full flex-shrink-0 flex items-center justify-center text-white text-xs font-bold ${
-                              entry.visibility === 'public' ? 'bg-teal-600' : 'bg-indigo-600'
+                              entry.visibility === 'public' ? 'bg-teal-600' : 'bg-[var(--primary)]'
                             }`}>
                               {entry.actor_role[0].toUpperCase()}
                             </div>
@@ -985,7 +985,7 @@ const IPAllTickets: React.FC = () => {
                 <textarea
                   value={reason}
                   onChange={e => setReason(e.target.value)}
-                  className="w-full h-28 p-3 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none resize-none"
+                  className="w-full h-28 p-3 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-[var(--primary)]/40 focus:border-[var(--primary)] outline-none resize-none"
                   placeholder="Please explain here..."
                 />
               </div>

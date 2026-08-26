@@ -1,6 +1,4 @@
 import { create } from 'zustand';
-import { getVobiFormHint } from '@/lib/vobiFormHints';
-import { getVobiPageGuide } from '@/lib/vobiPageGuides';
 import type { VobiErrorContext } from '@/lib/vobiErrorMessages';
 
 export type VobiAmbientMode = 'idle' | 'error' | 'hint' | 'guide' | 'exact';
@@ -65,17 +63,12 @@ type VobiAmbientState = {
 };
 
 let errorTimer: ReturnType<typeof setTimeout> | null = null;
-let hintTimer: ReturnType<typeof setTimeout> | null = null;
 let errorDismissTimer: ReturnType<typeof setTimeout> | null = null;
 
 const HINT_DISMISSED_KEY = 'vobi_hint_dismissed';
 const GUIDE_DISMISSED_KEY = 'vobi_guide_dismissed';
 const GUIDE_DISABLED_KEY = 'vobi_guides_disabled';
 const RECENT_ERRORS_KEY = 'vobi_recent_errors';
-
-function isMobileViewport() {
-  return typeof window !== 'undefined' && window.matchMedia('(max-width: 767px)').matches;
-}
 
 function getDismissedHints(): string[] {
   if (typeof window === 'undefined') return [];
@@ -127,34 +120,21 @@ function disableGuides() {
 
 function clearTimers() {
   if (errorTimer) clearTimeout(errorTimer);
-  if (hintTimer) clearTimeout(hintTimer);
   if (errorDismissTimer) clearTimeout(errorDismissTimer);
   errorTimer = null;
-  hintTimer = null;
   errorDismissTimer = null;
 }
 
 function pageGuideState(route: string | null) {
-  if (areGuidesDisabled() || getDismissedGuides().includes(normalizeRoute(route))) {
-    return {
-      mode: 'idle' as const,
-      isOpen: false,
-      errorContext: null,
-      exactIssue: null,
-      formKey: null,
-      pageAlerts: [],
-      bottomBarLabel: '',
-    };
-  }
-  const guide = getVobiPageGuide(route);
   return {
-    mode: guide ? 'guide' as const : 'idle' as const,
+    mode: 'idle' as const,
     isOpen: false,
     errorContext: null,
     exactIssue: null,
     formKey: null,
     pageAlerts: [],
-    bottomBarLabel: guide ? `${guide.pageName} - what can I do here?` : '',
+    bottomBarLabel: '',
+    pageRoute: route,
   };
 }
 
@@ -268,53 +248,26 @@ export const useVobiAmbientStore = create<VobiAmbientState>((set, get) => ({
   },
 
   setFormHint: (key) => {
-    if (isMobileViewport() || getDismissedHints().includes(key)) return;
-    clearTimers();
-    hintTimer = setTimeout(() => {
-      const state = get();
-      if (state.mode === 'error' || state.mode === 'exact') return;
-      const hint = getVobiFormHint(key);
-      if (!hint) return;
-      set({
-        mode: 'hint',
-        isOpen: false,
-        formKey: key,
-        errorContext: null,
-        bottomBarLabel: `${hint.formName} - need help?`,
-      });
-    }, 1200);
+    // Remember form key silently — no guideline popups; users open Vobi when they want help.
+    set({ formKey: key || null });
   },
 
   setPageGuide: (route) => {
-    clearTimers();
-    if (areGuidesDisabled() || getDismissedGuides().includes(normalizeRoute(route))) {
-      set({
-        mode: 'idle',
-        isOpen: false,
-        errorContext: null,
-        exactIssue: null,
-        formKey: null,
-        pageRoute: route,
-        pageAlerts: [],
-        bottomBarLabel: '',
-      });
-      return;
-    }
-    const guide = getVobiPageGuide(route);
+    // Keep route for Vobi page context — do not show hardcoded guide popups.
     const state = get();
-    if (state.mode === 'error' || state.mode === 'exact') {
+    if (state.mode === 'error' || state.mode === 'exact' || state.mode === 'hint') {
       set({ pageRoute: route });
       return;
     }
     set({
-      mode: guide ? 'guide' : 'idle',
+      mode: 'idle',
       isOpen: false,
       errorContext: null,
       exactIssue: null,
       formKey: null,
       pageRoute: route,
       pageAlerts: [],
-      bottomBarLabel: guide ? `${guide.pageName} - what can I do here?` : '',
+      bottomBarLabel: '',
     });
   },
 

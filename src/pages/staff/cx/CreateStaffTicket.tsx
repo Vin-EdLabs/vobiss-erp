@@ -1,12 +1,16 @@
 // src/pages/staff/CreateStaffTicketPage.tsx (or wherever your create page is)
 import React, { useEffect, useState, useMemo } from 'react';
-import { cxApi, type TicketEscalationStage } from '../../../api';
+import { getWorkflowConfig, cxApi, type TicketEscalationStage } from '../../../api';
 import { API_URL } from '@/lib/api';
 import { Search, Ticket, Clock, AlertCircle, Plus, RefreshCw } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { vobiAmbientStore } from '@/stores/vobiAmbientStore';
 import { useVobiFormState } from '@/hooks/useVobiFormState';
 import { useVobiSection } from '@/hooks/useVobiSection';
+import { TicketTagBadge } from '@/components/tickets/TicketTagBadge';
+import { TicketTagPicker } from '@/components/tickets/TicketTagPicker';
+import { suggestTagsForTicket, type TicketTag } from '@/lib/ticketTags';
+import { DEFAULT_TICKET_SLA, describeSlaForPriority, type TicketSlaConfig } from '@/lib/ticketSla';
 
 interface Project {
   id: number;
@@ -63,12 +67,18 @@ const CreateStaffTicketPage: React.FC = () => {
 
   const [selectedProject, setSelectedProject] = useState<number | ''>('');
   const [selectedCustomer, setSelectedCustomer] = useState<number | ''>('');
+  const [selectedSite, setSelectedSite] = useState<number | ''>('');
+  const [clientSites, setClientSites] = useState<any[]>([]);
+  const [loadingSites, setLoadingSites] = useState(false);
 
   const [title, setTitle] = useState('');
   const [category, setCategory] = useState('general');
-  const [priority, setPriority] = useState('normal');
+  const [priority, setPriority] = useState('medium');
   const [description, setDescription] = useState('');
   const [selectedUnit, setSelectedUnit] = useState(MANUAL_TICKET_UNITS[0].key);
+  const [allTags, setAllTags] = useState<TicketTag[]>([]);
+  const [selectedTagIds, setSelectedTagIds] = useState<number[]>([]);
+  const [ticketSla, setTicketSla] = useState<TicketSlaConfig>(DEFAULT_TICKET_SLA);
 
   const [projectSearch, setProjectSearch] = useState('');
   const [customerSearch, setCustomerSearch] = useState('');
@@ -87,6 +97,33 @@ const CreateStaffTicketPage: React.FC = () => {
     help: 'Create a staff ticket by choosing the exact customer, writing a clear title, describing the issue, and routing it to NOC, IP, or TS.',
     priority: 20,
   }, showForm);
+
+  useEffect(() => {
+    if (!selectedCustomer) {
+      setClientSites([]);
+      setSelectedSite('');
+      return;
+    }
+    let cancelled = false;
+    setLoadingSites(true);
+    cxApi
+      .getClientSites(selectedCustomer)
+      .then((res) => {
+        if (cancelled) return;
+        const list = Array.isArray(res?.data) ? res.data : Array.isArray(res) ? res : [];
+        setClientSites(list);
+        setSelectedSite('');
+      })
+      .catch(() => {
+        if (!cancelled) setClientSites([]);
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingSites(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedCustomer]);
 
   useVobiFormState({
     formKey: 'ticket-create',
@@ -110,13 +147,14 @@ const CreateStaffTicketPage: React.FC = () => {
   const loadData = async () => {
     setLoadingTickets(true);
     try {
-      const [projList, membersResponse, allTicketsResponse, custList] = await Promise.all([
+      const [projList, membersResponse, allTicketsResponse, custList, tagsRes] = await Promise.all([
         cxApi.getProjects(),
         fetch(`${API_URL}/cx/team-members`, {
           headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
         }),
         cxApi.getAllTickets(),
         cxApi.getCustomers(),
+        cxApi.getTags().catch(() => ({ data: [] })),
       ]);
 
       if (!membersResponse.ok) throw new Error('Failed to load team members');
@@ -156,6 +194,7 @@ const CreateStaffTicketPage: React.FC = () => {
 
       setProjects(projList);
       setCustomers(custList);
+      setAllTags(Array.isArray(tagsRes?.data) ? tagsRes.data : Array.isArray(tagsRes) ? tagsRes : []);
       setSelectedUnit((current) => MANUAL_TICKET_UNITS.some((unit) => unit.key === current) ? current : MANUAL_TICKET_UNITS[0].key);
       setMyCreatedTickets(staffCreated);
     } catch (err: any) {
@@ -168,6 +207,11 @@ const CreateStaffTicketPage: React.FC = () => {
 
   useEffect(() => {
     loadData();
+    getWorkflowConfig()
+      .then((cfg) => {
+        if (cfg?.ticket_sla) setTicketSla(cfg.ticket_sla as TicketSlaConfig);
+      })
+      .catch(() => {});
   }, []);
 
   const filteredProjects = useMemo(() => {
@@ -187,6 +231,25 @@ const CreateStaffTicketPage: React.FC = () => {
       )
     );
   }, [customers, customerSearch, selectedProject]);
+
+  const suggestedTags = useMemo(
+    () =>
+      suggestTagsForTicket(allTags, category, priority).filter((t) => !selectedTagIds.includes(t.id)),
+    [allTags, category, priority, selectedTagIds]
+  );
+
+  const slaHint = useMemo(() => describeSlaForPriority(ticketSla, priority), [ticketSla, priority]);
+
+  const selectedTags = useMemo(
+    () => allTags.filter((t) => selectedTagIds.includes(t.id)),
+    [allTags, selectedTagIds]
+  );
+
+  const toggleTag = (tag: TicketTag) => {
+    setSelectedTagIds((prev) =>
+      prev.includes(tag.id) ? prev.filter((id) => id !== tag.id) : [...prev, tag.id]
+    );
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -224,11 +287,13 @@ const CreateStaffTicketPage: React.FC = () => {
         category,
         priority,
         route_to_unit: selectedUnit,
+        tag_ids: selectedTagIds.length ? selectedTagIds : undefined,
+        site_id: selectedSite ? Number(selectedSite) : null,
       });
 
       const ticketId = newTicket.ticket?.ticket_id || newTicket.ticket_id || 'N/A';
       const customerInfo = customers.find(c => c.id === selectedCustomer);
-      const projectInfo = projects.find(p => p.id === customerInfo?.project_id || p.id === selectedProject);
+      const siteInfo = clientSites.find((s) => s.id === selectedSite);
 
       // Assume current logged-in user (you can get this from auth context later)
       const currentUserName = teamMembers.find(m => m.email === localStorage.getItem('userEmail'))?.fullName || 'You';
@@ -237,8 +302,8 @@ const CreateStaffTicketPage: React.FC = () => {
         ticket_id: ticketId,
         customer_name: customerInfo?.customer_name || 'Unknown',
         customer_code: customerInfo?.customer_code || 'N/A',
-        project_name: projectInfo?.project_name || 'N/A',
-        project_code: projectInfo?.project_code || 'N/A',
+        project_name: siteInfo?.site_name || 'N/A',
+        project_code: siteInfo?.site_code || 'N/A',
         priority,
         status: 'NEW',
         created_at: new Date().toISOString(),
@@ -253,9 +318,12 @@ const CreateStaffTicketPage: React.FC = () => {
       setTitle('');
       setDescription('');
       setCategory('general');
-      setPriority('normal');
+      setPriority('medium');
+      setSelectedTagIds([]);
       setSelectedProject('');
       setSelectedCustomer('');
+      setSelectedSite('');
+      setClientSites([]);
       setCustomerSearch('');
       setProjectSearch('');
       setShowForm(false);
@@ -273,13 +341,13 @@ const CreateStaffTicketPage: React.FC = () => {
     const pu = p.toLowerCase();
     if (pu === 'critical' || pu === 'urgent') return 'bg-red-100 text-red-800';
     if (pu === 'high') return 'bg-orange-100 text-orange-800';
-    if (pu === 'normal' || pu === 'medium') return 'bg-blue-100 text-blue-800';
+    if (pu === 'normal' || pu === 'medium') return 'bg-[var(--accent-green-light)] text-[var(--primary-hover)]';
     return 'bg-gray-100 text-gray-800';
   };
 
   const getStatusColor = (s: string) => {
     const su = s.toUpperCase();
-    if (su === 'NEW') return 'bg-blue-100 text-blue-800';
+    if (su === 'NEW') return 'bg-blue-100 text-[var(--primary-hover)]';
     if (su === 'OPEN' || su === 'IN_PROGRESS') return 'bg-yellow-100 text-yellow-800';
     if (su === 'RESOLVED') return 'bg-green-100 text-green-800';
     if (su === 'CLOSED') return 'bg-gray-100 text-gray-800';
@@ -296,7 +364,7 @@ const CreateStaffTicketPage: React.FC = () => {
         {/* Header */}
         <div className="flex justify-between items-center mb-8">
           <h1 className="text-2xl font-bold text-gray-800 flex items-center gap-3">
-            <Ticket className="w-8 h-8 text-blue-600" />
+            <Ticket className="w-8 h-8 text-[var(--primary)]" />
             Staff-Created Tickets ({myCreatedTickets.length})
           </h1>
 
@@ -312,7 +380,7 @@ const CreateStaffTicketPage: React.FC = () => {
 
             <button
               onClick={() => setShowForm(!showForm)}
-              className="bg-blue-600 hover:bg-blue-700 text-white font-medium py-2.5 px-5 rounded-lg transition flex items-center gap-2 shadow-md"
+              className="bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white font-medium py-2.5 px-5 rounded-lg transition flex items-center gap-2 shadow-md"
             >
               <Plus className="w-5 h-5" />
               {showForm ? 'Cancel' : 'Create Ticket'}
@@ -332,7 +400,7 @@ const CreateStaffTicketPage: React.FC = () => {
         )}
 
         {/* Full Quick Guide */}
-        <div className="bg-blue-50 border border-blue-200 rounded-xl p-6 mb-8 text-sm text-blue-900">
+        <div className="bg-[var(--accent-green-light)] border border-[#e0c4a0] rounded-xl p-6 mb-8 text-sm text-[var(--primary-hover)]">
           <p className="font-semibold text-base mb-3">Quick Guide:</p>
           <p className="mb-4">
             Click the Create Ticket button → select a customer → choose the receiving unit → fill details → submit. Project is optional context and is filled from the customer.
@@ -346,7 +414,7 @@ const CreateStaffTicketPage: React.FC = () => {
             <li>Click "Create Ticket" to submit.</li>
           </ol>
 
-          <p className="mt-4 text-blue-800">
+          <p className="mt-4 text-[var(--primary-hover)]">
             Customers will see the ticket in their portal and receive email updates (if enabled).
           </p>
         </div>
@@ -355,16 +423,16 @@ const CreateStaffTicketPage: React.FC = () => {
         {showForm && (
           <div className="bg-white rounded-xl shadow-[var(--shadow-md)] border border-gray-200 p-6 mb-10">
             <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-2 gap-6" noValidate>
-              {/* Customer Select */}
+              {/* Client Select */}
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1.5">Customer *</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1.5">Client *</label>
                 <div className="relative">
                   <input
                     data-vobi-field="customerSearch"
                     type="text"
                     value={customerSearch}
                     onChange={(e) => setCustomerSearch(e.target.value)}
-                    placeholder="Search customers..."
+                    placeholder="Search clients..."
                     className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-sm"
                   />
                   <Search className="absolute left-3 top-2.5 w-4 h-4 text-gray-400" />
@@ -381,44 +449,38 @@ const CreateStaffTicketPage: React.FC = () => {
                   className="w-full mt-2 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-sm"
                   required
                 >
-                  <option value="">Select customer</option>
+                  <option value="">Select client</option>
                   {filteredCustomers.map(c => (
                     <option key={c.id} value={c.id}>
-                      {c.customer_code} — {c.customer_name}{c.project_name ? ` (${c.project_code} — ${c.project_name})` : ''}
+                      {c.customer_code} — {c.customer_name}
                     </option>
                   ))}
                 </select>
               </div>
 
-              {/* Optional Project Filter */}
+              {/* Site Select */}
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1.5">Project (Optional Filter)</label>
-                <div className="relative">
-                  <input
-                    data-vobi-field="projectSearch"
-                    type="text"
-                    value={projectSearch}
-                    onChange={(e) => setProjectSearch(e.target.value)}
-                    placeholder="Search projects..."
-                    className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-sm"
-                  />
-                  <Search className="absolute left-3 top-2.5 w-4 h-4 text-gray-400" />
-                </div>
+                <label className="block text-sm font-medium text-gray-700 mb-1.5">Site</label>
                 <select
-                  data-vobi-field="selectedProject"
-                  value={selectedProject}
-                  onChange={(e) => {
-                    const val = Number(e.target.value) || '';
-                    setSelectedProject(val);
-                    setSelectedCustomer('');
-                    setProjectSearch('');
-                  }}
-                  className="w-full mt-2 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-sm"
+                  data-vobi-field="selectedSite"
+                  value={selectedSite}
+                  onChange={(e) => setSelectedSite(Number(e.target.value) || '')}
+                  className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-sm"
+                  disabled={!selectedCustomer || loadingSites}
                 >
-                  <option value="">All projects</option>
-                  {filteredProjects.map(p => (
-                    <option key={p.id} value={p.id}>
-                      {p.project_code} — {p.project_name}
+                  <option value="">
+                    {!selectedCustomer
+                      ? 'Select a client first'
+                      : loadingSites
+                        ? 'Loading sites…'
+                        : clientSites.length === 0
+                          ? 'No sites for this client'
+                          : 'Select site (optional)'}
+                  </option>
+                  {clientSites.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.site_code} — {s.site_name}
+                      {s.connection_status ? ` (${s.connection_status})` : ''}
                     </option>
                   ))}
                 </select>
@@ -455,10 +517,15 @@ const CreateStaffTicketPage: React.FC = () => {
                 <label className="block text-sm font-medium text-gray-700 mb-1.5">Priority</label>
                 <select data-vobi-field="priority" value={priority} onChange={(e) => setPriority(e.target.value)} className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-sm">
                   <option value="low">Low</option>
-                  <option value="normal">Normal</option>
+                  <option value="medium">Medium</option>
                   <option value="high">High</option>
                   <option value="critical">Critical</option>
                 </select>
+                {slaHint && (
+                  <p className="mt-1.5 text-xs text-slate-600">
+                    SLA from configuration: {slaHint}
+                  </p>
+                )}
               </div>
 
               <div className="md:col-span-2">
@@ -471,6 +538,35 @@ const CreateStaffTicketPage: React.FC = () => {
                   ))}
                 </select>
                 <p className="mt-1 text-xs text-gray-500">Tickets start unassigned in the selected unit queue until that unit claims or assigns an owner.</p>
+              </div>
+
+              <div className="md:col-span-2">
+                <label className="block text-sm font-medium text-gray-700 mb-1.5">Tags</label>
+                <div className="flex flex-wrap items-center gap-2">
+                  {selectedTags.map((tag) => (
+                    <TicketTagBadge key={tag.id} tag={tag} onRemove={() => toggleTag(tag)} />
+                  ))}
+                  <TicketTagPicker
+                    allTags={allTags}
+                    selectedIds={selectedTagIds}
+                    onToggle={toggleTag}
+                  />
+                </div>
+                {suggestedTags.length > 0 && (
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    <span className="text-xs font-medium text-slate-500">Suggested:</span>
+                    {suggestedTags.map((tag) => (
+                      <button
+                        key={tag.id}
+                        type="button"
+                        onClick={() => toggleTag(tag)}
+                        className="rounded-full ring-1 ring-slate-200 ring-offset-1 transition hover:ring-slate-400"
+                      >
+                        <TicketTagBadge tag={tag} compact />
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
 
               <div className="md:col-span-2">
@@ -497,7 +593,7 @@ const CreateStaffTicketPage: React.FC = () => {
                 <button
                   type="submit"
                   disabled={loading}
-                  className="bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white font-medium py-2.5 px-8 rounded-lg text-sm flex items-center gap-2"
+                  className="bg-[var(--primary)] hover:bg-[var(--primary-hover)] disabled:opacity-60 text-white font-medium py-2.5 px-8 rounded-lg text-sm flex items-center gap-2"
                 >
                   {loading ? 'Creating...' : 'Create Ticket'}
                 </button>
@@ -544,9 +640,9 @@ const CreateStaffTicketPage: React.FC = () => {
                     <tr
                       key={ticket.ticket_id}
                       onClick={() => handleRowClick(ticket.ticket_id)}
-                      className="hover:bg-blue-50 cursor-pointer transition-colors"
+                      className="hover:bg-[var(--accent-green-light)] cursor-pointer transition-colors"
                     >
-                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-blue-600">#{ticket.ticket_id}</td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-[var(--primary)]">#{ticket.ticket_id}</td>
                       <td className="px-6 py-4 text-sm text-gray-700">{ticket.customer_code} — {ticket.customer_name}</td>
                       <td className="px-6 py-4 text-sm text-gray-700">{ticket.project_code} — {ticket.project_name}</td>
                       <td className="px-6 py-4 text-sm text-gray-700 font-medium">{ticket.created_by}</td>

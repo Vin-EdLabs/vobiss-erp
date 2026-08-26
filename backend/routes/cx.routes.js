@@ -18,7 +18,28 @@ import {
   updateTicketStaff,
   getUserWorkHistory,
   searchTicketWithFullDetails,
+  listTicketTags,
+  createTicketTag,
+  updateTicketTag,
+  deleteTicketTag,
+  getTagsForTicket,
+  addTagsToTicket,
+  removeTagFromTicket,
 } from '../db.ticketing.cjs';
+import {
+  listClients,
+  createClient,
+  getClientById,
+  updateClient,
+  listSitesForClient,
+  createSite,
+  createStandaloneSite,
+  updateSite,
+  updateSiteById,
+  linkSitesToClient,
+  listAllSites,
+  resetClientPassword,
+} from '../db.clients.cjs';
 import { getUserById } from '../db.js';
 import { emitToStaff } from '../realtime/channels.js';
 import { getRealtimeIo } from '../realtime/channels.js';
@@ -310,14 +331,90 @@ router.post('/customers/:id/reset-pin', async (req, res) => {
   }
 });
 
+// --- TICKET TAGS ---
+function parseIdList(raw) {
+  if (!raw) return [];
+  if (Array.isArray(raw)) return raw.map(Number).filter((n) => Number.isFinite(n));
+  return String(raw)
+    .split(',')
+    .map((s) => Number(s.trim()))
+    .filter((n) => Number.isFinite(n));
+}
+
+function actorFromReq(req) {
+  return {
+    id: req.authUser?.id,
+    name: `${req.authUser?.first_name || ''} ${req.authUser?.last_name || ''}`.trim() || req.authUser?.username || 'Staff',
+    role: String(req.authUser?.role || req.authUser?.main_role || 'staff').split(',')[0].trim() || 'staff',
+  };
+}
+
+router.get('/tags', async (req, res) => {
+  try {
+    const tags = await listTicketTags();
+    res.json({ success: true, data: tags });
+  } catch (err) {
+    console.error('GET /tags error:', err);
+    res.status(500).json({ error: 'Failed to load tags' });
+  }
+});
+
+router.post('/tags', async (req, res) => {
+  try {
+    if (!isTicketManager(req.authUser)) {
+      return res.status(403).json({ error: 'Only managers can create tags' });
+    }
+    const tag = await createTicketTag({
+      name: req.body?.name,
+      color: req.body?.color,
+      created_by: req.authUser.id,
+    });
+    res.status(201).json({ success: true, data: tag });
+  } catch (err) {
+    console.error('POST /tags error:', err);
+    res.status(err.statusCode || 500).json({ error: err.message || 'Failed to create tag' });
+  }
+});
+
+router.patch('/tags/:id', async (req, res) => {
+  try {
+    if (!isTicketManager(req.authUser)) {
+      return res.status(403).json({ error: 'Only managers can update tags' });
+    }
+    const tag = await updateTicketTag(req.params.id, {
+      name: req.body?.name,
+      color: req.body?.color,
+    });
+    res.json({ success: true, data: tag });
+  } catch (err) {
+    console.error('PATCH /tags error:', err);
+    res.status(err.statusCode || 500).json({ error: err.message || 'Failed to update tag' });
+  }
+});
+
+router.delete('/tags/:id', async (req, res) => {
+  try {
+    if (!isTicketManager(req.authUser)) {
+      return res.status(403).json({ error: 'Only managers can delete tags' });
+    }
+    await deleteTicketTag(req.params.id);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('DELETE /tags error:', err);
+    res.status(err.statusCode || 500).json({ error: err.message || 'Failed to delete tag' });
+  }
+});
+
 // --- TICKET ENDPOINTS ---
 router.get('/tickets', async (req, res) => {
   try {
-    const { status, project_id, escalation_stage } = req.query;
+    const { status, project_id, escalation_stage, tag_ids, tag_ids_any } = req.query;
     const tickets = await getAllTickets({
       status: status ? status.toUpperCase() : null,
       project_id: project_id ? parseInt(project_id, 10) : null,
       escalation_stage: escalation_stage ? String(escalation_stage) : null,
+      tag_ids: parseIdList(tag_ids),
+      tag_ids_any: parseIdList(tag_ids_any),
     });
     const visibleTickets = isTicketManager(req.authUser)
       ? tickets
@@ -390,7 +487,8 @@ router.get('/tickets/:id', async (req, res) => {
     }
 
     const timeline = await getTicketTimeline(id);
-    res.json({ success: true, data: { ticket, timeline } });
+    const tags = await getTagsForTicket(id);
+    res.json({ success: true, data: { ticket: { ...ticket, tags }, timeline } });
   } catch (err) {
     console.error('GET /tickets/:id error:', err);
     res.status(500).json({ error: 'Failed to fetch ticket details' });
@@ -405,7 +503,9 @@ router.post('/tickets', async (req, res) => {
     priority = 'normal',
     description,
     assigned_to,
-    route_to_unit
+    route_to_unit,
+    tag_ids,
+    site_id,
   } = req.body;
 
   if (!customer_id || !title?.trim() || !description?.trim()) {
@@ -427,6 +527,16 @@ router.post('/tickets', async (req, res) => {
     if (custRes.rowCount === 0) return res.status(404).json({ error: 'Customer not found' });
     const project_id = custRes.rows[0].project_id;
 
+    if (site_id) {
+      const siteRes = await pool.query(
+        `SELECT id FROM customer_sites WHERE id = $1 AND customer_id = $2`,
+        [parseInt(site_id, 10), parseInt(customer_id, 10)]
+      );
+      if (!siteRes.rowCount) {
+        return res.status(400).json({ error: 'Selected site does not belong to this client' });
+      }
+    }
+
     const ticket = await createTicket(
       {
         project_id,
@@ -435,6 +545,7 @@ router.post('/tickets', async (req, res) => {
         category,
         description: description.trim(),
         priority,
+        site_id: site_id ? parseInt(site_id, 10) : null,
       },
       assigned_to ? parseInt(assigned_to) : null,
       req.authUser.id,
@@ -461,10 +572,41 @@ router.post('/tickets', async (req, res) => {
       console.warn('[chat] ticket system message failed:', e.message);
     }
 
-    res.status(201).json({ success: true, ticket_id: ticket.ticket_id, ticket });
+    let tags = [];
+    try {
+      if (Array.isArray(tag_ids) && tag_ids.length) {
+        tags = await addTagsToTicket(ticket.ticket_id, tag_ids, actorFromReq(req));
+      } else {
+        tags = await getTagsForTicket(ticket.ticket_id);
+      }
+    } catch (tagErr) {
+      console.warn('[tags] apply on create failed:', tagErr.message);
+    }
+
+    res.status(201).json({ success: true, ticket_id: ticket.ticket_id, ticket: { ...ticket, tags } });
   } catch (err) {
     console.error('Ticket creation error:', err);
     res.status(500).json({ error: 'Failed to create ticket' });
+  }
+});
+
+router.post('/tickets/:id/tags', async (req, res) => {
+  try {
+    const tags = await addTagsToTicket(req.params.id, req.body?.tag_ids || [], actorFromReq(req));
+    res.json({ success: true, data: tags });
+  } catch (err) {
+    console.error('POST /tickets/:id/tags error:', err);
+    res.status(err.statusCode || 500).json({ error: err.message || 'Failed to add tags' });
+  }
+});
+
+router.delete('/tickets/:id/tags/:tagId', async (req, res) => {
+  try {
+    const tags = await removeTagFromTicket(req.params.id, Number(req.params.tagId), actorFromReq(req));
+    res.json({ success: true, data: tags });
+  } catch (err) {
+    console.error('DELETE /tickets/:id/tags/:tagId error:', err);
+    res.status(err.statusCode || 500).json({ error: err.message || 'Failed to remove tag' });
   }
 });
 
@@ -844,6 +986,189 @@ router.get('/tickets/search/:ticketId', async (req, res) => {
   } catch (err) {
     console.error('GET /tickets/search/:ticketId error:', err);
     res.status(500).json({ error: 'Failed to search ticket' });
+  }
+});
+
+// ═══════════════════════════════════════════
+// CLIENTS (label) / customers (table) + SITES
+// ═══════════════════════════════════════════
+router.get('/clients', async (req, res) => {
+  try {
+    const { status, search, page, limit } = req.query;
+    const result = await listClients({
+      status: status || undefined,
+      search: search || undefined,
+      page: page ? parseInt(page, 10) : 1,
+      limit: limit ? parseInt(limit, 10) : 50,
+    });
+    res.json({ success: true, ...result });
+  } catch (err) {
+    console.error('GET /clients error:', err);
+    res.status(500).json({ error: 'Failed to fetch clients' });
+  }
+});
+
+router.post('/clients', async (req, res) => {
+  try {
+    const {
+      company_name,
+      organization_name,
+      customer_name,
+      contact_person,
+      email,
+      contact_email,
+      phone,
+      contact_phone,
+      location,
+      status,
+      site_ids,
+    } = req.body;
+    const name = (company_name || organization_name || customer_name || '').trim();
+    const mail = (email || contact_email || '').trim();
+    const tel = (phone || contact_phone || '').trim();
+    if (!name) return res.status(400).json({ error: 'Company name is required' });
+    if (!mail) return res.status(400).json({ error: 'Email is required' });
+    if (!tel) return res.status(400).json({ error: 'Phone is required' });
+    if (!location?.trim()) return res.status(400).json({ error: 'Location is required' });
+
+    const client = await createClient({
+      company_name: name,
+      contact_person,
+      email: mail,
+      phone: tel,
+      location: location.trim(),
+      status,
+      site_ids: Array.isArray(site_ids) ? site_ids : [],
+    });
+    res.status(201).json({ success: true, data: client });
+  } catch (err) {
+    console.error('POST /clients error:', err);
+    if (err.code === '23505') {
+      return res.status(409).json({ error: 'A client with that email already exists' });
+    }
+    res.status(500).json({ error: err.message || 'Failed to create client' });
+  }
+});
+
+router.get('/clients/:id', async (req, res) => {
+  try {
+    const client = await getClientById(parseInt(req.params.id, 10));
+    if (!client) return res.status(404).json({ error: 'Client not found' });
+    res.json({ success: true, data: client });
+  } catch (err) {
+    console.error('GET /clients/:id error:', err);
+    res.status(500).json({ error: 'Failed to fetch client' });
+  }
+});
+
+router.patch('/clients/:id', async (req, res) => {
+  try {
+    const client = await updateClient(parseInt(req.params.id, 10), req.body || {});
+    if (!client) return res.status(404).json({ error: 'Client not found' });
+    res.json({ success: true, data: client });
+  } catch (err) {
+    console.error('PATCH /clients/:id error:', err);
+    res.status(500).json({ error: err.message || 'Failed to update client' });
+  }
+});
+
+router.post('/clients/:id/reset-password', async (req, res) => {
+  try {
+    const { new_password, reset_to_code, generate } = req.body || {};
+    const result = await resetClientPassword(parseInt(req.params.id, 10), {
+      new_password,
+      reset_to_code: generate ? false : (reset_to_code !== false && !new_password),
+      generate: !!generate,
+    });
+    res.json({ success: true, ...result });
+  } catch (err) {
+    console.error('POST /clients/:id/reset-password error:', err);
+    res.status(400).json({ error: err.message || 'Failed to reset password' });
+  }
+});
+
+router.get('/clients/:id/sites', async (req, res) => {
+  try {
+    const sites = await listSitesForClient(parseInt(req.params.id, 10));
+    res.json({ success: true, data: sites });
+  } catch (err) {
+    console.error('GET /clients/:id/sites error:', err);
+    res.status(500).json({ error: 'Failed to fetch sites' });
+  }
+});
+
+router.post('/clients/:id/sites', async (req, res) => {
+  try {
+    const site = await createSite(parseInt(req.params.id, 10), req.body || {});
+    res.status(201).json({ success: true, data: site });
+  } catch (err) {
+    console.error('POST /clients/:id/sites error:', err);
+    res.status(400).json({ error: err.message || 'Failed to create site' });
+  }
+});
+
+router.patch('/clients/:id/sites/:siteId', async (req, res) => {
+  try {
+    const site = await updateSite(
+      parseInt(req.params.id, 10),
+      parseInt(req.params.siteId, 10),
+      req.body || {}
+    );
+    if (!site) return res.status(404).json({ error: 'Site not found' });
+    res.json({ success: true, data: site });
+  } catch (err) {
+    console.error('PATCH /clients/:id/sites/:siteId error:', err);
+    res.status(400).json({ error: err.message || 'Failed to update site' });
+  }
+});
+
+router.patch('/clients/:id/sites', async (req, res) => {
+  try {
+    const clientId = parseInt(req.params.id, 10);
+    const siteIds = Array.isArray(req.body?.site_ids) ? req.body.site_ids : [];
+    const linked = await linkSitesToClient(clientId, siteIds);
+    const sites = await listSitesForClient(clientId);
+    res.json({ success: true, linked, data: sites });
+  } catch (err) {
+    console.error('PATCH /clients/:id/sites error:', err);
+    res.status(400).json({ error: err.message || 'Failed to link sites' });
+  }
+});
+
+router.get('/sites', async (req, res) => {
+  try {
+    const sites = await listAllSites({
+      client_id: req.query.client_id || req.query.customer_id,
+      unassigned: req.query.unassigned,
+      connection_status: req.query.connection_status,
+      region: req.query.region,
+      search: req.query.search,
+    });
+    res.json({ success: true, data: sites });
+  } catch (err) {
+    console.error('GET /sites error:', err);
+    res.status(500).json({ error: 'Failed to fetch sites' });
+  }
+});
+
+router.post('/sites', async (req, res) => {
+  try {
+    const site = await createStandaloneSite(req.body || {});
+    res.status(201).json({ success: true, data: site });
+  } catch (err) {
+    console.error('POST /sites error:', err);
+    res.status(400).json({ error: err.message || 'Failed to create site' });
+  }
+});
+
+router.patch('/sites/:id', async (req, res) => {
+  try {
+    const site = await updateSiteById(parseInt(req.params.id, 10), req.body || {});
+    if (!site) return res.status(404).json({ error: 'Site not found' });
+    res.json({ success: true, data: site });
+  } catch (err) {
+    console.error('PATCH /sites/:id error:', err);
+    res.status(400).json({ error: err.message || 'Failed to update site' });
   }
 });
 

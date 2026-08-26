@@ -19,7 +19,7 @@ const INTENT_PATTERNS: Array<{ intent: VobiIntent; patterns: RegExp[] }> = [
   { intent: 'approvals', patterns: [/what\s+needs\s+approval/i, /\bmy\s+approvals\b/i, /\bapprovals?\b/i] },
   { intent: 'tasks', patterns: [/show\s+my\s+tasks/i, /\bmy\s+tasks\b/i, /\btasks\b/i] },
   { intent: 'missed', patterns: [/what\s+did\s+i\s+miss/i, /\bmissed\b/i] },
-  { intent: 'personal_digest', patterns: [/while\s+i\s+was\s+away/i, /^catch\s+me\s+up$/i, /summari[sz]e\s+(all\s+)?my\s+(chats|threads)/i, /\bdigest\b/i, /summari[sz]e\s+all/i] },
+  { intent: 'personal_digest', patterns: [/while\s+i\s+was\s+away/i, /\bcatch\s+me\s+up\b/i, /summari[sz]e\s+(all\s+)?my\s+(chats|threads)/i, /\bdigest\b/i, /summari[sz]e\s+all/i] },
   { intent: 'chat_mentions', patterns: [/\bany\s+mentions\b/i, /did\s+anyone\s+mention/i, /my\s+mentions\s+in\s+chat/i] },
   { intent: 'summarise_thread', patterns: [/summari[sz]e\s+/i, /what\s+happened\s+in\s+/i, /catch\s+me\s+up\s+on\s+/i, /\brecap\s+/i, /summary\s+of\s+/i, /what'?s\s+in\s+/i] },
   { intent: 'tickets_summary', patterns: [/summari[sz]e\s+my\s+tickets/i, /\bticket\s+summary\b/i, /\bmy\s+tickets\b/i] },

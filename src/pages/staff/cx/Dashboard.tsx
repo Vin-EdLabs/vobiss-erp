@@ -138,7 +138,7 @@ const CXDashboard: React.FC = () => {
     return (
       <div className="flex min-h-[40vh] items-center justify-center">
         <div className="text-center space-y-4">
-          <div className="animate-spin h-12 w-12 border-4 border-blue-500 border-t-transparent rounded-full mx-auto"></div>
+          <div className="animate-spin h-12 w-12 border-4 border-[var(--primary)] border-t-transparent rounded-full mx-auto"></div>
           <p className="text-slate-500 font-medium">Loading CX Hub...</p>
         </div>
       </div>
@@ -154,7 +154,7 @@ const CXDashboard: React.FC = () => {
           <p className="mb-8 text-[var(--text-secondary)]">{error}</p>
           <button
             onClick={() => window.location.reload()}
-            className="px-8 py-3 bg-blue-600 text-white font-semibold rounded-xl hover:bg-blue-700 transition shadow-lg shadow-blue-200/50"
+            className="px-8 py-3 bg-[var(--primary)] text-white font-semibold rounded-xl hover:bg-[var(--primary-hover)] transition shadow-lg shadow-[#8b5a2b]/25"
           >
             Retry
           </button>
@@ -250,7 +250,7 @@ const CXDashboard: React.FC = () => {
                   {tickets.slice(0, 8).map((ticket) => (
                     <tr
                       key={ticket.ticket_id || `row-${ticket.id}`}
-                      className="group hover:bg-blue-50/40 transition-colors"
+                      className="group hover:bg-[var(--accent-green-light)]/40 transition-colors"
                     >
                       <td className="px-10 py-6">
                         <div className="font-semibold text-slate-800 group-hover:text-blue-700 transition-colors text-lg">
@@ -274,7 +274,7 @@ const CXDashboard: React.FC = () => {
                       <td className="px-8 py-6 text-right pr-12">
                         <button
                           onClick={() => ticket.ticket_id && handleViewTicket(ticket.ticket_id)}
-                          className="p-3 bg-slate-100 text-slate-500 rounded-2xl hover:bg-blue-600 hover:text-white transition-all duration-300 hover:scale-110 active:scale-95"
+                          className="p-3 bg-slate-100 text-slate-500 rounded-2xl hover:bg-[var(--primary)] hover:text-white transition-all duration-300 hover:scale-110 active:scale-95"
                         >
                           <ArrowRight className="w-5 h-5" />
                         </button>
@@ -295,21 +295,21 @@ const CXDashboard: React.FC = () => {
 
           {/* Sidebar – glass + depth */}
           <aside className="space-y-8">
-            <div className="bg-gradient-to-br from-slate-900 to-slate-800 rounded-3xl p-10 text-white shadow-2xl shadow-slate-900/30 relative overflow-hidden group">
+            <div className="bg-gradient-to-br from-[#5c3a1e] to-[#3c2210] rounded-3xl p-10 text-white shadow-2xl shadow-[#3c2210]/30 relative overflow-hidden group">
               <div className="relative z-10">
-                <Users className="w-12 h-12 text-blue-400 mb-6 opacity-90" />
+                <Users className="w-12 h-12 text-[#e8d5bc] mb-6 opacity-90" />
                 <h3 className="text-2xl font-bold mb-3">Quick Actions</h3>
                 <p className="text-slate-300 mb-8 leading-relaxed">
                   Managing {projects.length} projects • Stay in control
                 </p>
                 <Link
                   to="/staff/cx/projects"
-                  className="block w-full py-4 bg-blue-600 hover:bg-blue-500 rounded-2xl font-bold text-center transition shadow-lg shadow-blue-900/30"
+                  className="block w-full py-4 bg-[var(--primary)] hover:bg-[var(--primary-hover)] rounded-2xl font-bold text-center transition shadow-lg shadow-[#5c3a1e]/30"
                 >
                   Go to Projects →
                 </Link>
               </div>
-              <div className="absolute inset-0 bg-blue-600/5 group-hover:bg-blue-600/10 transition-all duration-500"></div>
+              <div className="absolute inset-0 bg-[var(--primary)]/5 group-hover:bg-[var(--primary)]/10 transition-all duration-500"></div>
             </div>
 
             <div className="bg-white/80 backdrop-blur-md rounded-3xl border border-slate-100 p-8 shadow-[var(--shadow-md)]">
@@ -354,7 +354,7 @@ const CXDashboard: React.FC = () => {
                     className="flex items-center justify-between p-4 rounded-2xl hover:bg-slate-50 transition-all border border-transparent hover:border-slate-200 group"
                   >
                     <div className="flex items-center gap-4">
-                      <div className="h-12 w-12 bg-gradient-to-br from-indigo-100 to-purple-100 rounded-full flex items-center justify-center font-bold text-indigo-600 text-lg shadow-sm group-hover:scale-105 transition">
+                      <div className="h-12 w-12 bg-gradient-to-br from-[var(--accent-green-light)] to-[#e8d5bc] rounded-full flex items-center justify-center font-bold text-[var(--primary)] text-lg shadow-sm group-hover:scale-105 transition">
                         {member.fullName.slice(0, 2).toUpperCase()}
                       </div>
                       <div>
@@ -366,7 +366,7 @@ const CXDashboard: React.FC = () => {
                         </div>
                       </div>
                     </div>
-                    <span className="text-sm font-bold text-indigo-600 bg-indigo-50 px-3 py-1.5 rounded-full">
+                    <span className="text-sm font-bold text-[var(--primary)] bg-[var(--accent-green-light)] px-3 py-1.5 rounded-full">
                       {getAssignedCount(member.id)} assigned
                     </span>
                   </div>
@@ -409,8 +409,8 @@ const PriorityDot = ({ priority }: { priority: string }) => {
   const p = (priority || 'NORMAL').toUpperCase();
   const colors: Record<string, string> = {
     URGENT: 'bg-rose-500 ring-rose-200',
-    HIGH: 'bg-orange-500 ring-orange-200',
-    NORMAL: 'bg-blue-500 ring-blue-200',
+    HIGH: 'bg-[var(--accent-green-light)] ring-orange-200',
+    NORMAL: 'bg-[var(--accent-green-light)] ring-blue-200',
     LOW: 'bg-slate-400 ring-slate-200',
   };
 

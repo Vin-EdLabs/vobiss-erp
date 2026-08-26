@@ -130,8 +130,8 @@ const TicketDetail = () => {
     const upper = status.toUpperCase();
     const configs: Record<string, { icon: JSX.Element; bg: string; text: string; color: string }> = {
       NEW: { icon: <Clock className="h-3 w-3" />, bg: 'bg-yellow-100', text: 'New', color: 'text-yellow-800' },
-      OPEN: { icon: <AlertCircle className="h-3 w-3" />, bg: 'bg-blue-100', text: 'In Progress', color: 'text-blue-800' },
-      IN_PROGRESS: { icon: <AlertCircle className="h-3 w-3" />, bg: 'bg-blue-100', text: 'In Progress', color: 'text-blue-800' },
+      OPEN: { icon: <AlertCircle className="h-3 w-3" />, bg: 'bg-blue-100', text: 'In Progress', color: 'text-[var(--primary-hover)]' },
+      IN_PROGRESS: { icon: <AlertCircle className="h-3 w-3" />, bg: 'bg-blue-100', text: 'In Progress', color: 'text-[var(--primary-hover)]' },
       RESOLVED: { icon: <CheckCircle className="h-3 w-3" />, bg: 'bg-green-100', text: 'Resolved', color: 'text-green-800' },
       CLOSED: { icon: <CheckCircle className="h-3 w-3" />, bg: 'bg-gray-100', text: 'Closed', color: 'text-gray-800' },
     };
@@ -176,7 +176,7 @@ const TicketDetail = () => {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center">
-          <div className="animate-spin rounded-full h-8 w-8 border-t-4 border-indigo-600 mx-auto mb-4" />
+          <div className="animate-spin rounded-full h-8 w-8 border-t-4 border-[var(--primary)] mx-auto mb-4" />
           <p className="text-gray-600 text-xs">Loading ticket...</p>
         </div>
       </div>
@@ -204,7 +204,7 @@ const TicketDetail = () => {
   const baseUploadUrl = '/uploads/';
 
   return (
-    <div className="min-h-screen bg-gray-50 flex text-xs">
+    <div className="flex min-h-screen bg-[var(--content-bg)] text-xs">
       <CustomerSidebar />
       <div className="flex-1 md:ml-64 pb-20 md:pb-0">
         <CustomerHeader
@@ -225,18 +225,18 @@ const TicketDetail = () => {
             </Button>
 
             {/* Banner */}
-            <Card className="mb-5 border-l-4 border-indigo-500 shadow-sm">
+            <Card className="mb-5 border-l-4 border-[var(--primary)] shadow-sm">
               <CardHeader className="pb-3">
                 <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                   <div>
                     <div className="flex items-center gap-3 mb-1">
                       <img src="/vobiss-logo.png" alt="VOBISS" className="h-8" />
-                      <h1 className="text-lg font-bold text-gray-900">Support Ticket</h1>
+                      <h1 className="text-lg font-bold text-[var(--text-primary)]">Support Ticket</h1>
                     </div>
-                    <p className="text-gray-600 text-xs flex items-center gap-2">
+                    <p className="flex items-center gap-2 text-xs text-[var(--text-muted)]">
                       #{ticket.ticket_id} • {formatDateTime(ticket.created_at)}
                       {backgroundRefreshing && (
-                        <span className="text-indigo-500 text-xs animate-pulse flex items-center gap-1">
+                        <span className="text-[var(--primary)] text-xs animate-pulse flex items-center gap-1">
                           <RefreshCw className="h-3 w-3 animate-spin" /> checking...
                         </span>
                       )}
@@ -265,17 +265,17 @@ const TicketDetail = () => {
                         <div className="flex flex-col items-center">
                           <div
                             className={`w-10 h-10 rounded-full flex items-center justify-center text-white text-xs font-bold shadow
-                              ${isCompleted ? 'bg-green-500' : isActive ? 'bg-indigo-600' : 'bg-gray-300'}
+                              ${isCompleted ? 'bg-green-500' : isActive ? 'bg-[var(--primary)]' : 'bg-gray-300'}
                             `}
                           >
                             {isCompleted ? <CheckCircle className="h-5 w-5" /> : i + 1}
                           </div>
-                          <span className={`mt-2 text-xs ${isActive ? 'font-bold text-indigo-700' : 'text-gray-600'}`}>
+                          <span className={`mt-2 text-xs ${isActive ? 'font-bold text-[var(--primary)]' : 'text-[var(--text-muted)]'}`}>
                             {step}
                           </span>
                         </div>
                         {i < statusSteps.length - 1 && (
-                          <ArrowRight className={`h-5 w-5 mx-3 ${isCompleted ? 'text-green-500' : 'text-gray-300'}`} />
+                          <ArrowRight className={`mx-3 h-5 w-5 ${isCompleted ? 'text-green-500' : 'text-[var(--border-strong)]'}`} />
                         )}
                       </div>
                     );
@@ -454,7 +454,7 @@ const TicketDetail = () => {
                     <div className="space-y-7">
                       {timeline.map((entry, idx) => (
                         <div key={idx} className="relative flex gap-5">
-                          <div className="flex-shrink-0 w-10 h-10 rounded-full bg-indigo-600 text-white flex items-center justify-center shadow z-10">
+                          <div className="flex-shrink-0 w-10 h-10 rounded-full bg-[var(--primary)] text-white flex items-center justify-center shadow z-10">
                             {idx === 0 ? <FileText className="h-5 w-5" /> : <User className="h-5 w-5" />}
                           </div>
                           <div className="flex-1 bg-white border rounded-lg p-4 shadow-[var(--shadow-md)]">

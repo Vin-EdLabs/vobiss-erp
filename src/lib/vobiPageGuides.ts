@@ -157,6 +157,152 @@ export const vobiPageGuides: Record<string, VobiPageGuide> = {
       { label: 'Protect System Admin', hint: 'System Admin is the reserved full-access account and is hidden from the user list.', urgent: true, visibleTo: ['superadmin'] },
     ],
   },
+  '/request-forms': {
+    pageName: 'Material requests',
+    actions: [
+      { label: 'Create request', hint: 'Add the items and quantities you need with a clear purpose.', visibleTo: VOBI_ALL_STAFF },
+      { label: 'Track status', hint: 'Watch pending vs approved so you know when stock can be issued.', visibleTo: VOBI_ALL_STAFF },
+      { label: 'Open chat', hint: 'Clarify missing items with warehouse in the request thread.', visibleTo: VOBI_ALL_STAFF },
+    ],
+  },
+  '/request-forms/:id': {
+    pageName: 'Material request detail',
+    actions: [
+      { label: 'Approve', hint: 'Only if you are the assigned approver for this stage.', visibleTo: VOBI_MANAGER },
+      { label: 'Reject', hint: 'Add a reason. The requester will see it.', visibleTo: VOBI_MANAGER },
+      { label: 'Open chat thread', hint: 'Use the request conversation for clarification.', visibleTo: VOBI_ALL_STAFF },
+    ],
+  },
+  '/cash-request': {
+    pageName: 'Cash request',
+    actions: [
+      { label: 'Enter amount & purpose', hint: 'Be specific — finance approves faster with clear purpose.', visibleTo: VOBI_ALL_STAFF },
+      { label: 'Submit', hint: 'After submit, track status under approvals / cash details.', visibleTo: VOBI_ALL_STAFF },
+    ],
+  },
+  '/cash-approvals': {
+    pageName: 'Cash approvals',
+    actions: [
+      { label: 'Review queue', hint: 'Open each request and verify amount, purpose, and requester.', visibleTo: VOBI_FINANCE },
+      { label: 'Approve or reject', hint: 'Reject with a reason when documentation is incomplete.', visibleTo: VOBI_FINANCE },
+    ],
+  },
+  '/finance-approvals': {
+    pageName: 'Finance approvals',
+    actions: [
+      { label: 'Clear pending', hint: 'Work oldest or highest value first.', visibleTo: VOBI_FINANCE },
+      { label: 'Open detail', hint: 'Never approve blind — read purpose and attachments.', visibleTo: VOBI_FINANCE },
+    ],
+  },
+  '/material-approvals': {
+    pageName: 'Material approvals',
+    actions: [
+      { label: 'Check stock impact', hint: 'Confirm items exist and quantities are reasonable before approving.', visibleTo: VOBI_WAREHOUSE },
+      { label: 'Approve / reject', hint: 'Rejection should include what the requester must fix.', visibleTo: VOBI_MANAGER },
+    ],
+  },
+  '/hr/dashboard': {
+    pageName: 'HR dashboard',
+    actions: [
+      { label: 'People signals', hint: 'Check attendance, leave, and payroll readiness cards first.', visibleTo: VOBI_MANAGER },
+      { label: 'Jump to module', hint: 'Use Employees, Leave, Attendance, or Payroll from the sidebar.', visibleTo: VOBI_MANAGER },
+    ],
+  },
+  '/hr/employees': {
+    pageName: 'Employees',
+    actions: [
+      { label: 'Search staff', hint: 'Find by name before creating a duplicate profile.', visibleTo: VOBI_MANAGER },
+      { label: 'Open profile', hint: 'Keep role, unit, and employment details accurate for access and payroll.', visibleTo: VOBI_MANAGER },
+    ],
+  },
+  '/hr/payroll': {
+    pageName: 'Payroll',
+    actions: [
+      { label: 'Run / review period', hint: 'Confirm attendance and leave before finalizing pay.', visibleTo: VOBI_MANAGER },
+      { label: 'Payslips', hint: 'Only roles with payroll access should view salary figures.', visibleTo: VOBI_MANAGER },
+    ],
+  },
+  '/hr-self/attendance': {
+    pageName: 'My attendance',
+    actions: [
+      { label: 'Clock in/out', hint: 'Use GPS when required. Stay within the office geofence if enabled.', visibleTo: VOBI_ALL_STAFF },
+      { label: 'Review history', hint: 'Check today’s punches before contacting HR about discrepancies.', visibleTo: VOBI_ALL_STAFF },
+    ],
+  },
+  '/staff/cx/dashboard': {
+    pageName: 'CX ticket dashboard',
+    actions: [
+      { label: 'Watch SLA', hint: 'Handle overdue and unassigned tickets first.', urgent: true, visibleTo: VOBI_CX },
+      { label: 'Open queue', hint: 'Use the ticket list for filtering and bulk awareness.', visibleTo: VOBI_CX },
+    ],
+  },
+  '/staff/noc/tickets': {
+    pageName: 'NOC ticket queue',
+    actions: [
+      { label: 'Prioritize outages', hint: 'Network-impacting tickets before routine work.', urgent: true, visibleTo: VOBI_CX },
+      { label: 'Claim & document', hint: 'Record checks and timestamps before escalating.', visibleTo: VOBI_CX },
+    ],
+  },
+  '/staff/ip/tickets': {
+    pageName: 'IP ticket queue',
+    actions: [
+      { label: 'Read prior notes', hint: 'NOC/CX context should drive the IP step.', visibleTo: VOBI_CX },
+      { label: 'Update progress', hint: 'Keep status current for the requester.', visibleTo: VOBI_CX },
+    ],
+  },
+  '/staff/field/tickets': {
+    pageName: 'Field ticket queue',
+    actions: [
+      { label: 'Confirm site', hint: 'Verify site and access before dispatch.', visibleTo: VOBI_ALL_STAFF },
+      { label: 'Close with notes', hint: 'Completion notes prevent repeat visits.', visibleTo: VOBI_ALL_STAFF },
+    ],
+  },
+  '/project-request/create': {
+    pageName: 'Create service request',
+    actions: [
+      { label: 'Fill client/site', hint: 'Correct site identity drives the whole unit pipeline.', visibleTo: VOBI_ALL_STAFF },
+      { label: 'Submit', hint: 'After create, track progress in your unit queue.', visibleTo: VOBI_ALL_STAFF },
+    ],
+  },
+  '/assets': {
+    pageName: 'Assets registry',
+    actions: [
+      { label: 'Search asset', hint: 'Avoid duplicate registrations — search first.', visibleTo: VOBI_WAREHOUSE },
+      { label: 'New asset', hint: 'Capture category, location, and photos for accountability.', visibleTo: VOBI_WAREHOUSE },
+    ],
+  },
+  '/field/dashboard': {
+    pageName: 'Field dashboard',
+    actions: [
+      { label: 'Today’s activities', hint: 'Confirm engineers are progressing on assigned sites.', visibleTo: VOBI_ALL_STAFF },
+      { label: 'Open map', hint: 'Use Field Map for geographic awareness.', visibleTo: VOBI_ALL_STAFF },
+    ],
+  },
+  '/audit-logs': {
+    pageName: 'Audit logs',
+    actions: [
+      { label: 'Search by action', hint: 'Filter deletes/updates when investigating “who changed this”.', visibleTo: VOBI_MANAGER },
+      { label: 'Read details', hint: 'Inventory audits include old/new quantities and reasons.', visibleTo: VOBI_MANAGER },
+    ],
+  },
+  '/settings': {
+    pageName: 'System settings',
+    actions: [
+      { label: 'Review carefully', hint: 'Settings affect all staff — change only what you intend.', visibleTo: VOBI_MANAGER },
+    ],
+  },
+  '/configuration': {
+    pageName: 'System configuration',
+    actions: [
+      { label: 'Units & options', hint: 'Configuration drives workflows and dropdowns across modules.', visibleTo: VOBI_MANAGER },
+    ],
+  },
+  '/profile': {
+    pageName: 'My profile',
+    actions: [
+      { label: 'Update details', hint: 'Keep your name and contact info accurate for chat and HR.', visibleTo: VOBI_ALL_STAFF },
+    ],
+  },
 };
 
 function routePatternMatches(pattern: string, route: string): boolean {

@@ -131,9 +131,9 @@ function normalizeTicket(t: Record<string, unknown>): TicketRow {
 function statusClass(status: string) {
   switch (status?.toUpperCase()) {
     case 'OPEN':
-      return 'bg-blue-100 text-blue-800';
+      return 'bg-blue-100 text-[var(--primary-hover)]';
     case 'IN_PROGRESS':
-      return 'bg-purple-100 text-purple-800';
+      return 'bg-[var(--accent-green-light)] text-[var(--primary-hover)]';
     case 'RESOLVED':
       return 'bg-green-100 text-green-800';
     case 'CLOSED':
@@ -151,7 +151,7 @@ function priorityClass(priority: string) {
       return 'text-red-700 font-semibold';
     case 'HIGH':
     case 'URGENT':
-      return 'text-orange-700 font-medium';
+      return 'text-[var(--primary)] font-medium';
     case 'MEDIUM':
       return 'text-amber-700';
     default:
@@ -303,18 +303,18 @@ export default function TicketReport() {
   };
 
   return (
-    <div className="min-h-full bg-gradient-to-br from-slate-50 via-white to-indigo-50/40 p-4 sm:p-6">
+    <div className="min-h-full bg-gradient-to-br from-slate-50 via-white to-[#f5ebe0]/40/40 p-4 sm:p-6">
       <div className="mx-auto max-w-[1440px]">
         <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
           <div>
             <Link
               to="/staff/reports"
-              className="mb-2 inline-flex items-center gap-1 text-sm font-medium text-indigo-600 hover:text-indigo-800"
+              className="mb-2 inline-flex items-center gap-1 text-sm font-medium text-[var(--primary)] hover:text-[var(--primary-hover)]"
             >
               <ArrowLeft className="h-4 w-4" />
               Report System
             </Link>
-            <p className="text-xs font-semibold uppercase tracking-widest text-indigo-600">
+            <p className="text-xs font-semibold uppercase tracking-widest text-[var(--primary)]">
               Report System · Support
             </p>
             <h1 className="text-3xl font-bold text-slate-900">Ticket Report</h1>
@@ -380,7 +380,7 @@ export default function TicketReport() {
           <button
             type="button"
             onClick={() => void load()}
-            className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700"
+            className="rounded-lg bg-[var(--primary)] px-4 py-2 text-sm font-medium text-white hover:bg-[var(--primary-hover)]"
           >
             Apply dates
           </button>
@@ -388,7 +388,7 @@ export default function TicketReport() {
 
         {displaySummary && (
           <div className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            <StatCard label="Total tickets" value={displaySummary.total} icon={Ticket} tone="indigo" accentIndex={0} />
+            <StatCard label="Total tickets" value={displaySummary.total} icon={Ticket} tone="amber" accentIndex={0} />
             <StatCard label="Pending" value={displaySummary.pending} icon={Clock} tone="amber" accentIndex={1} />
             <StatCard
               label="Completed"
@@ -532,7 +532,7 @@ export default function TicketReport() {
                 onClick={() => setBucket(b)}
                 className={`rounded-lg px-4 py-2 text-sm font-medium capitalize transition ${
                   bucket === b
-                    ? 'bg-indigo-600 text-white shadow'
+                    ? 'bg-[var(--primary)] text-white shadow'
                     : 'text-slate-600 hover:bg-slate-50'
                 }`}
               >
@@ -552,7 +552,7 @@ export default function TicketReport() {
               placeholder="Search ticket, customer, assignee, worker…"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="w-full rounded-xl border border-slate-200 bg-white py-2 pl-10 pr-3 text-sm shadow-sm focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-100"
+              className="w-full rounded-xl border border-slate-200 bg-white py-2 pl-10 pr-3 text-sm shadow-sm focus:border-[var(--primary)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-green-light)]"
             />
           </div>
           <p className="text-sm text-slate-500">
@@ -652,7 +652,7 @@ export default function TicketReport() {
                           </td>
                           <td className="px-3 py-3">
                             <span className="inline-flex items-center gap-1 text-slate-700">
-                              <Users className="h-3.5 w-3.5 text-indigo-500" />
+                              <Users className="h-3.5 w-3.5 text-[var(--primary)]" />
                               {workerNames || '—'}
                               {extraWorkers}
                             </span>
@@ -681,7 +681,7 @@ export default function TicketReport() {
                                 returnTo: '/staff/reports/tickets',
                                 returnLabel: 'Back to Ticket Report',
                               }}
-                              className="text-xs font-medium text-indigo-600 hover:text-indigo-800"
+                              className="text-xs font-medium text-[var(--primary)] hover:text-[var(--primary-hover)]"
                             >
                               Details
                             </Link>
@@ -824,7 +824,7 @@ function StatCard({
   label: string;
   value: number | string;
   icon: React.ComponentType<{ className?: string }>;
-  tone: 'indigo' | 'amber' | 'green' | 'slate';
+  tone: 'amber' | 'green' | 'slate' | 'brown';
   isText?: boolean;
   accentIndex?: number;
 }) {

@@ -11,17 +11,28 @@ import {
   AlertCircle,
   Loader2,
   Clock,
+  Shield,
 } from 'lucide-react';
 import { getWorkflowConfig, updateWorkflowConfig, type WorkflowConfig, type TicketEscalationStage } from '../api';
 import { useAuth } from '../context/AuthContext';
 import { useVobiSection } from '@/hooks/useVobiSection';
+import { useToast } from '@/hooks/use-toast';
+import {
+  DEFAULT_TICKET_SLA,
+  SLA_PRIORITY_META,
+  type TicketSlaConfig,
+  type TicketSlaPriorityKey,
+  type SlaUnit,
+} from '@/lib/ticketSla';
 
 export default function ConfigurationPage() {
   const { user, isAdminSuper } = useAuth();
   const navigate = useNavigate();
+  const { toast } = useToast();
   const [config, setConfig] = useState<WorkflowConfig | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [savingSla, setSavingSla] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
@@ -44,10 +55,16 @@ export default function ConfigurationPage() {
     priority: 28,
   });
   useVobiSection({
+    id: 'ticket-sla-config',
+    title: 'SLA Configuration',
+    help: 'Set default first-response and resolution times by ticket priority. Applied when staff or customers pick a priority.',
+    priority: 27,
+  });
+  useVobiSection({
     id: 'save-configuration',
     title: 'Save Configuration',
     help: 'Changes do not apply until Save configuration is clicked.',
-    priority: 27,
+    priority: 26,
   });
 
   useEffect(() => {
@@ -76,6 +93,7 @@ export default function ConfigurationPage() {
             { key: 'director', label: 'CTO / Directors', minutes: 0, target_roles: ['director', 'cto'] },
           ],
         },
+        ticket_sla: (data.ticket_sla as TicketSlaConfig) || DEFAULT_TICKET_SLA,
       });
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load configuration');
@@ -91,7 +109,8 @@ export default function ConfigurationPage() {
       setError(null);
       setSuccess(null);
       await updateWorkflowConfig(config);
-      setSuccess('Configuration saved. Ticket escalation SLAs and approval workflows now use these settings.');
+      setSuccess('Configuration saved. Ticket escalation, SLA, and approval workflows now use these settings.');
+      toast({ title: 'Configuration saved', description: 'Workflow and SLA settings are live.' });
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to save configuration');
     } finally {
@@ -149,6 +168,64 @@ export default function ConfigurationPage() {
     if (!thresholds[index]) return;
     thresholds[index] = { ...thresholds[index], [field]: value };
     updateFinanceThresholds(thresholds);
+  };
+
+  const slaConfig: TicketSlaConfig = (config?.ticket_sla as TicketSlaConfig) || DEFAULT_TICKET_SLA;
+
+  const updateSlaPriority = (
+    key: TicketSlaPriorityKey,
+    field: keyof TicketSlaConfig['priorities']['critical'],
+    value: number | SlaUnit
+  ) => {
+    setConfig((prev) => {
+      if (!prev) return prev;
+      const current = (prev.ticket_sla as TicketSlaConfig) || DEFAULT_TICKET_SLA;
+      const rule = { ...current.priorities[key] };
+      if (field === 'first_response_value' || field === 'resolution_value') {
+        rule[field] = Math.max(1, Number(value) || 1);
+      } else {
+        rule[field] = value as SlaUnit;
+      }
+      return {
+        ...prev,
+        ticket_sla: {
+          ...current,
+          priorities: { ...current.priorities, [key]: rule },
+        },
+      };
+    });
+  };
+
+  const handleSaveSla = async () => {
+    if (!config) return;
+    try {
+      setSavingSla(true);
+      setError(null);
+      const saved = await updateWorkflowConfig(config);
+      setConfig((prev) =>
+        prev
+          ? {
+              ...prev,
+              ...saved,
+              ticket_sla: (saved.ticket_sla as TicketSlaConfig) || prev.ticket_sla || DEFAULT_TICKET_SLA,
+            }
+          : prev
+      );
+      toast({
+        title: 'SLA settings saved',
+        description: 'New tickets will use these response and resolution times by priority.',
+      });
+      setSuccess('SLA settings saved.');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to save SLA settings');
+      toast({
+        title: 'Save failed',
+        description: e instanceof Error ? e.message : 'Could not save SLA settings',
+        variant: 'destructive',
+      });
+    } finally {
+      setSavingSla(false);
+    }
   };
 
   if (loading || !config) {
@@ -435,6 +512,129 @@ export default function ConfigurationPage() {
               </div>
             </div>
           ))}
+        </div>
+      </section>
+
+      <section className="mt-6 bg-white rounded-xl border border-gray-200 shadow-[var(--shadow-md)] overflow-hidden">
+        <div className="px-6 py-4 bg-slate-900 border-b border-slate-800 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <Shield className="h-5 w-5 text-emerald-400" />
+            <div>
+              <h2 className="text-lg font-semibold text-white">SLA Configuration</h2>
+              <p className="text-xs text-slate-300">
+                Default first-response and resolution times by priority — applied when a ticket is created.
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={handleSaveSla}
+            disabled={savingSla}
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-emerald-500 text-white text-sm font-medium hover:bg-emerald-400 disabled:opacity-50"
+          >
+            {savingSla ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+            {savingSla ? 'Saving…' : 'Save SLA Settings'}
+          </button>
+        </div>
+        <div className="p-6 space-y-5">
+          <label className="flex items-start gap-3 p-4 rounded-xl border border-slate-200 bg-slate-50">
+            <input
+              type="checkbox"
+              checked={slaConfig.enabled !== false}
+              onChange={(e) =>
+                setConfig((prev) =>
+                  prev
+                    ? {
+                        ...prev,
+                        ticket_sla: {
+                          ...((prev.ticket_sla as TicketSlaConfig) || DEFAULT_TICKET_SLA),
+                          enabled: e.target.checked,
+                        },
+                      }
+                    : null
+                )
+              }
+              className="mt-1 rounded border-gray-300 text-emerald-600"
+            />
+            <span>
+              <span className="block text-sm font-semibold text-slate-900">Enable SLA Monitoring</span>
+              <span className="block text-xs text-slate-600 mt-0.5">
+                When on, tickets are tracked against these deadlines across the ERP. Deadlines are still
+                stored on create when off, but monitoring is inactive.
+              </span>
+            </span>
+          </label>
+
+          <div className="overflow-x-auto rounded-xl border border-slate-200">
+            <table className="w-full min-w-[720px] text-sm">
+              <thead className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
+                <tr>
+                  <th className="px-4 py-3 font-semibold">Priority</th>
+                  <th className="px-4 py-3 font-semibold">Default First Response</th>
+                  <th className="px-4 py-3 font-semibold">Default Resolution</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {(Object.keys(SLA_PRIORITY_META) as TicketSlaPriorityKey[]).map((key) => {
+                  const meta = SLA_PRIORITY_META[key];
+                  const rule = slaConfig.priorities[key];
+                  return (
+                    <tr key={key} className="bg-white">
+                      <td className="px-4 py-4 align-middle">
+                        <span className={`inline-flex rounded-full px-3 py-1 text-xs font-bold ${meta.badgeClass}`}>
+                          {meta.label}
+                        </span>
+                      </td>
+                      <td className="px-4 py-4">
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="number"
+                            min={1}
+                            value={rule.first_response_value}
+                            onChange={(e) =>
+                              updateSlaPriority(key, 'first_response_value', parseInt(e.target.value, 10) || 1)
+                            }
+                            className="w-20 rounded-lg border border-slate-300 px-2.5 py-2 text-sm focus:ring-2 focus:ring-emerald-500"
+                          />
+                          <select
+                            value={rule.first_response_unit}
+                            onChange={(e) => updateSlaPriority(key, 'first_response_unit', e.target.value as SlaUnit)}
+                            className="rounded-lg border border-slate-300 px-2.5 py-2 text-sm bg-white"
+                          >
+                            <option value="minutes">Minutes</option>
+                            <option value="hours">Hours</option>
+                            <option value="days">Days</option>
+                          </select>
+                        </div>
+                      </td>
+                      <td className="px-4 py-4">
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="number"
+                            min={1}
+                            value={rule.resolution_value}
+                            onChange={(e) =>
+                              updateSlaPriority(key, 'resolution_value', parseInt(e.target.value, 10) || 1)
+                            }
+                            className="w-20 rounded-lg border border-slate-300 px-2.5 py-2 text-sm focus:ring-2 focus:ring-emerald-500"
+                          />
+                          <select
+                            value={rule.resolution_unit}
+                            onChange={(e) => updateSlaPriority(key, 'resolution_unit', e.target.value as SlaUnit)}
+                            className="rounded-lg border border-slate-300 px-2.5 py-2 text-sm bg-white"
+                          >
+                            <option value="minutes">Minutes</option>
+                            <option value="hours">Hours</option>
+                            <option value="days">Days</option>
+                          </select>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         </div>
       </section>
     </div>

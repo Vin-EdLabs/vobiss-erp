@@ -1,6 +1,6 @@
 // src/pages/customer/CreateTicket.tsx
 import React, { useState, useEffect, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   ArrowLeft,
   FileText,
@@ -9,18 +9,22 @@ import {
   X,
   CheckCircle,
   Upload,
+  MapPin,
+  Wifi,
 } from 'lucide-react';
 import CustomerSidebar from '../../components/customer/CustomerSidebar';
 import MobileBottomNav from '../../components/customer/MobileBottomNav';
 import CustomerHeader from '../../components/customer/CustomerHeader';
-import { createCustomerTicket } from '../../api';
+import { createCustomerTicket, getCustomerSites, getWorkflowConfig, type CustomerSite } from '../../api';
 import { API_URL } from '@/lib/api';
+import { DEFAULT_TICKET_SLA, describeSlaForPriority, type TicketSlaConfig } from '@/lib/ticketSla';
 
 interface CustomerProfile {
   id: number;
   name: string;
   customer_code: string;
-  project: { id: number; name: string; code: string };
+  project?: { id: number; name: string; code: string };
+  sites?: CustomerSite[];
   created_at: string;
 }
 
@@ -31,17 +35,21 @@ const CustomerCreateTicket = () => {
   const [formData, setFormData] = useState({
     title: '',
     category: 'general',
-    priority: 'normal',
+    priority: 'medium',
     description: '',
   });
+  const [ticketSla, setTicketSla] = useState<TicketSlaConfig>(DEFAULT_TICKET_SLA);
   const [attachments, setAttachments] = useState<File[]>([]);
   const [previews, setPreviews] = useState<string[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitStatus, setSubmitStatus] = useState<'idle' | 'success' | 'error'>('idle');
   const [submitError, setSubmitError] = useState('');
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
+  const [sites, setSites] = useState<CustomerSite[]>([]);
+  const [selectedSiteId, setSelectedSiteId] = useState<number | null>(null);
   const [createdTicketId, setCreatedTicketId] = useState<string | null>(null);
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -54,7 +62,18 @@ const CustomerCreateTicket = () => {
         });
         if (!res.ok) throw new Error('Profile load failed');
         const data = await res.json();
-        setProfile(data.customer || data);
+        const profileData = data.customer || data;
+        setProfile(profileData);
+        const loadedSites = Array.isArray(profileData.sites)
+          ? profileData.sites
+          : Array.isArray(data.sites)
+            ? data.sites
+            : await getCustomerSites();
+        setSites(loadedSites);
+        const requestedSiteId = Number(searchParams.get('site_id'));
+        if (requestedSiteId && loadedSites.some((site: CustomerSite) => site.id === requestedSiteId)) {
+          setSelectedSiteId(requestedSiteId);
+        }
       } catch (err: any) {
         setProfileError(err.message || 'Unable to load account.');
       } finally {
@@ -62,7 +81,12 @@ const CustomerCreateTicket = () => {
       }
     };
     loadProfile();
-  }, [navigate]);
+    getWorkflowConfig()
+      .then((cfg) => {
+        if (cfg?.ticket_sla) setTicketSla(cfg.ticket_sla as TicketSlaConfig);
+      })
+      .catch(() => {});
+  }, [navigate, searchParams]);
 
   const categories = [
     { value: 'general', label: 'General Inquiry' },
@@ -74,21 +98,21 @@ const CustomerCreateTicket = () => {
 
   const priorities = [
     { value: 'low', label: 'Low', color: 'bg-gray-100 text-gray-700 border-gray-300' },
-    { value: 'normal', label: 'Normal', color: 'bg-blue-100 text-blue-700 border-blue-300' },
+    { value: 'medium', label: 'Medium', color: 'bg-blue-100 text-blue-700 border-blue-300' },
     { value: 'high', label: 'High', color: 'bg-amber-100 text-amber-700 border-amber-300' },
-    { value: 'urgent', label: 'Urgent', color: 'bg-red-100 text-red-700 border-red-300' },
+    { value: 'critical', label: 'Critical', color: 'bg-red-100 text-red-700 border-red-300' },
   ];
 
-  if (loadingProfile) return <div className="min-h-screen bg-gray-50 flex items-center justify-center text-gray-600">Loading...</div>;
+  if (loadingProfile) return <div className="flex min-h-screen items-center justify-center bg-[var(--content-bg)] text-[var(--text-muted)]">Loading…</div>;
 
   if (profileError || !profile) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
-        <div className="bg-white rounded-2xl shadow-xl p-8 text-center max-w-sm">
-          <AlertCircle className="w-16 h-16 text-red-500 mx-auto mb-4" />
-          <h2 className="text-2xl font-bold mb-2">Access Denied</h2>
-          <p className="text-gray-600 mb-6">{profileError || 'Please log in'}</p>
-          <button onClick={() => navigate('/customer/login')} className="bg-blue-600 text-white px-8 py-3 rounded-xl font-medium hover:bg-blue-700">
+      <div className="flex min-h-screen items-center justify-center bg-[var(--content-bg)] p-4">
+        <div className="max-w-sm rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-8 text-center shadow-[var(--shadow-md)]">
+          <AlertCircle className="mx-auto mb-4 h-16 w-16 text-red-500" />
+          <h2 className="mb-2 text-2xl font-bold text-[var(--text-primary)]">Access Denied</h2>
+          <p className="mb-6 text-[var(--text-muted)]">{profileError || 'Please log in'}</p>
+          <button type="button" onClick={() => navigate('/customer/login')} className="rounded-xl bg-[var(--primary)] px-8 py-3 font-medium text-white hover:bg-[var(--primary-hover)]">
             Login
           </button>
         </div>
@@ -149,6 +173,7 @@ const CustomerCreateTicket = () => {
     const errors: Record<string, string> = {};
     if (!formData.title.trim()) errors.title = 'Subject is required';
     if (!formData.description.trim()) errors.description = 'Description is required';
+    if (sites.length > 0 && !selectedSiteId) errors.site_id = 'Please select the affected site';
     setFormErrors(errors);
     return Object.keys(errors).length === 0;
   };
@@ -165,13 +190,14 @@ const CustomerCreateTicket = () => {
     payload.append('category', formData.category);
     payload.append('priority', formData.priority);
     payload.append('description', formData.description.trim());
+    if (selectedSiteId) payload.append('site_id', String(selectedSiteId));
 
     attachments.forEach(file => {
       payload.append('attachments', file);
     });
 
     try {
-      const response = await createCustomerTicket(payload);
+      const response = await createCustomerTicket(payload, selectedSiteId);
       const { ticket_id } = response;
 
       setCreatedTicketId(ticket_id);
@@ -181,7 +207,7 @@ const CustomerCreateTicket = () => {
       setFormData({
         title: '',
         category: 'general',
-        priority: 'normal',
+        priority: 'medium',
         description: '',
       });
       setAttachments([]);
@@ -207,34 +233,35 @@ const CustomerCreateTicket = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 flex">
+    <div className="flex min-h-screen bg-[var(--content-bg)]">
       <CustomerSidebar />
-      <div className="flex-1 md:ml-64 relative pb-32 md:pb-20">
+      <div className="relative flex-1 pb-32 md:ml-64 md:pb-20">
         <CustomerHeader name={customerName} customer_code={customerCode} heightClass="py-4" />
 
         {/* Success Toast */}
         {submitStatus === 'success' && createdTicketId && (
-          <div className="fixed top-20 left-0 right-0 z-40 flex justify-center px-4 pointer-events-none">
-            <div className="pointer-events-auto max-w-md w-full">
-              <div className="bg-white border border-gray-200 text-gray-800 rounded-xl shadow-2xl px-6 py-4 flex items-center justify-between">
+          <div className="pointer-events-none fixed left-0 right-0 top-20 z-40 flex justify-center px-4">
+            <div className="pointer-events-auto w-full max-w-md">
+              <div className="flex items-center justify-between rounded-xl border border-[var(--border)] bg-[var(--surface)] px-6 py-4 text-[var(--text-primary)] shadow-2xl">
                 <div className="flex items-center gap-4">
-                  <CheckCircle className="w-8 h-8 text-blue-600 flex-shrink-0" />
+                  <CheckCircle className="h-8 w-8 shrink-0 text-[var(--primary)]" />
                   <div>
-                    <p className="font-semibold">Ticket Created Successfully!</p>
-                    <p className="text-sm text-gray-600 mt-1">
+                    <p className="font-semibold">Ticket created</p>
+                    <p className="mt-1 text-sm text-[var(--text-muted)]">
                       Ticket ID: <span className="font-mono font-bold">{createdTicketId}</span>
                     </p>
                   </div>
                 </div>
                 <div className="flex items-center gap-3">
                   <button
+                    type="button"
                     onClick={() => navigate(`/customer/tickets/${createdTicketId}`)}
-                    className="px-4 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition text-sm"
+                    className="rounded-lg bg-[var(--primary)] px-4 py-2 text-sm font-medium text-white hover:bg-[var(--primary-hover)]"
                   >
                     View Ticket
                   </button>
-                  <button onClick={resetSuccess} className="text-gray-400 hover:text-gray-600">
-                    <X className="w-5 h-5" />
+                  <button type="button" onClick={resetSuccess} className="text-[var(--text-muted)] hover:text-[var(--text-primary)]">
+                    <X className="h-5 w-5" />
                   </button>
                 </div>
               </div>
@@ -242,42 +269,79 @@ const CustomerCreateTicket = () => {
           </div>
         )}
 
-        <div className="pt-20 px-4 md:px-8 max-w-4xl mx-auto">
-          <button onClick={() => navigate(-1)} className="flex items-center text-gray-600 hover:text-blue-600 text-sm font-medium mb-5">
-            <ArrowLeft className="w-4 h-4 mr-1" /> Back
+        <div className="mx-auto max-w-4xl px-4 pt-20 md:px-8">
+          <button type="button" onClick={() => navigate(-1)} className="mb-5 flex items-center text-sm font-medium text-[var(--text-muted)] hover:text-[var(--primary)]">
+            <ArrowLeft className="mr-1 h-4 w-4" /> Back
           </button>
 
-          <div className="bg-white rounded-2xl shadow-lg overflow-hidden">
-            <div className="bg-gradient-to-r from-blue-600 via-gray-400 to-white px-6 py-4">
+          <div className="overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow-md)]">
+            <div className="bg-[var(--primary)] px-6 py-4">
               <div className="flex items-center gap-3">
-                <div className="p-2 bg-white/30 rounded-lg">
-                  <FileText className="w-5 h-5 text-white" />
+                <div className="rounded-lg bg-white/15 p-2">
+                  <FileText className="h-5 w-5 text-white" />
                 </div>
                 <div>
-                  <h1 className="text-lg font-bold text-white drop-shadow-md">New Ticket</h1>
-                  <p className="text-white/80 text-xs">{project.name} • {project.code}</p>
+                  <h1 className="text-lg font-bold text-white">New Ticket</h1>
+                  <p className="text-xs text-white/80">{project ? `${project.name} • ${project.code}` : 'Client support request'}</p>
                 </div>
               </div>
             </div>
 
             <div className="p-6">
               {submitStatus === 'error' && (
-                <div className="mb-5 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700 flex gap-2">
-                  <AlertCircle className="w-4 h-4 mt-0.5" />
+                <div className="mb-5 flex gap-2 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">
+                  <AlertCircle className="mt-0.5 h-4 w-4" />
                   {submitError}
                 </div>
               )}
 
               <form onSubmit={submit} className="space-y-6">
+                {sites.length > 0 && (
+                  <fieldset>
+                    <legend className="mb-3 text-sm font-semibold text-[var(--text-primary)]">Which site is having the issue? *</legend>
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      {sites.map((site) => {
+                        const selected = selectedSiteId === site.id;
+                        return (
+                          <button
+                            key={site.id}
+                            type="button"
+                            onClick={() => {
+                              setSelectedSiteId(site.id);
+                              setFormErrors((current) => ({ ...current, site_id: '' }));
+                            }}
+                            className={`rounded-xl border-2 p-4 text-left transition ${
+                              selected
+                                ? 'border-[var(--primary)] bg-[var(--accent-green-light)] shadow-sm'
+                                : 'border-[var(--border)] bg-[var(--surface)] hover:border-[var(--primary)]/50'
+                            }`}
+                          >
+                            <div className="flex items-start justify-between gap-3">
+                              <span className="font-semibold text-[var(--text-primary)]">{site.site_name}</span>
+                              {selected && <CheckCircle className="h-5 w-5 shrink-0 text-[var(--primary)]" />}
+                            </div>
+                            <p className="mt-1 font-mono text-xs text-[var(--primary)]">{site.site_code}</p>
+                            <div className="mt-3 flex flex-wrap gap-3 text-xs text-[var(--text-muted)]">
+                              {site.region && <span className="flex items-center gap-1"><MapPin className="h-3.5 w-3.5" />{site.region}</span>}
+                              <span className="flex items-center gap-1"><Wifi className="h-3.5 w-3.5" />{site.connection_status || 'Pending'}</span>
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                    {formErrors.site_id && <p className="mt-2 text-xs text-red-600">{formErrors.site_id}</p>}
+                  </fieldset>
+                )}
+
                 <div>
-                  <label className="block text-sm font-semibold text-gray-800 mb-1.5">Subject *</label>
+                  <label className="mb-1.5 block text-sm font-semibold text-[var(--text-primary)]">Subject *</label>
                   <input
                     name="title"
                     value={formData.title}
                     onChange={handleChange}
                     placeholder="Brief summary of your issue..."
-                    className={`w-full px-4 py-2.5 border rounded-lg focus:ring-2 focus:ring-blue-300 focus:border-blue-500 ${
-                      formErrors.title ? 'border-red-400' : 'border-gray-300'
+                    className={`w-full rounded-lg border bg-[var(--surface)] px-4 py-2.5 text-[var(--text-primary)] focus:border-[var(--primary)] focus:outline-none focus:ring-2 focus:ring-[var(--primary)]/30 ${
+                      formErrors.title ? 'border-red-400' : 'border-[var(--border)]'
                     }`}
                   />
                   {formErrors.title && <p className="text-xs text-red-600 mt-1">{formErrors.title}</p>}
@@ -285,12 +349,12 @@ const CustomerCreateTicket = () => {
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-sm font-semibold text-gray-800 mb-1.5">Category</label>
+                    <label className="mb-1.5 block text-sm font-semibold text-[var(--text-primary)]">Category</label>
                     <select
                       name="category"
                       value={formData.category}
                       onChange={handleChange}
-                      className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-300 focus:border-blue-500"
+                      className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-4 py-2.5 text-[var(--text-primary)] focus:border-[var(--primary)] focus:outline-none focus:ring-2 focus:ring-[var(--primary)]/30"
                     >
                       {categories.map(c => (
                         <option key={c.value} value={c.value}>{c.label}</option>
@@ -299,62 +363,67 @@ const CustomerCreateTicket = () => {
                   </div>
 
                   <div>
-                    <label className="block text-sm font-semibold text-gray-800 mb-1.5">Priority</label>
+                    <label className="mb-1.5 block text-sm font-semibold text-[var(--text-primary)]">Priority</label>
                     <div className="grid grid-cols-4 gap-2">
                       {priorities.map(p => (
                         <button
                           key={p.value}
                           type="button"
                           onClick={() => handlePriorityClick(p.value)}
-                          className={`py-2 px-3 rounded-lg text-xs font-medium border transition-all ${
+                          className={`rounded-lg border px-3 py-2 text-xs font-medium transition-all ${
                             formData.priority === p.value
-                              ? `${p.color} shadow-sm ring-2 ring-offset-1 ring-blue-400`
-                              : 'bg-white text-gray-600 border-gray-200 hover:border-gray-400'
+                              ? `${p.color} shadow-sm ring-2 ring-[var(--primary)]/40 ring-offset-1 ring-offset-[var(--surface)]`
+                              : 'border-[var(--border)] bg-[var(--surface)] text-[var(--text-secondary)] hover:border-[var(--primary)]/40'
                           }`}
                         >
                           {p.label}
                         </button>
                       ))}
                     </div>
+                    {describeSlaForPriority(ticketSla, formData.priority) && (
+                      <p className="mt-2 text-xs text-[var(--text-muted)]">
+                        SLA: {describeSlaForPriority(ticketSla, formData.priority)}
+                      </p>
+                    )}
                   </div>
                 </div>
 
                 <div>
-                  <label className="block text-sm font-semibold text-gray-800 mb-1.5">Description *</label>
+                  <label className="mb-1.5 block text-sm font-semibold text-[var(--text-primary)]">Description *</label>
                   <textarea
                     name="description"
                     value={formData.description}
                     onChange={handleChange}
                     rows={5}
                     placeholder="Please describe your issue in detail..."
-                    className={`w-full px-4 py-3 border rounded-lg resize-none focus:ring-2 focus:ring-blue-300 focus:border-blue-500 ${
-                      formErrors.description ? 'border-red-400' : 'border-gray-300'
+                    className={`w-full resize-none rounded-lg border bg-[var(--surface)] px-4 py-3 text-[var(--text-primary)] focus:border-[var(--primary)] focus:outline-none focus:ring-2 focus:ring-[var(--primary)]/30 ${
+                      formErrors.description ? 'border-red-400' : 'border-[var(--border)]'
                     }`}
                   />
                   <div className="flex justify-between mt-1">
                     {formErrors.description && <p className="text-xs text-red-600">{formErrors.description}</p>}
-                    <span className="text-xs text-gray-500 ml-auto">{formData.description.length}/2000</span>
+                    <span className="ml-auto text-xs text-[var(--text-muted)]">{formData.description.length}/2000</span>
                   </div>
                 </div>
 
                 <div>
-                  <label className="block text-sm font-semibold text-gray-800 mb-1.5">
+                  <label className="mb-1.5 block text-sm font-semibold text-[var(--text-primary)]">
                     Attachments (optional – images only)
                   </label>
 
                   {previews.length > 0 && (
-                    <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-3 mb-4">
+                    <div className="mb-4 grid grid-cols-3 gap-3 sm:grid-cols-4 md:grid-cols-5">
                       {previews.map((src, index) => (
-                        <div key={index} className="relative group rounded-lg overflow-hidden border border-gray-200 shadow-sm">
+                        <div key={index} className="group relative overflow-hidden rounded-lg border border-[var(--border)] shadow-sm">
                           <img
                             src={src}
                             alt={`attachment preview ${index + 1}`}
-                            className="w-full h-24 object-cover"
+                            className="h-24 w-full object-cover"
                           />
                           <button
                             type="button"
                             onClick={() => removeAttachment(index)}
-                            className="absolute top-1 right-1 bg-red-600 text-white rounded-full p-1.5 opacity-0 group-hover:opacity-100 transition shadow-md"
+                            className="absolute right-1 top-1 rounded-full bg-red-600 p-1.5 text-white opacity-0 shadow-md transition group-hover:opacity-100"
                           >
                             <X size={16} />
                           </button>
@@ -363,10 +432,10 @@ const CustomerCreateTicket = () => {
                     </div>
                   )}
 
-                  <label className="block w-full h-40 border-2 border-dashed border-gray-300 rounded-xl cursor-pointer hover:border-blue-500 hover:bg-blue-50 transition flex flex-col items-center justify-center text-center bg-gray-50">
-                    <Upload className="w-10 h-10 text-gray-400 mb-3" />
-                    <span className="text-base font-medium text-gray-700">Click to upload or take photo</span>
-                    <span className="text-sm text-gray-500 mt-2">
+                  <label className="flex h-40 w-full cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed border-[var(--border)] bg-[var(--surface-secondary)] text-center transition hover:border-[var(--primary)] hover:bg-[var(--accent-green-light)]">
+                    <Upload className="mb-3 h-10 w-10 text-[var(--text-muted)]" />
+                    <span className="text-base font-medium text-[var(--text-primary)]">Click to upload or take photo</span>
+                    <span className="mt-2 text-sm text-[var(--text-muted)]">
                       Supports JPG, PNG, GIF, etc. • Max 5MB per image
                     </span>
                     <input
@@ -385,7 +454,7 @@ const CustomerCreateTicket = () => {
                   <button
                     type="submit"
                     disabled={isSubmitting}
-                    className="inline-flex items-center gap-2 px-8 py-3 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-xl transition shadow-md disabled:opacity-60 disabled:cursor-not-allowed"
+                    className="inline-flex items-center gap-2 px-8 py-3 bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white font-medium rounded-xl transition shadow-md disabled:opacity-60 disabled:cursor-not-allowed"
                   >
                     {isSubmitting ? (
                       <>Creating Ticket...</>
