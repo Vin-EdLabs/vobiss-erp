@@ -1,4 +1,9 @@
 import pool from '../db.js';
+import { searchAllReferenceTypes } from '../services/referenceRegistry.js';
+
+// Types already covered by the hand-tuned queries below (richer subtitles/joins); the
+// registry-driven pass only fills in the request types global search didn't reach yet.
+const ALREADY_COVERED_TYPES = new Set(['ticket', 'material_request', 'cash_request', 'item_return', 'service_request']);
 
 const LIMIT = 10;
 
@@ -29,7 +34,7 @@ export async function globalExecutiveSearch(query) {
 
   try {
     const ticketRes = await pool.query(
-      `SELECT TRIM(t.ticket_id) AS ticket_id, t.title, t.status,
+      `SELECT t.id, TRIM(t.ticket_id) AS ticket_id, t.title, t.status,
               COALESCE(c.customer_name, 'Unknown') AS customer_name
        FROM tickets t
        LEFT JOIN customers c ON c.id = t.customer_id
@@ -54,7 +59,7 @@ export async function globalExecutiveSearch(query) {
       if (!code) continue;
       results.push({
         kind: 'ticket',
-        id: code,
+        id: String(row.id),
         title: row.title || code,
         subtitle: `${code} · ${row.customer_name} · ${row.status}`,
         href: `/staff/cx/tickets/${encodeURIComponent(code)}`,
@@ -175,6 +180,25 @@ export async function globalExecutiveSearch(query) {
     }
   } catch (e) {
     console.error('[global-search] project:', e.message);
+  }
+
+  // Transport / fuel / rental / WIP / incident / sign-off — driven by the shared reference
+  // registry so this list stays in sync with what reference linking already knows about,
+  // instead of hand-rolling another set of per-table queries here.
+  try {
+    const registryResults = await searchAllReferenceTypes(q, 8);
+    for (const summary of registryResults) {
+      if (ALREADY_COVERED_TYPES.has(summary.type)) continue;
+      results.push({
+        kind: summary.type,
+        id: String(summary.id),
+        title: summary.title,
+        subtitle: `${summary.label} ${summary.referenceNumber}${summary.status ? ` · ${summary.status}` : ''}`,
+        href: summary.pagePath,
+      });
+    }
+  } catch (e) {
+    console.error('[global-search] registry types:', e.message);
   }
 
   return results.slice(0, 30);

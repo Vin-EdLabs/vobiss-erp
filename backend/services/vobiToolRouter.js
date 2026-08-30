@@ -28,9 +28,32 @@ function wantsClients(text) {
 }
 
 function wantsDocs(text) {
-  return /\b(how\s+does|how\s+do\s+i|explain|documentation|what\s+is\s+(a\s+)?ticket|payroll|escalation|sla)\b/i.test(
+  return /\b(how\s+does|how\s+do\s+i|documentation|payroll\s+guide|ticket\s+escalation|escalation\s+sla)\b/i.test(
     text
   );
+}
+
+function wantsServerIncident(text) {
+  const t = String(text || '');
+  if (/\b(server\s+(down|downtime|outage|reboot|shutdown|report|incident|update|updates|change|changes|status)|who\s+cleared|cleared\s+(their\s+)?activit|lost\s+memory\s+after|5:?34|12:?34)\b/i.test(t)) {
+    return true;
+  }
+  // "changes/update … server" or "what happened on/to the server today"
+  if (/\b(change|changes|update|updates|happened|report)\b/i.test(t) && /\bserver\b/i.test(t)) {
+    return true;
+  }
+  if (/\bwhat\s+happened\s+(to\s+|on\s+)?(the\s+)?server\b/i.test(t)) return true;
+  return false;
+}
+
+function wantsServerLogins(text) {
+  return /\b(who\s+logged\s+in|server\s+login|login\s+history|ssh\s+session|last\s+-a|who\s+accessed\s+(the\s+)?server|list\s+(all\s+)?(server\s+)?logins?)\b/i.test(
+    text
+  );
+}
+
+function wantsServerOps(text) {
+  return wantsServerIncident(text) || wantsServerLogins(text);
 }
 
 async function softDeletedInventory(limit = 15) {
@@ -152,20 +175,46 @@ export async function gatherVobiToolContext(message, toolCtx) {
     );
   }
 
-  if (wantsDocs(text)) {
+  if (wantsDocs(text) || wantsServerOps(text)) {
     jobs.push(
       (async () => {
-        enrichment.results.docs = await executeVobiTool(
-          'search_system_docs',
-          { query: text.slice(0, 120) },
-          toolCtx
-        );
+        if (wantsServerOps(text)) {
+          const docs = {
+            login_history: await executeVobiTool(
+              'search_system_docs',
+              { doc_id: 'server_login_history' },
+              toolCtx
+            ),
+            incident: await executeVobiTool(
+              'search_system_docs',
+              { doc_id: 'server_incident_report' },
+              toolCtx
+            ),
+          };
+          enrichment.results.docs = docs;
+          enrichment.results.server_answer_priority =
+            'Lead with SERVER INCIDENT + LOGIN HISTORY docs for erp-server. Then add ERP audit_logs as a separate section (app activity, not OS shutdown). Actor for the outage remains unknown.';
+          // Also pull today's ERP audit so answers can include both feeds
+          if (!enrichment.results.audit_logs) {
+            enrichment.results.audit_logs = await executeVobiTool(
+              'get_audit_logs',
+              { hours: 24, limit: 20 },
+              toolCtx
+            );
+          }
+        } else {
+          enrichment.results.docs = await executeVobiTool(
+            'search_system_docs',
+            { query: text.slice(0, 120) },
+            toolCtx
+          );
+        }
       })()
     );
   }
 
   // Generic "who did X" without inventory keyword — still pull recent audit
-  if (/\bwho\b/i.test(text) && !enrichment.results.audit_logs && jobs.length === 0) {
+  if (/\bwho\b/i.test(text) && !enrichment.results.audit_logs && !wantsServerOps(text) && jobs.length === 0) {
     jobs.push(
       (async () => {
         enrichment.results.audit_logs = await executeVobiTool(
@@ -184,8 +233,11 @@ export async function gatherVobiToolContext(message, toolCtx) {
 
 export function formatToolEnrichmentForPrompt(enrichment) {
   if (!enrichment?.results) return '';
+  const priority = enrichment.results.server_answer_priority
+    ? `\nSERVER QUESTION PRIORITY:\n${enrichment.results.server_answer_priority}\n`
+    : '';
   return `
 TOOL LOOKUP RESULTS (authoritative — use these facts; if empty, say nothing matching was found):
-${JSON.stringify(enrichment.results, null, 2)}
+${priority}${JSON.stringify(enrichment.results, null, 2)}
 `.trim();
 }

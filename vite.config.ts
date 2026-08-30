@@ -53,10 +53,10 @@ export default defineConfig(({ mode }) => {
         registerType: "prompt",
         includeAssets: ["favicon.ico", "favicon-16.png", "favicon-32.png", "apple-touch-icon.png", "vobiss-logo.png"],
         devOptions: {
-          enabled: true,
+          enabled: false,
         },
         workbox: {
-          maximumFileSizeToCacheInBytes: 6 * 1024 * 1024,
+          maximumFileSizeToCacheInBytes: 10 * 1024 * 1024,
           globPatterns: ["**/*.{js,css,html,png,svg,ico,woff2}"],
           navigateFallback: "/index.html",
           navigateFallbackDenylist: [/^\/api/, /^\/socket\.io/, /^\/uploads/, /^\/firebase-messaging-sw\.js/, /^\/push-sw\.js/],

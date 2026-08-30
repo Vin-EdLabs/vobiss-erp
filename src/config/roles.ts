@@ -5,6 +5,8 @@ export const ALL_STAFF_ROLES = [
   'admin',
   'requester',
   'approver',
+  'transport_unit',
+  'transport_supervisor',
   'issuer',
   'finance',
   'finance_manager',
@@ -22,7 +24,10 @@ export const ALL_STAFF_ROLES = [
   'ip_supervisor',
   'ts_manager',
   'ts_supervisor',
+  'design_manager',
+  'design_supervisor',
   'project',
+  'sales',
   'field_engineer',
   'field_engineer_admin',
   'relationship_officer',
@@ -268,7 +273,10 @@ export const PRODUCTION_ACCESS_ROLES: string[] = [
   'field_engineer_admin',
   'relationship_officer',
   'project',
+  'sales',
   'cto',
+  'design_manager',
+  'design_supervisor',
 ];
 
 export const FIELD_ACTIVITY_ROLES: string[] = [
@@ -566,6 +574,8 @@ export function getWorkspaceQuickLinks(
     noc: [
       { label: 'NOC Dashboard', path: '/staff/noc/dashboard', description: 'Network operations' },
       { label: 'NOC Tickets', path: '/staff/noc/tickets', description: 'Your ticket queue' },
+      { label: 'Master Tickets', path: '/staff/cx/tickets', description: 'View every support ticket' },
+      { label: 'Incident Notes', path: '/noc/incident-notes', description: 'Daily NOC shift log' },
       profile,
     ],
     noc_manager: [
@@ -573,11 +583,13 @@ export function getWorkspaceQuickLinks(
       { label: 'Ticket Report', path: '/staff/reports/tickets', description: 'All tickets — pending & completed' },
       { label: 'NOC Dashboard', path: '/staff/noc/dashboard', description: 'Team overview' },
       { label: 'NOC Tickets', path: '/staff/noc/tickets', description: 'All NOC tickets' },
+      { label: 'Incident Notes', path: '/noc/incident-notes', description: 'Daily NOC shift log' },
       profile,
     ],
     noc_supervisor: [
       { label: 'NOC Dashboard', path: '/staff/noc/dashboard', description: 'Supervisor overview' },
       { label: 'NOC Tickets', path: '/staff/noc/tickets', description: 'Ticket queue' },
+      { label: 'Incident Notes', path: '/noc/incident-notes', description: 'Daily NOC shift log' },
       profile,
     ],
     relationship_officer: [

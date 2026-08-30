@@ -3,6 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Edit2, QrCode, Calendar, DollarSign, MapPin, User, Package, AlertCircle, Clock, CheckCircle, Save, X, Lock, Loader2 } from 'lucide-react';
 import { assetApi } from '../../api';
+import { ShareButton } from '@/components/ShareButton';
 
 interface Asset {
   id: string;
@@ -159,6 +160,24 @@ export default function AssetDetailPage() {
         <div className="flex items-center gap-4">
         {!isEditing ? (
           <>
+          <ShareButton
+            recordType="asset"
+            recordId={current.id}
+            pagePath={window.location.pathname}
+            pageTitle={current.name}
+            recordPreview={{
+              title: current.name,
+              reference: `#${current.tag}`,
+              status: current.status,
+              category: current.category,
+              location: current.location,
+              assigned_to: current.assigned_to,
+              serial_number: current.serial_number,
+              brand: current.brand,
+              model: current.model,
+              description: current.description,
+            }}
+          />
           <button className="flex items-center gap-2 px-5 py-3 bg-white border border-gray-300 rounded-lg hover:shadow-md transition">
             <QrCode className="h-5 w-5" />
             <span className="font-medium">Generate QR</span>

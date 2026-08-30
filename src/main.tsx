@@ -20,6 +20,12 @@ if (typeof window !== 'undefined') {
   };
   syncPinchBlock();
   mq.addEventListener('change', syncPinchBlock);
+
+  window.addEventListener('load', () => {
+    if (import.meta.env.PROD && 'serviceWorker' in navigator) {
+      void navigator.serviceWorker.register('/service-worker.js').then((registration) => registration.update());
+    }
+  });
 }
 
 createRoot(document.getElementById('root')!).render(

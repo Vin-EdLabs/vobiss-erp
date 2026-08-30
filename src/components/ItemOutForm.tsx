@@ -153,9 +153,8 @@ const ItemOutForm: React.FC<ItemOutFormProps> = ({ onSave, onCancel }) => {
       });
 
       toast({
-        title: "Success",
-        description: "Materials request submitted successfully.",
-        variant: "default",
+        title: 'Request submitted successfully',
+        variant: 'default',
       });
       setFormData({
         teamLeaderPhone: '',

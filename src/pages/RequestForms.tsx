@@ -201,9 +201,8 @@ const RequestForms: React.FC = () => {
 
       setIsFormOpen(false);
       toast({
-        title: "Success",
-        description: `Material request created and sent to ${formData.selectedApproverIds.length} approver(s)`,
-        variant: "default"
+        title: 'Request submitted successfully',
+        variant: 'default'
       });
       loadRequests();
     } catch (error: any) {

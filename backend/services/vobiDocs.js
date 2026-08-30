@@ -18,6 +18,16 @@ const DOC_FILES = [
   { id: 'ticketing', file: path.join('docs', 'TICKETING.md'), title: 'Ticketing module guide' },
   { id: 'payroll', file: path.join('docs', 'PAYROLL.md'), title: 'Payroll / HR guide' },
   { id: 'assets', file: path.join('docs', 'ASSET_MANAGER_TEST.md'), title: 'Assets module notes' },
+  {
+    id: 'server_incident_report',
+    file: path.join('docs', 'SERVER_INCIDENT_REPORT.md'),
+    title: 'Server downtime incident report (26 Aug 2026)',
+  },
+  {
+    id: 'server_login_history',
+    file: path.join('docs', 'SERVER_LOGIN_HISTORY.md'),
+    title: 'ERP server login history (last -a)',
+  },
 ];
 
 function readSafe(relPath, maxChars = 28000) {

@@ -4,6 +4,7 @@ import { ArrowLeft, Copy, KeyRound, MapPin, Pencil, Plus, RotateCcw, Unlink } fr
 import { toast } from 'sonner';
 import { cxApi } from '@/api';
 import { Button } from '@/components/ui/button';
+import { ShareButton } from '@/components/ShareButton';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
@@ -276,18 +277,35 @@ const ClientDetailPage: React.FC = () => {
               </Badge>
             </div>
           </div>
-          <Button
-            className="bg-[var(--primary)] text-white hover:bg-[var(--primary-hover)]"
-            onClick={() => {
-              if (editOpen) closeEdit();
-              else {
-                fillEditFromClient(client);
-                setEditOpen(true);
-              }
-            }}
-          >
-            <Pencil className="mr-2 h-4 w-4" /> {editOpen ? 'Close' : 'Edit Client'}
-          </Button>
+          <div className="flex items-center gap-2">
+            <ShareButton
+              recordType="cx_client"
+              recordId={client.id}
+              pagePath={window.location.pathname}
+              pageTitle={client.company_name || client.customer_name}
+              recordPreview={{
+                title: client.company_name || client.customer_name,
+                reference: client.customer_code,
+                status: client.status || 'Active',
+                contact_person: client.contact_person,
+                email: client.email,
+                phone: client.phone,
+                address: client.address,
+              }}
+            />
+            <Button
+              className="bg-[var(--primary)] text-white hover:bg-[var(--primary-hover)]"
+              onClick={() => {
+                if (editOpen) closeEdit();
+                else {
+                  fillEditFromClient(client);
+                  setEditOpen(true);
+                }
+              }}
+            >
+              <Pencil className="mr-2 h-4 w-4" /> {editOpen ? 'Close' : 'Edit Client'}
+            </Button>
+          </div>
         </div>
 
         {editOpen && (

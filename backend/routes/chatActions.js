@@ -14,6 +14,7 @@ import {
   canBypassApprovalRestrictions,
   canReleaseCash,
 } from '../permissions.js';
+import { logUserAction } from '../services/activityLog.js';
 
 const router = express.Router();
 router.use(authenticateToken);
@@ -129,6 +130,11 @@ router.post('/actions', async (req, res) => {
       if (messageId) {
         await updateSystemMessageMeta(messageId, { actionState: 'approved' }, io);
       }
+      await logUserAction(req.user, {
+        actionType: 'approve',
+        recordType: request.type || recordType,
+        recordId: requestId,
+      });
       return res.json({ ok: true, result: 'approved' });
     }
 
@@ -153,6 +159,11 @@ router.post('/actions', async (req, res) => {
         requestType: request.type,
         io,
         finalState: 'rejected',
+      });
+      await logUserAction(req.user, {
+        actionType: 'reject',
+        recordType: request.type || recordType,
+        recordId: requestId,
       });
       return res.json({ ok: true, result: 'rejected' });
     }

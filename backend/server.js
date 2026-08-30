@@ -22,6 +22,7 @@ import {
   getSupervisors, addSupervisor, updateSupervisor, deleteSupervisor,
   initDB, getSettings, updateSetting,
   getUsers, createUser, getUserByLogin, resetUserPassword, updateUserRole, updateUser, deleteUser,
+  getUserById,
   getApprovers, getWorkflowConfig, updateWorkflowConfig, getRealmApprovers, updateRealmApprovers, backupDatabase, restoreDatabase, wipeDatabase,
   markCashAsReceived,
   getNotificationsForUser, createNotification, markNotificationRead, deleteNotification,
@@ -36,17 +37,24 @@ import fieldRoutes from './routes/field.js';
 import cxRoutes from './routes/cx.routes.js';
 import reportsRoutes from './routes/reports.routes.js';
 import customerRoutes from './routes/customer.routes.js';
-import ticketRoutes from './routes/ticket.routes.js';  // ✅ ADD THIS
+import ticketRoutes from './routes/ticket.routes.js';  // 
 import staffTicketRoutes from './routes/staff_ticket.routes.js';
 import assetRoutes from './routes/assets.routes.js';
 import projectRequestRoutes from './routes/project.routes.js';
+import networkAssetsRoutes from './routes/networkAssets.js';
+import incidentNotesRoutes from './routes/incidentNotes.js';
+import nocShiftsRoutes from './routes/nocShifts.js';
+import timeEngineRoutes from './routes/timeEngine.js';
 import {
   migrateUserRoleConstraint,
   isValidSystemRole,
   normalizeSystemRole,
   invalidRoleMessage,
   userHasAnyRole,
+  isSystemAdminAccount,
 } from './roles.js';
+import { formatPersonName } from './utils/displayName.js';
+import { parseIdList as parseApprovalIds, buildApprovalParties, myApprovalState, loadUserNames } from './utils/approvalSummary.js';
 import {
   canApproveCashRequest,
   canApproveMaterialRequest,
@@ -74,6 +82,10 @@ import vobiRoutes from './routes/vobi.js';
 import vobiVaultRoutes from './routes/vobiVault.routes.js';
 import hrRoutes from './routes/hr.js';
 import hrSelfRoutes from './routes/hrSelf.js';
+import fuelRequestsRoutes from './routes/fuel_requests.js';
+import vehicleRequestsRoutes from './routes/vehicle_requests.js';
+import referenceLinksRoutes from './routes/reference_links.js';
+import referencesRoutes from './routes/references.js';
 import { registerTodoRoutes } from './routes/todos.js';
 import { initHrSchema, seedHrDemo } from './db/hr.js';
 import { initFieldSchema } from './db/field.js';
@@ -85,6 +97,36 @@ import {
 } from './services/chatSystemMessage.js';
 import { ensureRequestThread } from './services/chatRecordThreads.js';
 import { getRealtimeIo } from './realtime/channels.js';
+import { resolveReferenceInput, attachReference, isReferenceRequired } from './services/referenceLink.js';
+import { getRecordSummary } from './services/referenceRegistry.js';
+
+/**
+ * Persists the new multi-reference links (from the reusable ReferenceLinkPicker) once a
+ * parent record has an id. `links` is the raw `linked_references` array from the request
+ * body — `[{ type, id }, ...]`; anything that no longer resolves is silently skipped rather
+ * than failing the whole submission.
+ */
+async function persistLinkedReferences(sourceType, sourceId, links, userId) {
+  if (!Array.isArray(links) || !links.length) return;
+  for (const link of links) {
+    try {
+      const summary = await getRecordSummary(String(link?.type || ''), Number(link?.id));
+      if (!summary) continue;
+      await pool.query(
+        `INSERT INTO linked_references
+           (source_record_type, source_record_id, linked_record_type, linked_record_id, linked_reference_number, linked_title, linked_status, created_by_user_id)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+        [sourceType, sourceId, summary.type, summary.id, summary.referenceNumber, summary.title, summary.status, userId]
+      );
+    } catch (linkError) {
+      console.warn(`[linked_references] failed to persist link for ${sourceType} #${sourceId}:`, linkError.message);
+    }
+  }
+}
+import { logUserAction } from './services/activityLog.js';
+import { recordTimingEvent, checkSlaThresholdsAndNotify } from './services/workflowTimeEngine.js';
+import activityRoutes from './routes/activity.js';
+import sharedLinksRoutes from './routes/sharedLinks.js';
 import { emitToUser, emitToStaff } from './realtime/channels.js';
 import { sendPushToUserIds as fcmSendToUserIds, sendPushBroadcast as fcmBroadcast } from './push/fcm.js';
 import {
@@ -114,6 +156,7 @@ async function sendPushBroadcast(payload) {
   return { sent };
 }
 import { authenticateToken } from './middleware/auth.js';
+import { authenticateOrShareToken } from './middleware/shareAuth.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -251,6 +294,10 @@ app.use('/api/customer/tickets', ticketRoutes);  // ✅ ADD THIS
 app.use('/api/tickets', staffTicketRoutes);
 app.use('/api/assets', assetRoutes);
 app.use('/api/project-request', projectRequestRoutes);
+app.use('/api/network-assets', networkAssetsRoutes);
+app.use('/api/noc/incident-notes', incidentNotesRoutes);
+app.use('/api/noc/shifts', nocShiftsRoutes);
+app.use('/api/time-engine', timeEngineRoutes);
 /** @deprecated use /api/project-request */
 app.use('/api/production', projectRequestRoutes);
 app.use('/api/chat', chatRoutes);
@@ -262,6 +309,13 @@ app.use('/api/vobi', vobiRoutes);
 app.use('/api/vobi-vault', vobiVaultRoutes);
 app.use('/api/hr', hrRoutes);
 app.use('/api/hr-self', hrSelfRoutes);
+app.use('/api/transport/fuel-requests', fuelRequestsRoutes);
+app.use('/api/finance/fuel-requests', fuelRequestsRoutes);
+app.use('/api/transport/vehicle-requests', vehicleRequestsRoutes);
+app.use('/api/transport/references', referenceLinksRoutes);
+app.use('/api/references', referencesRoutes);
+app.use('/api/activity', activityRoutes);
+app.use('/api/shared-links', sharedLinksRoutes);
 registerTodoRoutes(app, authenticateToken);
 // Frontend build — after API routes so POST /api/* is never swallowed by static
 app.use(express.static(path.join(__dirname, '../dist')));
@@ -685,9 +739,12 @@ app.post('/api/login', async (req, res) => {
     const loginPermissions = permissionFlags(permissionUser);
     
     const token = jwt.sign({ 
-      id: user.id, 
-      username: user.username, 
-      role: user.role,  // Keep for backward compatibility
+      id: user.id,
+      username: user.username,
+      role: user.role,
+      first_name: user.first_name,
+      last_name: user.last_name,
+      full_name: formatPersonName(user, user.username),
       main_role: mainRole,  // Main role for sidebar
       roles: roles,  // All roles for permissions
       units: units,   // Units for access control
@@ -713,7 +770,7 @@ app.post('/api/login', async (req, res) => {
         permissions: loginPermissions,
         first_name: user.first_name,
         last_name: user.last_name,
-        full_name: `${user.first_name} ${user.last_name}`.trim(),
+        full_name: formatPersonName(user, user.username),
         avatar_url: user.avatar_url || null,
         ...publicAccountFields(user),
       }
@@ -765,7 +822,7 @@ app.get('/api/me', authenticateToken, async (req, res) => {
       permissions: permissionFlags(permissionUser),
       first_name: dbUser.first_name,
       last_name: dbUser.last_name,
-      full_name: `${dbUser.first_name || ''} ${dbUser.last_name || ''}`.trim(),
+      full_name: formatPersonName(dbUser, dbUser.username),
       avatar_url: dbUser.avatar_url || null,
       ...publicAccountFields(dbUser),
     });
@@ -897,6 +954,720 @@ app.get('/api/realm', authenticateToken, requireSuperAdmin, async (req, res) => 
   } catch (error) {
     console.error('Error fetching realm:', error.stack);
     res.status(500).json({ error: error.message || 'Failed to load Realm' });
+  }
+});
+
+app.post('/api/transport/uploads', authenticateToken, upload.array('files', 10), async (req, res) => {
+  try {
+    if (!req.files || req.files.length === 0) {
+      return res.status(400).json({ error: 'No files uploaded.' });
+    }
+
+    const payload = req.files.map((file) => ({
+      id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+      name: file.originalname,
+      type: file.mimetype || 'application/octet-stream',
+      mimeType: file.mimetype || 'application/octet-stream',
+      url: `/uploads/${file.filename}`,
+      fileSize: file.size,
+      isPdf: file.mimetype === 'application/pdf' || file.originalname.toLowerCase().endsWith('.pdf'),
+    }));
+
+    const recordType = String(req.query.record_type || req.body?.record_type || '').trim();
+    const recordId = Number(req.query.record_id || req.body?.record_id);
+    if (recordType && Number.isInteger(recordId) && recordId > 0) {
+      const looksInvoice = payload.some((file) => /invoice/i.test(file.name));
+      await logUserAction(req.user, {
+        actionType: looksInvoice ? 'upload_invoice' : 'upload',
+        recordType,
+        recordId,
+        fileKind: looksInvoice ? 'invoice' : 'file',
+      });
+    }
+
+    res.status(200).json(payload);
+  } catch (error) {
+    console.error('Error uploading transport files:', error.stack);
+    res.status(500).json({ error: error.message || 'Failed to upload files' });
+  }
+});
+
+app.get('/api/transport/settings', authenticateToken, async (req, res) => {
+  try {
+    const config = await getWorkflowConfig();
+    const transport = config.transport || {
+      approver_ids: [],
+      supervisor_id: null,
+      transport_supervisor_ids: [],
+      vehicle_request_approver_ids: [],
+      finance_user_ids: [],
+      fuel_request_approver_ids: [],
+      price_per_litre: null,
+    };
+    const ids = [...new Set([
+      ...(transport.approver_ids || []),
+      ...(transport.transport_supervisor_ids || []),
+      ...(transport.vehicle_request_approver_ids || []),
+      ...(transport.finance_user_ids || []),
+      ...(transport.fuel_request_approver_ids || []),
+      ...(transport.supervisor_id ? [transport.supervisor_id] : []),
+    ])];
+    let people = [];
+    if (ids.length > 0) {
+      const result = await pool.query(
+        `SELECT id, first_name, last_name, username, role, position, unit
+         FROM users WHERE deleted_at IS NULL AND id = ANY($1::int[])
+         ORDER BY last_name ASC, first_name ASC`,
+        [ids]
+      );
+      people = result.rows.map((row) => ({
+        id: row.id,
+        fullName: `${row.first_name || ''} ${row.last_name || ''}`.trim() || row.username,
+        username: row.username,
+        role: row.role,
+        position: row.position,
+        unit: row.unit,
+      }));
+    }
+    res.json({
+      approver_ids: transport.approver_ids || [],
+      supervisor_id: transport.supervisor_id || null,
+      transport_supervisor_ids: transport.transport_supervisor_ids || [],
+      vehicle_request_approver_ids: transport.vehicle_request_approver_ids || [],
+      finance_user_ids: transport.finance_user_ids || [],
+      fuel_request_approver_ids: transport.fuel_request_approver_ids || [],
+      price_per_litre: transport.price_per_litre ?? null,
+      require_reference_link: Boolean(transport.require_reference_link),
+      people,
+    });
+  } catch (error) {
+    console.error('Error fetching transport settings:', error.stack);
+    res.status(500).json({ error: error.message || 'Failed to load transport settings' });
+  }
+});
+
+app.put('/api/transport/settings', authenticateToken, requireSuperAdmin, async (req, res) => {
+  try {
+    const {
+      approver_ids = [],
+      supervisor_id,
+      transport_supervisor_ids = [],
+      vehicle_request_approver_ids = [],
+      finance_user_ids = [],
+      fuel_request_approver_ids = [],
+      price_per_litre,
+    } = req.body || {};
+    const safeApprovers = Array.isArray(approver_ids) ? [...new Set(approver_ids.map(Number).filter((id) => Number.isInteger(id) && id > 0))] : [];
+    const safeSupervisors = Array.isArray(transport_supervisor_ids)
+      ? [...new Set(transport_supervisor_ids.map(Number).filter((id) => Number.isInteger(id) && id > 0))]
+      : [];
+    const safeVehicleApprovers = Array.isArray(vehicle_request_approver_ids)
+      ? [...new Set(vehicle_request_approver_ids.map(Number).filter((id) => Number.isInteger(id) && id > 0))]
+      : [];
+    const safeFinanceUsers = Array.isArray(finance_user_ids)
+      ? [...new Set(finance_user_ids.map(Number).filter((id) => Number.isInteger(id) && id > 0))]
+      : [];
+    const safeFuelApprovers = Array.isArray(fuel_request_approver_ids)
+      ? [...new Set(fuel_request_approver_ids.map(Number).filter((id) => Number.isInteger(id) && id > 0))]
+      : [];
+    const safeSupervisor = Number(supervisor_id) > 0 ? Number(supervisor_id) : (safeSupervisors[0] ?? null);
+    const resolvedPrice = price_per_litre !== undefined && price_per_litre !== null && price_per_litre !== '' ? Number(price_per_litre) : null;
+    const config = await getWorkflowConfig();
+    const updated = await updateWorkflowConfig({
+      ...config,
+      transport: {
+        ...((config.transport || {}) || {}),
+        approver_ids: safeApprovers,
+        supervisor_id: safeSupervisor,
+        transport_supervisor_ids: safeSupervisors,
+        vehicle_request_approver_ids: safeVehicleApprovers,
+        finance_user_ids: safeFinanceUsers,
+        fuel_request_approver_ids: safeFuelApprovers,
+        price_per_litre: Number.isFinite(resolvedPrice) && resolvedPrice >= 0 ? resolvedPrice : null,
+      },
+    });
+    res.json({
+      approver_ids: updated.transport?.approver_ids || [],
+      supervisor_id: updated.transport?.supervisor_id || null,
+      transport_supervisor_ids: updated.transport?.transport_supervisor_ids || [],
+      vehicle_request_approver_ids: updated.transport?.vehicle_request_approver_ids || [],
+      finance_user_ids: updated.transport?.finance_user_ids || [],
+      fuel_request_approver_ids: updated.transport?.fuel_request_approver_ids || [],
+      price_per_litre: updated.transport?.price_per_litre ?? null,
+    });
+  } catch (error) {
+    console.error('Error updating transport settings:', error.stack);
+    res.status(500).json({ error: error.message || 'Failed to save transport settings' });
+  }
+});
+
+app.get('/api/transport/requests', authenticateToken, async (req, res) => {
+  try {
+    const rows = await pool.query(
+      `SELECT tr.*,
+              u.first_name AS engineer_first_name, u.last_name AS engineer_last_name,
+              ru.first_name AS requester_first_name, ru.last_name AS requester_last_name, ru.username AS requester_username
+       FROM transport_requests tr
+       LEFT JOIN users u ON u.id = tr.engineer_id
+       LEFT JOIN users ru ON ru.id = tr.requester_id
+       WHERE tr.deleted_at IS NULL
+       ORDER BY tr.created_at DESC`
+    );
+    const config = await getWorkflowConfig();
+    const transport = config.transport || { approver_ids: [], supervisor_id: null };
+    const userId = Number(req.user?.id);
+    const isAdmin =
+      isSystemAdminAccount(req.user) ||
+      userHasAnyRole(req.user, ['admin', 'superadmin', 'system_admin']) ||
+      ['admin', 'superadmin', 'system_admin'].includes(String(req.user?.role || '').toLowerCase());
+    const configuredApprovers = parseApprovalIds(transport.approver_ids);
+    const supervisorId = Number(transport.supervisor_id || 0);
+
+    const ids = rows.rows.map((row) => row.id);
+    let approvalRows = [];
+    if (ids.length) {
+      const approvalRes = await pool.query(
+        `SELECT * FROM transport_request_approvals WHERE request_id = ANY($1::int[]) ORDER BY created_at ASC`,
+        [ids]
+      );
+      approvalRows = approvalRes.rows;
+    }
+
+    const allApproverIds = new Set(supervisorId > 0 ? [supervisorId] : []);
+    configuredApprovers.forEach((id) => allApproverIds.add(id));
+    rows.rows.forEach((row) => parseApprovalIds(row.selected_approver_ids).forEach((id) => allApproverIds.add(id)));
+    const names = await loadUserNames(pool, [...allApproverIds]);
+
+    const requests = rows.rows.map((row) => {
+      const selected = parseApprovalIds(row.selected_approver_ids);
+      const required = [...(selected.length ? selected : configuredApprovers)];
+      if (supervisorId > 0 && !required.includes(supervisorId)) required.push(supervisorId);
+      const rowApprovals = approvalRows.filter((item) => Number(item.request_id) === row.id);
+      const parties = buildApprovalParties(required, names, rowApprovals);
+      const mine = myApprovalState(rowApprovals, userId);
+      return {
+        id: row.id,
+        requester_id: row.requester_id,
+        requester_name: formatPersonName(
+          { first_name: row.requester_first_name, last_name: row.requester_last_name, username: row.requester_username },
+          row.requester_name
+        ),
+        site_name: row.site_name,
+        location: row.location,
+        client_name: row.client_name,
+        engineer_id: row.engineer_id,
+        engineer_name: row.engineer_id ? `${row.engineer_first_name || ''} ${row.engineer_last_name || ''}`.trim() || null : null,
+        purpose: row.purpose,
+        selected_approver_ids: selected,
+        status: row.status,
+        current_stage: row.current_stage,
+        created_at: row.created_at,
+        updated_at: row.updated_at,
+        ...attachReference(row),
+        ...mine,
+        approvals_required: required.length,
+        approvals_count: parties.filter((party) => party.status === 'approved').length,
+        approval_parties: parties,
+      };
+    });
+
+    const visible = req.user && req.user.id ? requests.filter((request) => {
+      if (isAdmin) return true;
+      if (Number(request.requester_id) === userId) return true;
+      if ((request.selected_approver_ids || []).includes(userId)) return true;
+      if (configuredApprovers.includes(userId) || supervisorId === userId) return true;
+      return String(request.my_decision || '').length > 0;
+    }) : requests;
+    res.json(visible);
+  } catch (error) {
+    console.error('Error fetching transport requests:', error.stack);
+    res.status(500).json({ error: error.message || 'Failed to load transport requests' });
+  }
+});
+
+app.post('/api/transport/requests', authenticateToken, async (req, res) => {
+  try {
+    const { site_name, location, client_name, engineer_id, purpose, selected_approver_ids } = req.body || {};
+    if (!site_name || !location || !client_name) {
+      return res.status(400).json({ error: 'Site name, location, and client name are required.' });
+    }
+
+    const config = await getWorkflowConfig();
+    const transport = config.transport || { approver_ids: [], supervisor_id: null };
+    const linkedRefsInput = Array.isArray(req.body?.linked_references) ? req.body.linked_references : [];
+    let linkedReference;
+    try {
+      linkedReference = await resolveReferenceInput(req.body || {}, {
+        required: isReferenceRequired(transport) && linkedRefsInput.length === 0,
+      });
+    } catch (refError) {
+      return res.status(refError.status || 400).json({ error: refError.message });
+    }
+
+    const rawApprovers = Array.isArray(selected_approver_ids) ? selected_approver_ids : [];
+    const selectedApproverIds = [...new Set(rawApprovers.map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0))];
+    if (!selectedApproverIds.length) {
+      return res.status(400).json({ error: 'Please select at least one transport approver from Realm.' });
+    }
+
+    const requester = await getUserById(req.user.id);
+    const requesterName = formatPersonName(requester || req.user, requester?.username || req.user.username);
+    const configuredSupervisorId = Number(transport.supervisor_id || 0);
+    const validApprovers = selectedApproverIds.filter((id) => {
+      const allowed = (transport.approver_ids || []).map(Number);
+      return allowed.includes(id) || id === configuredSupervisorId;
+    });
+    if (!validApprovers.length || !configuredSupervisorId) {
+      return res.status(400).json({ error: 'At least one valid transport approver and the transport supervisor must be configured in Realm before submitting a request.' });
+    }
+
+    const result = await pool.query(
+      `INSERT INTO transport_requests (
+        requester_id, requester_name, site_name, location, client_name, engineer_id, purpose,
+        status, current_stage, selected_approver_ids,
+        reference_type, reference_id, reference_number, reference_title, reference_status
+      )
+       VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', 'approver', $8::jsonb, $9, $10, $11, $12, $13)
+       RETURNING *`,
+      [
+        req.user.id,
+        requesterName,
+        String(site_name).trim(),
+        String(location).trim(),
+        String(client_name).trim(),
+        engineer_id ? Number(engineer_id) : null,
+        purpose ? String(purpose).trim() : null,
+        JSON.stringify(selectedApproverIds),
+        linkedReference.reference_type,
+        linkedReference.reference_id,
+        linkedReference.reference_number,
+        linkedReference.reference_title,
+        linkedReference.reference_status,
+      ]
+    );
+    const request = result.rows[0];
+
+    await persistLinkedReferences('transport_request', request.id, linkedRefsInput, req.user.id);
+
+    const notifyTargets = [...new Set([...selectedApproverIds, ...(configuredSupervisorId > 0 ? [configuredSupervisorId] : [])])];
+    for (const targetUserId of notifyTargets) {
+      await createNotification(
+        'Transport request submitted',
+        `A new transport request from ${requesterName} is waiting for your approval.`,
+        req.user.id,
+        { targetUserId: Number(targetUserId), linkUrl: '/transport-approvals' }
+      );
+    }
+
+    await logUserAction(req.user, {
+      actionType: 'submit',
+      recordType: 'transport_request',
+      recordId: request.id,
+    });
+
+    recordTimingEvent({
+      workflowType: 'transport_request', recordId: request.id,
+      eventType: 'created', stageName: 'pending_approval', triggeredByUserId: req.user.id,
+    }).catch(() => {});
+
+    res.status(201).json({
+      id: request.id,
+      requester_id: request.requester_id,
+      requester_name: request.requester_name,
+      site_name: request.site_name,
+      location: request.location,
+      client_name: request.client_name,
+      engineer_id: request.engineer_id,
+      purpose: request.purpose,
+      selected_approver_ids: Array.isArray(request.selected_approver_ids) ? request.selected_approver_ids : selectedApproverIds,
+      status: request.status,
+      current_stage: request.current_stage,
+      created_at: request.created_at,
+      updated_at: request.updated_at,
+      ...attachReference(request),
+    });
+  } catch (error) {
+    console.error('Error creating transport request:', error.stack);
+    res.status(500).json({ error: error.message || 'Failed to create transport request' });
+  }
+});
+
+app.get('/api/transport/requests/:id', authenticateOrShareToken('transport_request', authenticateToken), async (req, res) => {
+  try {
+    const requestId = req.isSharedView ? Number(req.shareLink.record_id) : Number(req.params.id);
+    if (!Number.isInteger(requestId) || requestId <= 0) {
+      return res.status(400).json({ error: 'A valid transport request id is required.' });
+    }
+    const requestRow = await pool.query(
+      `SELECT tr.*,
+              u.first_name AS engineer_first_name, u.last_name AS engineer_last_name,
+              ru.first_name AS requester_first_name, ru.last_name AS requester_last_name, ru.username AS requester_username
+       FROM transport_requests tr
+       LEFT JOIN users u ON u.id = tr.engineer_id
+       LEFT JOIN users ru ON ru.id = tr.requester_id
+       WHERE tr.id = $1 AND tr.deleted_at IS NULL`,
+      [requestId]
+    );
+    if (requestRow.rowCount === 0) {
+      return res.status(404).json({ error: 'Transport request not found' });
+    }
+    const request = requestRow.rows[0];
+    const approvals = await pool.query(
+      `SELECT * FROM transport_request_approvals WHERE request_id = $1 ORDER BY created_at ASC`,
+      [request.id]
+    );
+    const config = await getWorkflowConfig();
+    const transport = config.transport || { approver_ids: [], supervisor_id: null };
+    const selected = parseApprovalIds(request.selected_approver_ids);
+    const required = [...(selected.length ? selected : parseApprovalIds(transport.approver_ids))];
+    const supervisorId = Number(transport.supervisor_id || 0);
+    if (supervisorId > 0 && !required.includes(supervisorId)) required.push(supervisorId);
+    const names = await loadUserNames(pool, required);
+    const parties = buildApprovalParties(required, names, approvals.rows);
+    const mine = myApprovalState(approvals.rows, req.user?.id);
+    const userIds = approvals.rows.map((row) => row.approver_id).filter(Boolean);
+    let approverMap = {};
+    if (userIds.length > 0) {
+      const users = await pool.query(
+        `SELECT id, first_name, last_name, username FROM users WHERE id = ANY($1::int[])`,
+        [userIds]
+      );
+      approverMap = Object.fromEntries(users.rows.map((row) => [row.id, formatPersonName(row, row.username)]));
+    }
+    const detail = {
+      id: request.id,
+      requester_id: request.requester_id,
+      requester_name: formatPersonName(
+        { first_name: request.requester_first_name, last_name: request.requester_last_name, username: request.requester_username },
+        request.requester_name
+      ),
+      site_name: request.site_name,
+      location: request.location,
+      client_name: request.client_name,
+      engineer_id: request.engineer_id,
+      engineer_name: request.engineer_id ? `${request.engineer_first_name || ''} ${request.engineer_last_name || ''}`.trim() || null : null,
+      purpose: request.purpose,
+      selected_approver_ids: selected,
+      status: request.status,
+      current_stage: request.current_stage,
+      created_at: request.created_at,
+      updated_at: request.updated_at,
+      ...attachReference(request),
+      ...mine,
+      approvals_required: required.length,
+      approvals_count: parties.filter((party) => party.status === 'approved').length,
+      approval_parties: parties,
+      approvals: approvals.rows.map((row) => ({
+        id: row.id,
+        stage: row.stage,
+        approver_name: approverMap[row.approver_id] || row.approver_name || 'User',
+        decision: row.decision,
+        reason: row.reason,
+        created_at: row.created_at,
+      })),
+    };
+    res.json(detail);
+  } catch (error) {
+    console.error('Error fetching transport request detail:', error.stack);
+    res.status(500).json({ error: error.message || 'Failed to fetch transport request detail' });
+  }
+});
+
+app.post('/api/transport/requests/:id/approve', authenticateToken, async (req, res) => {
+  try {
+    const requestRow = await pool.query(
+      `SELECT * FROM transport_requests WHERE id = $1 AND deleted_at IS NULL`,
+      [req.params.id]
+    );
+    if (requestRow.rowCount === 0) return res.status(404).json({ error: 'Transport request not found' });
+    const request = requestRow.rows[0];
+    const config = await getWorkflowConfig();
+    const transport = config.transport || { approver_ids: [], supervisor_id: null };
+    const selectedApproverIds = Array.isArray(request.selected_approver_ids) ? request.selected_approver_ids.map(Number) : [];
+    const isApprover = selectedApproverIds.includes(Number(req.user.id)) || (transport.approver_ids || []).map(Number).includes(Number(req.user.id));
+    const isSupervisor = Number(transport.supervisor_id) === Number(req.user.id);
+    if (!isApprover && !isSupervisor && req.user.role !== 'admin' && req.user.role !== 'superadmin') {
+      return res.status(403).json({ error: 'You are not allowed to approve this request.' });
+    }
+    if (request.status === 'rejected') return res.status(400).json({ error: 'This request has already been rejected.' });
+    if (request.status === 'approved') return res.status(400).json({ error: 'This request has already been approved.' });
+
+    const approvalNotes = String(req.body?.reason || '').trim();
+    if (!approvalNotes) {
+      return res.status(400).json({ error: 'Approval notes or a digital signature are required.' });
+    }
+
+    const stageToRecord = isSupervisor ? 'supervisor' : 'approver';
+    const approverName = formatPersonName(req.user, req.user.username);
+
+    if (stageToRecord === 'approver' && request.current_stage !== 'approver') {
+      return res.status(400).json({ error: 'This request is already at the supervisor step.' });
+    }
+    if (stageToRecord === 'supervisor' && request.current_stage !== 'supervisor') {
+      return res.status(400).json({ error: 'Please complete the approver stage before the supervisor steps in.' });
+    }
+
+    await pool.query(
+      `INSERT INTO transport_request_approvals (request_id, approver_id, approver_name, stage, decision, reason)
+       VALUES ($1, $2, $3, $4, 'approved', $5)`,
+      [request.id, req.user.id, approverName, stageToRecord, approvalNotes]
+    );
+
+    let nextStatus = request.status;
+    let nextCurrentStage = request.current_stage;
+    if (stageToRecord === 'approver') {
+      const approvalCount = await pool.query(
+        `SELECT COUNT(*)::int AS count FROM transport_request_approvals WHERE request_id = $1 AND stage = 'approver' AND decision = 'approved'`,
+        [request.id]
+      );
+      const requiredApprovers = Array.isArray(transport.approver_ids) ? transport.approver_ids.length : 0;
+      if (requiredApprovers > 0 && approvalCount.rows[0].count >= requiredApprovers) {
+        nextCurrentStage = 'supervisor';
+      }
+    } else {
+      nextStatus = 'approved';
+      nextCurrentStage = 'supervisor';
+    }
+
+    await pool.query(
+      `UPDATE transport_requests SET status = $1, current_stage = $2, updated_at = CURRENT_TIMESTAMP WHERE id = $3`,
+      [nextStatus, nextCurrentStage, request.id]
+    );
+
+    if (stageToRecord === 'approver') {
+      const supervisorId = Number(transport.supervisor_id || 0);
+      if (supervisorId > 0) {
+        await createNotification(
+          'Transport request awaiting supervisor approval',
+          `The transport request for ${request.requester_name} has been approved by the first approver and is waiting for supervisor action.`,
+          req.user.id,
+          { targetUserId: supervisorId, linkUrl: '/transport-approvals' }
+        );
+      }
+    } else {
+      await createNotification(
+        'Transport request approved',
+        `Your transport request for ${request.site_name} has been fully approved by the transport supervisor.`,
+        req.user.id,
+        { targetUserId: Number(request.requester_id || 0) || null, linkUrl: `/transport-requests/${request.id}` }
+      );
+    }
+
+    await logUserAction(req.user, {
+      actionType: 'approve',
+      recordType: 'transport_request',
+      recordId: request.id,
+    });
+
+    recordTimingEvent({
+      workflowType: 'transport_request', recordId: request.id,
+      eventType: stageToRecord === 'supervisor' ? 'completed' : 'approved',
+      stageName: stageToRecord === 'supervisor' ? 'supervisor_approval' : 'pending_approval',
+      triggeredByUserId: req.user.id,
+    }).catch(() => {});
+
+    res.json({ message: stageToRecord === 'supervisor' ? 'Transport request approved by supervisor.' : 'Transport request approved by approver.', request: { id: request.id, status: nextStatus, current_stage: nextCurrentStage } });
+  } catch (error) {
+    console.error('Error approving transport request:', error.stack);
+    res.status(500).json({ error: error.message || 'Failed to approve transport request' });
+  }
+});
+
+app.post('/api/transport/requests/:id/reject', authenticateToken, async (req, res) => {
+  try {
+    const request = await pool.query('SELECT * FROM transport_requests WHERE id = $1 AND deleted_at IS NULL', [req.params.id]);
+    if (request.rowCount === 0) return res.status(404).json({ error: 'Transport request not found' });
+    const requestRow = request.rows[0];
+    const config = await getWorkflowConfig();
+    const transport = config.transport || { approver_ids: [], supervisor_id: null };
+    const selectedApproverIds = Array.isArray(requestRow.selected_approver_ids) ? requestRow.selected_approver_ids.map(Number) : [];
+    const isApprover = selectedApproverIds.includes(Number(req.user.id)) || (transport.approver_ids || []).map(Number).includes(Number(req.user.id));
+    const isSupervisor = Number(transport.supervisor_id) === Number(req.user.id);
+    if (!isApprover && !isSupervisor && req.user.role !== 'admin' && req.user.role !== 'superadmin') {
+      return res.status(403).json({ error: 'You are not allowed to reject this request.' });
+    }
+    const reason = String(req.body?.reason || '').trim();
+    if (!reason) {
+      return res.status(400).json({ error: 'A rejection reason is required.' });
+    }
+    const approverName = formatPersonName(req.user, req.user.username);
+    await pool.query(
+      `INSERT INTO transport_request_approvals (request_id, approver_id, approver_name, stage, decision, reason)
+       VALUES ($1, $2, $3, $4, 'rejected', $5)`,
+      [requestRow.id, req.user.id, approverName, isSupervisor ? 'supervisor' : 'approver', reason]
+    );
+    await pool.query(
+      `UPDATE transport_requests SET status = 'rejected', current_stage = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2`,
+      [isSupervisor ? 'supervisor' : 'approver', request.rows[0].id]
+    );
+
+    await createNotification(
+      'Transport request rejected',
+      `Your transport request for ${request.rows[0].site_name} was rejected${isSupervisor ? ' by the transport supervisor' : ' at the approval stage'}.`,
+      req.user.id,
+      { targetUserId: Number(request.rows[0].requester_id || 0) || null, linkUrl: `/transport-requests/${request.rows[0].id}` }
+    );
+
+    await logUserAction(req.user, {
+      actionType: 'reject',
+      recordType: 'transport_request',
+      recordId: request.rows[0].id,
+    });
+
+    recordTimingEvent({
+      workflowType: 'transport_request', recordId: request.rows[0].id,
+      eventType: 'rejected', stageName: 'pending_approval', triggeredByUserId: req.user.id,
+    }).catch(() => {});
+
+    res.json({ message: 'Transport request rejected.', request: { id: request.rows[0].id, status: 'rejected', current_stage: isSupervisor ? 'supervisor' : 'approver' } });
+  } catch (error) {
+    console.error('Error rejecting transport request:', error.stack);
+    res.status(500).json({ error: error.message || 'Failed to reject transport request' });
+  }
+});
+
+app.get('/api/transport/requests/:id/vehicle-request', authenticateToken, async (req, res) => {
+  try {
+    const requestId = Number(req.params.id);
+    if (!Number.isInteger(requestId) || requestId <= 0) {
+      return res.json(null);
+    }
+    const result = await pool.query(
+      `SELECT * FROM vehicle_request_forms WHERE transport_request_id = $1 AND deleted_at IS NULL ORDER BY created_at DESC LIMIT 1`,
+      [requestId]
+    );
+    if (result.rowCount === 0) {
+      return res.json(null);
+    }
+    const form = result.rows[0];
+    res.json({
+      id: form.id,
+      transport_request_id: form.transport_request_id,
+      requester_id: form.requester_id,
+      supervisor_id: form.supervisor_id,
+      department: form.department,
+      purpose: form.purpose,
+      date_submitted: form.date_submitted,
+      deliver_to: form.deliver_to,
+      phone: form.phone,
+      special_instructions: form.special_instructions,
+      order_no: form.order_no,
+      invoice_terms: form.invoice_terms,
+      received_by: form.received_by,
+      line_items: Array.isArray(form.line_items) ? form.line_items : [],
+      attachments: Array.isArray(form.attachments) ? form.attachments : [],
+      selected_approver_ids: Array.isArray(form.selected_approver_ids) ? form.selected_approver_ids : [],
+      status: form.status,
+      current_stage: form.current_stage,
+      created_at: form.created_at,
+      updated_at: form.updated_at,
+    });
+  } catch (error) {
+    console.error('Error loading vehicle request:', error.stack);
+    res.status(500).json({ error: error.message || 'Failed to load vehicle request' });
+  }
+});
+
+app.post('/api/transport/requests/:id/vehicle-request', authenticateToken, async (req, res) => {
+  try {
+    const requestId = Number(req.params.id);
+    if (!Number.isInteger(requestId) || requestId <= 0) {
+      return res.status(400).json({ error: 'A valid transport request id is required.' });
+    }
+    const transportRequest = await pool.query(
+      `SELECT * FROM transport_requests WHERE id = $1 AND deleted_at IS NULL`,
+      [requestId]
+    );
+    if (transportRequest.rowCount === 0) {
+      return res.status(404).json({ error: 'Transport request not found' });
+    }
+
+    const request = transportRequest.rows[0];
+    const config = await getWorkflowConfig();
+    const transport = config.transport || { supervisor_id: null };
+    const isSupervisor = Number(transport.supervisor_id) === Number(req.user.id);
+    if (!isSupervisor && req.user.role !== 'admin' && req.user.role !== 'superadmin') {
+      return res.status(403).json({ error: 'Only the transport supervisor can generate the vehicle request form.' });
+    }
+    if (request.status !== 'approved') {
+      return res.status(400).json({ error: 'The transport request must be approved before a vehicle request form can be generated.' });
+    }
+
+    const payload = req.body || {};
+    const lineItems = Array.isArray(payload.line_items) ? payload.line_items : [];
+    const attachments = Array.isArray(payload.attachments) ? payload.attachments : [];
+    const selectedApproverIds = Array.isArray(payload.selected_approver_ids)
+      ? [...new Set(payload.selected_approver_ids.map(Number).filter((id) => Number.isInteger(id) && id > 0))]
+      : [];
+    const fallbackApprovers = selectedApproverIds.length
+      ? selectedApproverIds
+      : [
+          ...(Array.isArray(config.transport?.vehicle_request_approver_ids)
+            ? config.transport.vehicle_request_approver_ids.map(Number).filter((id) => Number.isInteger(id) && id > 0)
+            : []),
+          ...(Array.isArray(config.transport?.approver_ids)
+            ? config.transport.approver_ids.map(Number).filter((id) => Number.isInteger(id) && id > 0)
+            : []),
+        ];
+
+    const result = await pool.query(
+      `INSERT INTO vehicle_request_forms (
+        transport_request_id, requester_id, supervisor_id, department, purpose, deliver_to,
+        phone, special_instructions, order_no, invoice_terms, received_by, line_items, attachments,
+        selected_approver_ids, status, current_stage
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb, $13::jsonb, $14::jsonb, 'pending', 'pending')
+       RETURNING *`,
+      [
+        request.id,
+        request.requester_id || req.user.id,
+        req.user.id,
+        payload.department || null,
+        request.purpose || null,
+        payload.deliver_to || null,
+        payload.phone || null,
+        payload.special_instructions || null,
+        payload.order_no || null,
+        payload.invoice_terms || null,
+        payload.received_by || null,
+        JSON.stringify(lineItems),
+        JSON.stringify(attachments),
+        JSON.stringify(fallbackApprovers),
+      ]
+    );
+
+    const form = result.rows[0];
+    for (const targetUserId of fallbackApprovers) {
+      await createNotification(
+        'Vehicle request awaiting approval',
+        `A new vehicle request from ${request.requester_name} is waiting for your approval.`,
+        req.user.id,
+        { targetUserId: Number(targetUserId), linkUrl: `/transport/vehicle-rental-requests/${form.id}` }
+      );
+    }
+
+    res.status(201).json({
+      id: form.id,
+      transport_request_id: form.transport_request_id,
+      requester_id: form.requester_id,
+      supervisor_id: form.supervisor_id,
+      department: form.department,
+      purpose: form.purpose,
+      deliver_to: form.deliver_to,
+      phone: form.phone,
+      special_instructions: form.special_instructions,
+      order_no: form.order_no,
+      invoice_terms: form.invoice_terms,
+      received_by: form.received_by,
+      line_items: Array.isArray(form.line_items) ? form.line_items : [],
+      attachments: Array.isArray(form.attachments) ? form.attachments : [],
+      status: form.status,
+      current_stage: form.current_stage,
+      created_at: form.created_at,
+      updated_at: form.updated_at,
+    });
+  } catch (error) {
+    console.error('Error creating vehicle request:', error.stack);
+    res.status(500).json({ error: error.message || 'Failed to create vehicle request' });
   }
 });
 
@@ -1100,10 +1871,10 @@ app.get('/api/workspace', authenticateToken, async (req, res) => {
 app.get('/api/notifications', authenticateToken, async (req, res) => {
   try {
     const rows = await getNotificationsForUser(req.user.id);
-    res.json(rows);
+    res.json(Array.isArray(rows) ? rows : []);
   } catch (error) {
     console.error('Error fetching notifications:', error.stack);
-    res.status(500).json({ error: error.message });
+    res.json([]);
   }
 });
 
@@ -1594,6 +2365,17 @@ app.post('/api/requests', authenticateToken, async (req, res) => {
       }
     );
 
+    await logUserAction(req.user, {
+      actionType: 'submit',
+      recordType: requestType || 'material_request',
+      recordId: newRequest.id,
+    });
+
+    recordTimingEvent({
+      workflowType: requestType || 'material_request', recordId: newRequest.id,
+      eventType: 'created', stageName: 'pending_approval', triggeredByUserId: req.user.id,
+    }).catch(() => {});
+
     const requestKind =
       requestType === 'cash_request'
         ? 'cash request'
@@ -1728,6 +2510,15 @@ app.post('/api/requests/:id/reject', authenticateToken, async (req, res) => {
     } catch (e) {
       console.warn('[chat] request rejected system message failed:', e.message);
     }
+    await logUserAction(req.user, {
+      actionType: 'reject',
+      recordType: request.type || 'material_request',
+      recordId: Number(req.params.id),
+    });
+    recordTimingEvent({
+      workflowType: request.type || 'material_request', recordId: Number(req.params.id),
+      eventType: 'rejected', stageName: 'pending_approval', triggeredByUserId: req.user.id,
+    }).catch(() => {});
     res.json(result);
   } catch (error) {
     console.error(`Error rejecting request ID ${req.params.id} - Full stack:`, error.stack);
@@ -1824,6 +2615,19 @@ app.post('/api/requests/:id/approve', authenticateToken, async (req, res) => {
     } catch (e) {
       console.warn('[chat] request approved system message failed:', e.message);
     }
+    const approvedTypeRow = await pool.query('SELECT type FROM requests WHERE id = $1', [requestId]);
+    const approvedType = approvedTypeRow.rows[0]?.type || 'material_request';
+    await logUserAction(req.user, {
+      actionType: stage === 'finance' && approvedType === 'cash_request' ? 'issue_cash' : 'approve',
+      recordType: approvedType,
+      recordId: Number(requestId),
+    });
+    recordTimingEvent({
+      workflowType: approvedType, recordId: Number(requestId), eventType: 'approved',
+      stageName: stage === 'finance' ? 'finance_processing' : stage === 'director' ? 'director_review' : 'pending_approval',
+      toUnitSlug: stage === 'finance' ? 'finance' : null,
+      triggeredByUserId: req.user.id,
+    }).catch(() => {});
     res.json(result);
   } catch (error) {
     console.error(`Failed to approve request ${req.params.id}:`, error.message);
@@ -1896,6 +2700,16 @@ app.post('/api/requests/:id/finalize', authenticateToken, async (req, res) => {
     } catch (e) {
       console.warn('[chat] request finalized system message failed:', e.message);
     }
+    const finalizedType = (await pool.query('SELECT type FROM requests WHERE id = $1', [req.params.id])).rows[0]?.type || 'material_request';
+    await logUserAction(req.user, {
+      actionType: 'complete',
+      recordType: finalizedType,
+      recordId: Number(req.params.id),
+    });
+    recordTimingEvent({
+      workflowType: finalizedType, recordId: Number(req.params.id),
+      eventType: 'completed', stageName: 'execution', triggeredByUserId: req.user.id,
+    }).catch(() => {});
     res.json(result);
   } catch (error) {
     console.error(`Error finalizing request ID ${req.params.id}:`, error.message);
@@ -1904,10 +2718,11 @@ app.post('/api/requests/:id/finalize', authenticateToken, async (req, res) => {
   }
 });
 
-app.get('/api/requests/:id', authenticateToken, async (req, res) => {
+app.get('/api/requests/:id', authenticateOrShareToken(['material_request', 'cash_request', 'item_return'], authenticateToken), async (req, res) => {
   try {
-    await assertRequestDetailAccess(req.params.id, req.user);
-    const request = await getRequestDetails(req.params.id);
+    const requestId = req.isSharedView ? req.shareLink.record_id : req.params.id;
+    if (!req.isSharedView) await assertRequestDetailAccess(requestId, req.user);
+    const request = await getRequestDetails(requestId);
     res.json(request);
   } catch (error) {
     console.error('Error fetching request details:', error.stack);
@@ -1935,6 +2750,10 @@ app.post('/api/requests/:id/cash-received', authenticateToken, async (req, res) 
     } catch (e) {
       console.warn('[chat] cash received system message failed:', e.message);
     }
+    recordTimingEvent({
+      workflowType: 'cash_request', recordId: Number(req.params.id),
+      eventType: 'completed', stageName: 'finance_processing', triggeredByUserId: req.user.id,
+    }).catch(() => {});
     res.json(result);
   } catch (error) {
     console.error('Error marking cash received:', error.stack);
@@ -2021,4 +2840,17 @@ server.listen(port, '0.0.0.0', async () => {
   };
   void runEscalations();
   setInterval(runEscalations, 60 * 1000);
+
+  const runSlaSweep = async () => {
+    try {
+      const { notified } = await checkSlaThresholdsAndNotify();
+      if (notified > 0) {
+        console.log(`[workflow-time-engine] Sent ${notified} SLA notification(s)`);
+      }
+    } catch (e) {
+      console.error('[workflow-time-engine] SLA sweep failed:', e.message);
+    }
+  };
+  void runSlaSweep();
+  setInterval(runSlaSweep, 60 * 1000);
 });

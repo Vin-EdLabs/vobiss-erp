@@ -5,6 +5,7 @@ import { Check, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { hrApi, HR_QUERY } from '@/api/hr';
 import { Button } from '@/components/ui/button';
+import { ShareButton } from '@/components/ShareButton';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Progress } from '@/components/ui/progress';
@@ -201,6 +202,25 @@ const HrEmployeeProfile = () => {
             </div>
           </div>
           <div className="emp-profile-actions flex flex-wrap gap-2">
+            {id && (
+              <ShareButton
+                recordType="hr_employee"
+                recordId={id}
+                pagePath={window.location.pathname}
+                pageTitle={emp.full_name}
+                recordPreview={{
+                  title: emp.full_name,
+                  status: emp.status,
+                  position: emp.position,
+                  department: emp.department,
+                  location: emp.location,
+                  email: emp.email,
+                  phone: emp.phone,
+                  gender: emp.gender,
+                  hire_date: emp.hire_date,
+                }}
+              />
+            )}
             <Button variant="outline" onClick={() => navigate('/hr/employees')}>Close</Button>
             <Button variant="outline" className="employment-print-hide" onClick={() => { setTab('overview'); window.setTimeout(() => window.print(), 80); }}>Print</Button>
             <Button variant="outline" onClick={() => (editOpen ? (setEditOpen(false), setPhoto(null)) : openEdit())}>

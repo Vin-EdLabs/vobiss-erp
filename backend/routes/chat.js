@@ -991,9 +991,10 @@ router.get('/unread-total', async (req, res) => {
       [userId]
     );
     const total = (channelUnread.rows[0]?.total || 0) + (dmUnread.rows[0]?.total || 0);
-    res.json({ total });
+    res.json({ total, count: total });
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    console.error('Error fetching chat unread total:', e.stack || e.message);
+    res.json({ total: 0, count: 0 });
   }
 });
 

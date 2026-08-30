@@ -1,6 +1,5 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { useNavigate } from 'react-router-dom';
 import {
   Search,
   Ticket,
@@ -11,9 +10,17 @@ import {
   Loader2,
   ArrowRight,
   AlertCircle,
+  Truck,
+  Fuel,
+  Car,
+  ListTodo,
+  AlertTriangle,
+  FileCheck,
+  Network,
 } from 'lucide-react';
 import { globalExecutiveSearch, type GlobalSearchResult } from '@/api/globalSearch';
 import { cn } from '@/lib/utils';
+import { FlowPanel } from '@/components/references/FlowPanel';
 
 const KIND_META: Record<
   string,
@@ -23,7 +30,19 @@ const KIND_META: Record<
   cash_request: { label: 'Cash requests', icon: Banknote, chip: 'bg-emerald-100 text-emerald-800' },
   material_request: { label: 'Material requests', icon: Package, chip: 'bg-amber-100 text-amber-800' },
   item_return: { label: 'Item returns', icon: RotateCcw, chip: 'bg-violet-100 text-violet-800' },
-  project_request: { label: 'Project requests', icon: FolderKanban, chip: 'bg-indigo-100 text-indigo-800' },
+  project_request: { label: 'Service requests', icon: FolderKanban, chip: 'bg-indigo-100 text-indigo-800' },
+  transport_request: { label: 'Transport requests', icon: Truck, chip: 'bg-orange-100 text-orange-800' },
+  fuel_request: { label: 'Fuel requests', icon: Fuel, chip: 'bg-lime-100 text-lime-800' },
+  vehicle_request: { label: 'Vehicle rental requests', icon: Car, chip: 'bg-teal-100 text-teal-800' },
+  wip_entry: { label: 'WIP entries', icon: ListTodo, chip: 'bg-cyan-100 text-cyan-800' },
+  incident_note: { label: 'Incident notes', icon: AlertTriangle, chip: 'bg-rose-100 text-rose-800' },
+  signoff_form: { label: 'Sign-off forms', icon: FileCheck, chip: 'bg-fuchsia-100 text-fuchsia-800' },
+  network_asset: { label: 'Network assets', icon: Network, chip: 'bg-slate-200 text-slate-800' },
+};
+
+/** Search results whose `kind` predates the reference registry use a different type name — map to the registry key so the Flow Panel can look them up. */
+const KIND_TO_REGISTRY_TYPE: Record<string, string> = {
+  project_request: 'service_request',
 };
 
 function groupResults(results: GlobalSearchResult[]) {
@@ -46,7 +65,6 @@ export function GlobalExecutiveSearch({
   className,
   autoFocus = false,
 }: Props) {
-  const navigate = useNavigate();
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<GlobalSearchResult[]>([]);
   const [loading, setLoading] = useState(false);
@@ -54,6 +72,7 @@ export function GlobalExecutiveSearch({
   const [open, setOpen] = useState(false);
   const [activeIndex, setActiveIndex] = useState(0);
   const [dropdownStyle, setDropdownStyle] = useState<React.CSSProperties>({});
+  const [flowTarget, setFlowTarget] = useState<{ type: string; id: string } | null>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
@@ -133,12 +152,9 @@ export function GlobalExecutiveSearch({
     };
   }, [showPanel, isPage, updateDropdownPosition, trimmed]);
 
-  const goTo = (href: string) => {
+  const openFlow = (item: GlobalSearchResult) => {
     setOpen(false);
-    setQuery('');
-    setResults([]);
-    setError(null);
-    navigate(href);
+    setFlowTarget({ type: KIND_TO_REGISTRY_TYPE[item.kind] || item.kind, id: item.id });
   };
 
   const onKeyDown = (e: React.KeyboardEvent) => {
@@ -151,7 +167,7 @@ export function GlobalExecutiveSearch({
       setActiveIndex((i) => Math.max(i - 1, 0));
     } else if (e.key === 'Enter' && flatResults[activeIndex]) {
       e.preventDefault();
-      goTo(flatResults[activeIndex].href);
+      openFlow(flatResults[activeIndex]);
     } else if (e.key === 'Escape') {
       setOpen(false);
       inputRef.current?.blur();
@@ -223,7 +239,7 @@ export function GlobalExecutiveSearch({
                     )}
                     onMouseEnter={() => setActiveIndex(thisIdx)}
                     onMouseDown={(e) => e.preventDefault()}
-                    onClick={() => goTo(item.href)}
+                    onClick={() => openFlow(item)}
                   >
                     <span
                       className={cn(
@@ -312,6 +328,13 @@ export function GlobalExecutiveSearch({
               />
               {dropdownContent}
             </>,
+            document.body
+          )
+        : null}
+
+      {flowTarget && typeof document !== 'undefined'
+        ? createPortal(
+            <FlowPanel type={flowTarget.type} id={flowTarget.id} onClose={() => setFlowTarget(null)} />,
             document.body
           )
         : null}

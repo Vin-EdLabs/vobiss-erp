@@ -21,7 +21,10 @@ export const SYSTEM_ROLES = [
   'ip_supervisor',
   'ts_manager',
   'ts_supervisor',
+  'design_manager',
+  'design_supervisor',
   'project',
+  'sales',
   'field_engineer',
   'field_engineer_admin',
   'relationship_officer',
@@ -72,6 +75,7 @@ export function defaultUnitsForRole(role) {
     superadmin: ['project', 'ts', 'ip', 'noc'],
     system_admin: ['project', 'ts', 'ip', 'noc'],
     project: ['project'],
+    sales: ['sales'],
     noc: ['noc', 'project'],
     noc_supervisor: ['noc', 'project'],
     noc_manager: ['project', 'ts', 'ip', 'noc'],
@@ -80,6 +84,8 @@ export function defaultUnitsForRole(role) {
     ip_manager: ['project', 'ts', 'ip', 'noc'],
     ts_manager: ['project', 'ts', 'ip', 'noc'],
     ts_supervisor: ['ts', 'project'],
+    design_manager: ['design'],
+    design_supervisor: ['design'],
     director: ['project', 'ts', 'ip', 'noc'],
     cto: ['project', 'ts', 'ip', 'noc'],
     field_engineer: ['ts', 'project'],
@@ -165,10 +171,18 @@ export function hasProjectUnitAccess(user) {
   if (!user) return false;
   const role = String(user.main_role || user.role || '').toLowerCase();
   const pos = String(user.position || '').trim().toLowerCase();
-  if (isSystemAdminAccount(user) || role === 'project' || role === 'director' || role === 'cto') return true;
+  if (isSystemAdminAccount(user) || role === 'project' || role === 'sales' || role === 'director' || role === 'cto') return true;
   if (pos === 'director' || pos === 'cto') return true;
   const units = effectiveUnitsForUser(user);
-  return units.includes('project') || units.some((u) => u.startsWith('project'));
+  return units.includes('project') || units.includes('sales') || units.some((u) => u.startsWith('project'));
+}
+
+export function hasDesignUnitAccess(user) {
+  if (!user) return false;
+  if (isSystemAdminAccount(user)) return true;
+  const roles = [user.role, user.main_role, ...(Array.isArray(user.roles) ? user.roles : [])]
+    .map((value) => String(value || '').toLowerCase());
+  return roles.includes('design_manager') || roles.includes('design_supervisor') || effectiveUnitsForUser(user).includes('design');
 }
 
 export const TICKET_SUPPORT_ROLES = [

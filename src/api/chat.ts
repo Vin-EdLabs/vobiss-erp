@@ -106,6 +106,14 @@ export interface ChatMessage {
       disabled?: boolean;
       result?: string;
     }>;
+    sharedRecord?: {
+      recordType: string;
+      recordId: string | number;
+      pagePath: string;
+      pageTitle: string | null;
+      recordPreview: Record<string, any> | null;
+      sharedByName: string;
+    };
   } | null;
   forwarded_from?: string | null;
   forwardedOrigin?: {
@@ -152,8 +160,14 @@ export interface ChatUser {
   is_online: boolean;
 }
 
-export async function getChatUnreadTotal(): Promise<{ total: number }> {
-  return chatFetch('/unread-total');
+export async function getChatUnreadTotal(): Promise<{ total: number; count: number }> {
+  try {
+    const data = await chatFetch('/unread-total');
+    const n = Number(data?.count ?? data?.total ?? 0) || 0;
+    return { total: n, count: n };
+  } catch {
+    return { total: 0, count: 0 };
+  }
 }
 
 export async function getChatChannels(): Promise<ChatChannel[]> {

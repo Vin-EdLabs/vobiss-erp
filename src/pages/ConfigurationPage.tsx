@@ -13,7 +13,7 @@ import {
   Clock,
   Shield,
 } from 'lucide-react';
-import { getWorkflowConfig, updateWorkflowConfig, type WorkflowConfig, type TicketEscalationStage } from '../api';
+import { getUsers, getWorkflowConfig, updateWorkflowConfig, type WorkflowConfig, type TicketEscalationStage } from '../api';
 import { useAuth } from '../context/AuthContext';
 import { useVobiSection } from '@/hooks/useVobiSection';
 import { useToast } from '@/hooks/use-toast';
@@ -30,6 +30,7 @@ export default function ConfigurationPage() {
   const navigate = useNavigate();
   const { toast } = useToast();
   const [config, setConfig] = useState<WorkflowConfig | null>(null);
+  const [allUsers, setAllUsers] = useState<Array<{ id: number; first_name?: string; last_name?: string; username?: string; role?: string; position?: string | null; unit?: string | null }>>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [savingSla, setSavingSla] = useState(false);
@@ -77,6 +78,12 @@ export default function ConfigurationPage() {
     load();
   }, [navigate, user, isAdminSuper]);
 
+  useEffect(() => {
+    getUsers()
+      .then((users) => setAllUsers(users))
+      .catch(() => setAllUsers([]));
+  }, []);
+
   const load = async () => {
     try {
       setLoading(true);
@@ -84,6 +91,7 @@ export default function ConfigurationPage() {
       const data = await getWorkflowConfig();
       setConfig({
         ...data,
+        transport: data.transport || { approver_ids: [], supervisor_id: null },
         ticket_escalation: data.ticket_escalation || {
           enabled: true,
           stages: [
@@ -299,6 +307,107 @@ export default function ConfigurationPage() {
                 className="w-20 rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
               />
               <span className="text-xs text-gray-500">e.g. 2, 3, or 5. Approvers are chosen in Realm.</span>
+            </div>
+          </div>
+        </section>
+
+        <section className="bg-white rounded-xl border border-gray-200 shadow-[var(--shadow-md)] overflow-hidden flex flex-col">
+          <div className="px-6 py-4 bg-amber-50 border-b border-amber-200 flex items-center gap-2 shrink-0">
+            <Shield className="h-5 w-5 text-amber-700" />
+            <h2 className="text-lg font-semibold text-gray-900">Transport & Fuel Configuration</h2>
+          </div>
+          <div className="p-6 flex flex-col gap-4 text-sm text-gray-600">
+            <div>
+              <label className="block text-xs font-semibold text-gray-700 uppercase tracking-wider mb-1">
+                Price per Litre (GHC)
+              </label>
+              <input
+                type="number"
+                step="0.01"
+                min="0"
+                placeholder="e.g. 14.50 (Leave blank for manual entry)"
+                value={config.transport?.price_per_litre ?? ''}
+                onChange={(e) => {
+                  const val = e.target.value === '' ? null : parseFloat(e.target.value);
+                  setConfig((prev) =>
+                    prev
+                      ? {
+                          ...prev,
+                          transport: {
+                            ...prev.transport,
+                            price_per_litre: val,
+                          },
+                        }
+                      : prev
+                  );
+                }}
+                className="w-full max-w-xs rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-amber-500 focus:border-amber-500"
+              />
+              <p className="text-xs text-gray-500 mt-1">
+                Used to auto-calculate estimated amount in fuel requests (Quantity &times; Price per litre). Leave blank to allow manual entry.
+              </p>
+            </div>
+
+            <div className="pt-3 border-t border-gray-100">
+              <p className="text-xs font-semibold text-gray-700 uppercase tracking-wider mb-1">Reference Linking</p>
+              <p className="mb-3 text-xs text-gray-500">
+                Whether at least one linked reference (a ticket, another request, etc.) must be attached before each form type can be submitted. Default is Optional.
+              </p>
+              {(
+                [
+                  { key: 'require_reference_link', label: 'Require reference link on Transport Requests' },
+                  { key: 'require_reference_link_fuel', label: 'Require reference link on Fuel Requests' },
+                  { key: 'require_reference_link_vehicle', label: 'Require reference link on Vehicle Rental Requests' },
+                ] as const
+              ).map(({ key, label }) => (
+                <div key={key} className="mb-4 last:mb-0">
+                  <label className="block text-sm font-medium text-gray-800">{label}</label>
+                  <div className="mt-2 flex gap-2">
+                    {(['optional', 'required'] as const).map((mode) => {
+                      const selected = Boolean(config.transport?.[key]) === (mode === 'required');
+                      return (
+                        <button
+                          key={mode}
+                          type="button"
+                          onClick={() =>
+                            setConfig((prev) =>
+                              prev
+                                ? {
+                                    ...prev,
+                                    transport: {
+                                      ...prev.transport,
+                                      approver_ids: prev.transport?.approver_ids || [],
+                                      supervisor_id: prev.transport?.supervisor_id ?? null,
+                                      [key]: mode === 'required',
+                                    },
+                                  }
+                                : prev
+                            )
+                          }
+                          className={`rounded-lg px-4 py-2 text-sm font-semibold capitalize transition ${
+                            selected ? 'bg-amber-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                          }`}
+                        >
+                          {mode}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="pt-3 border-t border-gray-100">
+              <p className="mb-2 text-xs text-gray-500">
+                Transport request approvers, supervisors, fuel request approvers, and vehicle finance users are assigned in <span className="font-semibold text-gray-800">Realm</span> so they follow standard approval controls.
+              </p>
+              <button
+                type="button"
+                onClick={() => navigate('/realm')}
+                className="inline-flex items-center gap-2 px-3 py-1.5 bg-amber-100 text-amber-800 rounded-lg text-xs font-semibold hover:bg-amber-200 transition"
+              >
+                Manage Approvers in Realm &rarr;
+              </button>
             </div>
           </div>
         </section>

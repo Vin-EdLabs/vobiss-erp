@@ -1,4 +1,5 @@
 import BASE_URL, { API_URL } from '@/lib/api';
+import { getActiveShareToken, isSharedRoute, shareTokenHeaders } from '@/lib/shareSession';
 
 const getAuthHeader = () => {
   const token = localStorage.getItem('token');
@@ -25,9 +26,13 @@ function projectRequestUrl(...segments: string[]): string {
 async function prjFetch(url: string, options: RequestInit = {}) {
   const res = await fetch(url, {
     ...options,
-    headers: { ...options.headers, ...getAuthHeader() },
+    headers: { ...options.headers, ...getAuthHeader(), ...shareTokenHeaders(options.method) },
   });
   if (res.status === 401) {
+    if (getActiveShareToken() || isSharedRoute()) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || 'This content is not available in the shared view.');
+    }
     clearStaffSession();
     throw new Error('Session expired. Please log in again.');
   }
@@ -81,6 +86,40 @@ export type ProjectUnit = {
   is_active: boolean;
 };
 
+export type WipEntry = Record<string, any> & { id: number; customer_name?: string; status?: string; start_date?: string; completion_date?: string };
+export const listWipEntries = async (): Promise<WipEntry[]> => (await prjFetch(projectRequestUrl('wip'))).json();
+export const createWipEntry = async (data: Partial<WipEntry>): Promise<WipEntry> => (await prjFetch(projectRequestUrl('wip'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) })).json();
+export const updateWipEntry = async (id: number, data: Partial<WipEntry>): Promise<WipEntry> => (await prjFetch(projectRequestUrl('wip', String(id)), { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) })).json();
+export const deleteWipEntry = async (id: number) => prjFetch(projectRequestUrl('wip', String(id)), { method: 'DELETE' });
+export const getWipOptions = async (): Promise<{ regions: string[]; serviceTypes: string[] }> => (await prjFetch(projectRequestUrl('wip', 'options'))).json();
+export const getWipHistory = async (id: number) => (await prjFetch(projectRequestUrl('wip', String(id), 'history'))).json();
+export const getWipRemarks = async (id: number) => (await prjFetch(projectRequestUrl('wip', String(id), 'remarks'))).json();
+export const addWipRemark = async (id: number, note_text: string) => (await prjFetch(projectRequestUrl('wip', String(id), 'remarks'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ note_text }) })).json();
+
+export type SignoffStatus = 'draft' | 'pending' | 'approved' | 'rejected';
+export type SignoffForm = {
+  id: number; reference_no: string; status: SignoffStatus; contractor: string;
+  site_name: string; circuit_id?: string | null; type_of_service?: string | null; contractual_bandwidth?: string | null; test_date?: string | null;
+  device_type?: string | null; device_model?: string | null; device_serial_number?: string | null;
+  packet_loss?: string | null; latency?: string | null; jitter?: string | null; billing_date?: string | null;
+  client_signature?: string | null; client_name?: string | null; client_date?: string | null; client_telephone?: string | null; client_company_name?: string | null;
+  vobiss_signature?: string | null; vobiss_name?: string | null; vobiss_date?: string | null; vobiss_telephone?: string | null;
+  manager_signature?: string | null; manager_name?: string | null; manager_date?: string | null; rejection_reason?: string | null;
+  linked_record_type?: string | null; linked_record_id?: number | null; linked_record_ref?: string | null;
+  created_by: number; created_by_name: string; created_at: string; updated_at: string;
+};
+export const listSignoffForms = async (params: { status?: string; search?: string } = {}): Promise<SignoffForm[]> => {
+  const q = new URLSearchParams(); if (params.status && params.status !== 'all') q.set('status', params.status); if (params.search) q.set('search', params.search);
+  return (await prjFetch(`${projectRequestUrl('signoff')}${q.toString() ? `?${q}` : ''}`)).json();
+};
+export const getSignoffForm = async (id: number): Promise<SignoffForm> => (await prjFetch(projectRequestUrl('signoff', String(id)))).json();
+export const getSignoffLinkOptions = async (): Promise<{ service_requests: Array<{ id: number; label: string; reference: string }>; wip_entries: Array<{ id: number; label: string; reference: string }> }> => (await prjFetch(projectRequestUrl('signoff', 'link-options'))).json();
+export const createSignoffForm = async (data: Partial<SignoffForm>): Promise<SignoffForm> => (await prjFetch(projectRequestUrl('signoff'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) })).json();
+export const updateSignoffForm = async (id: number, data: Partial<SignoffForm>): Promise<SignoffForm> => (await prjFetch(projectRequestUrl('signoff', String(id)), { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) })).json();
+export const submitSignoffForm = async (id: number): Promise<SignoffForm> => (await prjFetch(projectRequestUrl('signoff', String(id), 'submit'), { method: 'POST' })).json();
+export const approveSignoffForm = async (id: number, manager_signature: string): Promise<SignoffForm> => (await prjFetch(projectRequestUrl('signoff', String(id), 'approve'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ manager_signature }) })).json();
+export const rejectSignoffForm = async (id: number, reason: string): Promise<SignoffForm> => (await prjFetch(projectRequestUrl('signoff', String(id), 'reject'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reason }) })).json();
+
 export type ProjectRequestStatus =
   | 'pending'
   | 'ongoing'
@@ -121,6 +160,33 @@ export type ProjectRequest = {
   chat_channel_id?: string | null;
   remarks?: ProjectRequestRemark[];
   attachments?: ProjectRequestAttachment[];
+  isp?: string;
+  survey_date?: string;
+  design_specification?: string;
+  design_reference?: string;
+  is_design_request?: boolean;
+  design_materials?: DesignRequestMaterial[];
+};
+
+export type DesignMaterial = {
+  id: number;
+  material_name: string;
+  unit: string;
+  unit_price: number;
+  calculation_formula?: string | null;
+  is_primary_input: boolean;
+  sort_order: number;
+};
+
+export type DesignRequestMaterial = {
+  id?: number;
+  material_id?: number | null;
+  material_name: string;
+  unit: string;
+  unit_price: number;
+  quantity: number;
+  line_cost?: number;
+  calculation_formula?: string | null;
 };
 
 export type ProjectRequestRemark = {
@@ -144,6 +210,59 @@ export type ProjectRequestAttachment = {
 
 export async function getProjectUnits(): Promise<ProjectUnit[]> {
   const res = await prjFetch(projectRequestUrl('units'));
+  return res.json();
+}
+
+export async function getDesignMaterials(): Promise<DesignMaterial[]> {
+  const res = await prjFetch(projectRequestUrl('design', 'materials'));
+  return res.json();
+}
+
+export async function saveDesignMaterial(data: Omit<DesignMaterial, 'id'>, id?: number): Promise<DesignMaterial> {
+  const res = await prjFetch(projectRequestUrl('design', 'materials', id ? String(id) : ''), {
+    method: id ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data),
+  });
+  return res.json();
+}
+
+export async function deleteDesignMaterial(id: number): Promise<void> {
+  await prjFetch(projectRequestUrl('design', 'materials', String(id)), { method: 'DELETE' });
+}
+
+export async function createDesignRequest(data: Record<string, unknown>): Promise<ProjectRequest> {
+  const res = await prjFetch(projectRequestUrl('design', 'requests'), {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data),
+  });
+  return res.json();
+}
+
+export async function listDesignRequests(): Promise<ProjectRequest[]> {
+  const res = await prjFetch(projectRequestUrl('design', 'requests'));
+  return res.json();
+}
+
+export async function listSalesRequests(): Promise<ProjectRequest[]> {
+  const res = await prjFetch(projectRequestUrl('sales', 'requests'));
+  return res.json();
+}
+
+export async function createSalesRequest(data: Record<string, unknown>): Promise<ProjectRequest> {
+  const res = await prjFetch(projectRequestUrl('sales', 'requests'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+  return res.json();
+}
+
+export async function submitDesignRequest(id: number, data: Record<string, unknown>): Promise<ProjectRequest> {
+  const res = await prjFetch(projectRequestUrl('design', 'requests', String(id), 'submit'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+  return res.json();
+}
+
+export async function salesForwardProjectRequest(id: number): Promise<ProjectRequest> {
+  const res = await prjFetch(projectRequestUrl('sales', 'requests', String(id), 'forward'), { method: 'POST' });
+  return res.json();
+}
+
+export async function projectForwardProjectRequest(id: number, routeToStage: 'ts' | 'ip' | 'noc'): Promise<ProjectRequest> {
+  const res = await prjFetch(projectRequestUrl('requests', String(id), 'project', 'forward'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ route_to_stage: routeToStage }) });
   return res.json();
 }
 

@@ -26,7 +26,7 @@ export default function ProductionCreate() {
     region: '',
     capacity: '',
     bandwidth: '',
-    cable_displacement: '',
+    adss: '', drop_cable: '',
     service_type: '',
     cpe: '',
     start_date: '',
@@ -163,10 +163,10 @@ export default function ProductionCreate() {
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <FormField label="Capacity" value={form.capacity} onChange={(v) => set('capacity', v)} vobiField="capacity" />
             <FormField label="Bandwidth" value={form.bandwidth} onChange={(v) => set('bandwidth', v)} vobiField="bandwidth" />
-            <FormField label="Cable Distance" value={form.cable_displacement} onChange={(v) => set('cable_displacement', v)} vobiField="cable_displacement" />
             <FormField label="CPE" value={form.cpe} onChange={(v) => set('cpe', v)} vobiField="cpe" />
           </div>
         </FormSection>
+        <FormSection title="Cable Type" icon={Wrench}><div className="grid grid-cols-1 gap-4 md:grid-cols-2"><FormField label="ADSS" value={form.adss} onChange={(v) => set('adss', v)} /><FormField label="Drop Cable" value={form.drop_cable} onChange={(v) => set('drop_cable', v)} /></div></FormSection>
 
         <FormSection title="Dates & commercial" icon={Calendar}>
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">

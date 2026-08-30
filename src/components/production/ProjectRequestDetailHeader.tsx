@@ -4,6 +4,9 @@ import type { ProjectRequest } from '@/api/project';
 import { StatusBadge } from '@/components/production/StatusBadge';
 import { StageStepper } from '@/components/production/StageStepper';
 import { RecordChatButton } from '@/components/chat/RecordChatButton';
+import { ShareButton } from '@/components/ShareButton';
+import { buildPreviewTable } from '@/lib/shareRecord';
+import { useSharedView } from '@/context/SharedViewContext';
 
 const STAGE_LABELS: Record<string, string> = {
   ts: 'TS',
@@ -26,6 +29,7 @@ function formatWhen(iso?: string) {
 }
 
 export function ProjectRequestDetailHeader({ request }: { request: ProjectRequest }) {
+  const { isSharedView } = useSharedView();
   const stageLabel = STAGE_LABELS[request.current_stage] || request.current_stage;
   const locationLine = [request.site_name, request.region].filter(Boolean).join(' · ');
 
@@ -72,12 +76,58 @@ export function ProjectRequestDetailHeader({ request }: { request: ProjectReques
 
           {/* Inline meta — compact chips */}
           <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+            {!isSharedView && (
+            <ShareButton
+              recordType="project_request"
+              recordId={request.id}
+              pagePath={window.location.pathname}
+              pageTitle={`${request.customer_name} — Service Request #${request.id}`}
+              recordPreview={{
+                title: request.customer_name,
+                reference: `#${request.id}`,
+                status: request.status,
+                site: request.site_name,
+                region: request.region,
+                location: request.location,
+                stage: stageLabel,
+                service_type: request.service_type,
+                capacity: request.capacity,
+                bandwidth: request.bandwidth,
+                created_by: request.created_by_name,
+                submitted: request.created_at,
+                tables: [
+                  buildPreviewTable(
+                    'Remarks',
+                    request.remarks?.map((r) => ({ author: r.author_name, stage: r.stage, comment: r.comment_text, when: new Date(r.created_at).toLocaleString() })),
+                    [
+                      { key: 'author', label: 'Author' },
+                      { key: 'stage', label: 'Stage' },
+                      { key: 'comment', label: 'Comment' },
+                      { key: 'when', label: 'When' },
+                    ]
+                  ),
+                  buildPreviewTable(
+                    'Attachments',
+                    request.attachments?.map((a) => ({ file: a.file_name, uploaded_by: a.uploader_name, stage: a.stage, when: new Date(a.created_at).toLocaleString() })),
+                    [
+                      { key: 'file', label: 'File' },
+                      { key: 'uploaded_by', label: 'Uploaded By' },
+                      { key: 'stage', label: 'Stage' },
+                      { key: 'when', label: 'When' },
+                    ]
+                  ),
+                ].filter(Boolean),
+              }}
+            />
+            )}
+            {!isSharedView && (
             <RecordChatButton
               recordType="project_request"
               recordId={request.id}
               chatChannelId={request.chat_channel_id}
               className="border-indigo-200 text-indigo-700 hover:bg-indigo-50 dark:border-indigo-500/30 dark:text-indigo-300 dark:hover:bg-indigo-500/15"
             />
+            )}
             <span className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--border)] bg-[var(--surface-secondary)] px-2.5 py-1 text-xs text-[var(--text-secondary)]">
               <Layers className="h-3 w-3 text-[var(--text-muted)]" aria-hidden />
               <span className="text-[var(--text-muted)]">Stage</span>

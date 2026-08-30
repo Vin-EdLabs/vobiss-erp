@@ -116,7 +116,7 @@ export function MobileWorkspaceNavDrawer({
           <ul className="space-y-0.5">
             {workspaceLinks.map((item) => {
               const Icon = item.icon || iconFor(item.path);
-              const active = location.pathname === item.path;
+              const active = location.pathname.startsWith(item.path);
               const badge = 'badge' in item ? (item as { badge?: number }).badge : 0;
               return (
                 <li key={item.path}>

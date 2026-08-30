@@ -1,6 +1,6 @@
 // src/pages/finance/FinanceApprovals.tsx
 import React, { useState, useEffect } from 'react';
-import { Search, Clock, CheckCircle, DollarSign, XCircle } from 'lucide-react';
+import { Search } from 'lucide-react';
 import { getRequests, approveRequest, rejectRequest } from '../../api';
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
@@ -10,6 +10,10 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Link } from 'react-router-dom';
 import Modal from '../../components/Modal';
 import { useAuth } from '../../context/AuthContext';
+import { formatPersonName } from '@/lib/displayName';
+import { PersonName } from '@/components/PersonName';
+import type { ApprovalQueueTab } from '../../lib/approvalQueue';
+import { QueueStatusBadge } from '../../components/approvals/ApprovalProgress';
 
 interface CashRequest {
   id: number;
@@ -29,7 +33,7 @@ const FinanceApprovals: React.FC = () => {
   const [requests, setRequests] = useState<CashRequest[]>([]);
   const [filtered, setFiltered] = useState<CashRequest[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
-  const [activeTab, setActiveTab] = useState<'supervisor_approved' | 'finance_approved' | 'completed' | 'rejected'>('supervisor_approved');
+  const [activeTab, setActiveTab] = useState<ApprovalQueueTab>('pending_mine');
   const [loading, setLoading] = useState(true);
   const [selectedRequest, setSelectedRequest] = useState<CashRequest | null>(null);
   const [isApproveModalOpen, setIsApproveModalOpen] = useState(false);
@@ -40,9 +44,7 @@ const FinanceApprovals: React.FC = () => {
 
   const { toast } = useToast();
 
-  const financeOfficerName = user?.first_name && user?.last_name 
-    ? `${user.first_name} ${user.last_name}` 
-    : user?.username || 'Finance Officer';
+  const financeOfficerName = formatPersonName(user, 'Finance Officer');
 
   useEffect(() => {
     loadRequests();
@@ -75,15 +77,19 @@ const FinanceApprovals: React.FC = () => {
     }
   };
 
+  const financeTab = (request: CashRequest): ApprovalQueueTab => {
+    if (request.status === 'supervisor_approved') return 'pending_mine';
+    if (request.status === 'pending') return 'waiting_others';
+    return 'completed';
+  };
+
   const filterRequests = () => {
-    let filtered = requests.filter(r => r.status === activeTab);
+    let next = requests.filter((r) => financeTab(r) === activeTab);
     if (searchTerm.trim()) {
       const term = searchTerm.toLowerCase();
-      filtered = filtered.filter(r =>
-        r.created_by?.toLowerCase().includes(term)
-      );
+      next = next.filter((r) => r.created_by?.toLowerCase().includes(term));
     }
-    setFiltered(filtered);
+    setFiltered(next);
   };
 
   const handleApprove = async () => {
@@ -172,35 +178,6 @@ const FinanceApprovals: React.FC = () => {
     return num.toFixed(2);
   };
 
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'supervisor_approved': return 'bg-yellow-100 text-yellow-800';
-      case 'finance_approved': return 'bg-indigo-100 text-indigo-800';
-      case 'completed': return 'bg-green-100 text-green-800';
-      case 'rejected': return 'bg-red-100 text-red-800';
-      default: return 'bg-gray-100 text-gray-800';
-    }
-  };
-
-  const getStatusLabel = (status: string) => {
-    switch (status) {
-      case 'supervisor_approved': return 'Waiting for Finance';
-      case 'finance_approved': return 'Cash Released';
-      case 'completed': return 'Received';
-      case 'rejected': return 'Rejected';
-      default: return status;
-    }
-  };
-
-  // Correctly display the First Approver (Supervisor) name
-  const getFirstApproverName = (request: CashRequest): string => {
-    // Only show supervisor name if the request has passed supervisor approval
-    if (['supervisor_approved', 'finance_approved', 'completed'].includes(request.status)) {
-      return request.supervisor_approved_by || 'Supervisor ';
-    }
-    return '—';
-  };
-
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-screen">
@@ -231,19 +208,16 @@ const FinanceApprovals: React.FC = () => {
         </div>
       </div>
 
-      <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as any)}>
-        <TabsList className="grid grid-cols-4 w-full mb-6">
-          <TabsTrigger value="supervisor_approved">
-            Waiting for Release ({requests.filter(r => r.status === 'supervisor_approved').length})
+      <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as ApprovalQueueTab)}>
+        <TabsList className="grid grid-cols-3 w-full mb-6">
+          <TabsTrigger value="pending_mine">
+            Pending My Action ({requests.filter((r) => financeTab(r) === 'pending_mine').length})
           </TabsTrigger>
-          <TabsTrigger value="finance_approved">
-            Released ({requests.filter(r => r.status === 'finance_approved').length})
+          <TabsTrigger value="waiting_others">
+            Waiting for Others ({requests.filter((r) => financeTab(r) === 'waiting_others').length})
           </TabsTrigger>
           <TabsTrigger value="completed">
-            Completed ({requests.filter(r => r.status === 'completed').length})
-          </TabsTrigger>
-          <TabsTrigger value="rejected">
-            Rejected ({requests.filter(r => r.status === 'rejected').length})
+            Completed ({requests.filter((r) => financeTab(r) === 'completed').length})
           </TabsTrigger>
         </TabsList>
 
@@ -256,7 +230,6 @@ const FinanceApprovals: React.FC = () => {
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">ID</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">Requestor</th>
                     <th className="px-6 py-3 text-center text-xs font-medium text-gray-700 uppercase tracking-wider">Amount (GHS)</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">First Approver</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">Status</th>
                     <th className="px-6 py-3 text-center text-xs font-medium text-gray-700 uppercase tracking-wider">Actions</th>
                   </tr>
@@ -264,7 +237,7 @@ const FinanceApprovals: React.FC = () => {
                 <tbody className="divide-y divide-gray-200">
                   {filtered.length === 0 ? (
                     <tr>
-                      <td colSpan={6} className="text-center py-16 text-gray-500 text-lg">
+                      <td colSpan={5} className="text-center py-16 text-gray-500 text-lg">
                         No cash requests in this status
                       </td>
                     </tr>
@@ -278,7 +251,7 @@ const FinanceApprovals: React.FC = () => {
                         </td>
                         <td className="px-6 py-4">
                           <div className="font-medium text-gray-900 whitespace-nowrap">
-                            {request.created_by}
+                            <PersonName value={request.created_by} />
                           </div>
                         </td>
                         <td className="px-6 py-4 text-center whitespace-nowrap">
@@ -286,19 +259,8 @@ const FinanceApprovals: React.FC = () => {
                             GHS {formatAmount(request.total_amount)}
                           </div>
                         </td>
-                        <td className="px-6 py-4 text-sm">
-                          <div className="font-medium text-gray-900">
-                            {getFirstApproverName(request)}
-                          </div>
-                        </td>
                         <td className="px-6 py-4">
-                          <span className={`inline-flex items-center px-4 py-2 rounded-full text-sm font-medium ${getStatusColor(request.status)}`}>
-                            {request.status === 'supervisor_approved' && <Clock className="h-4 w-4 mr-2" />}
-                            {request.status === 'finance_approved' && <DollarSign className="h-4 w-4 mr-2" />}
-                            {request.status === 'completed' && <CheckCircle className="h-4 w-4 mr-2" />}
-                            {request.status === 'rejected' && <XCircle className="h-4 w-4 mr-2" />}
-                            {getStatusLabel(request.status)}
-                          </span>
+                          <QueueStatusBadge item={request} tab={activeTab} />
                         </td>
                         <td className="px-6 py-4">
                           <div className="flex flex-col sm:flex-row items-center justify-center gap-2">
@@ -309,7 +271,7 @@ const FinanceApprovals: React.FC = () => {
                               View Details
                             </Link>
 
-                            {request.status === 'supervisor_approved' && (
+                            {activeTab === 'pending_mine' && request.status === 'supervisor_approved' && (
                               <div className="flex gap-2 mt-2 sm:mt-0 order-2">
                                 <Button
                                   size="sm"

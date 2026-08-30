@@ -95,9 +95,10 @@ async function askFor(req, message, history, pageContext = null) {
   return askVobi(message, req.user.id, role, position, history || [], pageContext);
 }
 
-async function historyFor(req) {
+async function historyFor(req, options = {}) {
   const clientHistory = Array.isArray(req.body?.history) ? req.body.history : [];
-  const dbHistory = await loadVobiConversationHistory(req.user.id);
+  const limit = options.light ? 8 : undefined;
+  const dbHistory = await loadVobiConversationHistory(req.user.id, limit);
   return mergeVobiHistories(dbHistory, clientHistory);
 }
 
@@ -343,7 +344,15 @@ router.post('/command', vobiLimiter, async (req, res) => {
     }
 
     const enriched = await enrichPrompt(req.user.id, prompt, intent);
-    let reply = await askFor(req, enriched, await historyFor(req), pageContext);
+    const lightChat =
+      intent === 'greeting' ||
+      /^(hi|hey|hello|thanks|thank you|ok|okay)[\s!.?]*$/i.test(text);
+    let reply = await askFor(
+      req,
+      enriched,
+      await historyFor(req, { light: lightChat }),
+      pageContext
+    );
     if (!String(reply || '').trim()) {
       reply =
         intent === 'audit'

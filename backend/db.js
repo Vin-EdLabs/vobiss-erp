@@ -8,6 +8,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import bcrypt from 'bcrypt';
 import crypto from 'crypto';
+import { formatPersonName } from './utils/displayName.js';
 import { initTicketingDB } from './db.ticketing.cjs';
 import { DEFAULT_TICKET_ESCALATION, normalizeTicketEscalationConfig } from './ticketEscalationConfig.js';
 import { DEFAULT_TICKET_SLA, normalizeTicketSlaConfig } from './ticketSlaConfig.js';
@@ -611,6 +612,45 @@ export async function initDB() {
     await addColumnIfNotExists('requests', 'ticket_id', 'INTEGER REFERENCES tickets(id) ON DELETE SET NULL');
     await addColumnIfNotExists('requests', 'linked_cash_request_id', 'INTEGER REFERENCES requests(id) ON DELETE SET NULL');
 
+    await createTableIfNotExists(`
+      CREATE TABLE IF NOT EXISTS shared_links (
+        id SERIAL PRIMARY KEY,
+        token VARCHAR(128) UNIQUE NOT NULL,
+        record_type VARCHAR(80) NOT NULL,
+        record_id INTEGER NOT NULL,
+        visibility VARCHAR(16) NOT NULL DEFAULT 'private' CHECK (visibility IN ('public', 'private')),
+        created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        expires_at TIMESTAMP NULL,
+        revoked BOOLEAN NOT NULL DEFAULT FALSE,
+        view_count INTEGER NOT NULL DEFAULT 0,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+    `, 'shared_links');
+    await pool.query('CREATE INDEX IF NOT EXISTS shared_links_token_idx ON shared_links(token)');
+    await pool.query('CREATE INDEX IF NOT EXISTS shared_links_creator_idx ON shared_links(created_by_user_id, created_at DESC)');
+    await addColumnIfNotExists('shared_links', 'page_path', 'TEXT');
+    await addColumnIfNotExists('shared_links', 'page_title', 'TEXT');
+    await addColumnIfNotExists('shared_links', 'record_preview', 'TEXT');
+    await addColumnIfNotExists('shared_links', 'created_by_name', 'VARCHAR(255)');
+    await pool.query('CREATE INDEX IF NOT EXISTS shared_links_record_idx ON shared_links(record_type, record_id)');
+
+    await createTableIfNotExists(`
+      CREATE TABLE IF NOT EXISTS linked_references (
+        id SERIAL PRIMARY KEY,
+        source_record_type VARCHAR(80) NOT NULL,
+        source_record_id INTEGER NOT NULL,
+        linked_record_type VARCHAR(80) NOT NULL,
+        linked_record_id INTEGER NOT NULL,
+        linked_reference_number VARCHAR(80) NOT NULL,
+        linked_title TEXT,
+        linked_status VARCHAR(80),
+        created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+    `, 'linked_references');
+    await pool.query('CREATE INDEX IF NOT EXISTS linked_references_source_idx ON linked_references(source_record_type, source_record_id)');
+    await pool.query('CREATE INDEX IF NOT EXISTS linked_references_linked_idx ON linked_references(linked_record_type, linked_record_id)');
+
     try {
       await pool.query('ALTER TABLE requests ALTER COLUMN team_leader_name DROP NOT NULL');
       await pool.query('ALTER TABLE requests ALTER COLUMN team_leader_phone DROP NOT NULL');
@@ -672,6 +712,166 @@ export async function initDB() {
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
     `, 'rejections');
+
+    await createTableIfNotExists(`
+      CREATE TABLE IF NOT EXISTS transport_requests (
+        id SERIAL PRIMARY KEY,
+        requester_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        requester_name VARCHAR(255) NOT NULL,
+        site_name VARCHAR(255) NOT NULL,
+        location TEXT NOT NULL,
+        client_name VARCHAR(255) NOT NULL,
+        engineer_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        purpose TEXT,
+        status VARCHAR(30) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected')),
+        current_stage VARCHAR(30) NOT NULL DEFAULT 'approver' CHECK (current_stage IN ('approver', 'supervisor')),
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        deleted_at TIMESTAMP
+      );
+    `, 'transport_requests');
+    await addColumnIfNotExists('transport_requests', 'requester_id', 'INTEGER REFERENCES users(id) ON DELETE SET NULL');
+    await addColumnIfNotExists('transport_requests', 'engineer_id', 'INTEGER REFERENCES users(id) ON DELETE SET NULL');
+    await addColumnIfNotExists('transport_requests', 'purpose', 'TEXT');
+    await addColumnIfNotExists('transport_requests', 'current_stage', "VARCHAR(30) NOT NULL DEFAULT 'approver' CHECK (current_stage IN ('approver', 'supervisor'))");
+    await addColumnIfNotExists('transport_requests', 'deleted_at', 'TIMESTAMP');
+    await addColumnIfNotExists('transport_requests', 'reference_type', 'VARCHAR(40)');
+    await addColumnIfNotExists('transport_requests', 'reference_id', 'INTEGER');
+    await addColumnIfNotExists('transport_requests', 'reference_number', 'VARCHAR(80)');
+    await addColumnIfNotExists('transport_requests', 'reference_title', 'TEXT');
+    await addColumnIfNotExists('transport_requests', 'reference_status', 'VARCHAR(80)');
+    await addColumnIfNotExists('transport_requests', 'selected_approver_ids', "JSONB NOT NULL DEFAULT '[]'::jsonb");
+
+    await createTableIfNotExists(`
+      CREATE TABLE IF NOT EXISTS transport_request_approvals (
+        id SERIAL PRIMARY KEY,
+        request_id INTEGER NOT NULL REFERENCES transport_requests(id) ON DELETE CASCADE,
+        approver_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        approver_name VARCHAR(255) NOT NULL,
+        stage VARCHAR(30) NOT NULL CHECK (stage IN ('approver', 'supervisor')),
+        decision VARCHAR(30) NOT NULL CHECK (decision IN ('approved', 'rejected')),
+        reason TEXT,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+    `, 'transport_request_approvals');
+
+    await createTableIfNotExists(`
+      CREATE TABLE IF NOT EXISTS vehicle_request_forms (
+        id SERIAL PRIMARY KEY,
+        transport_request_id INTEGER REFERENCES transport_requests(id) ON DELETE SET NULL,
+        requester_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        supervisor_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        department VARCHAR(255),
+        requestor_name VARCHAR(255),
+        purpose TEXT,
+        date_submitted TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        deliver_to VARCHAR(255),
+        phone VARCHAR(255),
+        special_instructions TEXT,
+        order_no VARCHAR(255),
+        invoice_terms VARCHAR(255),
+        received_by VARCHAR(255),
+        line_items JSONB NOT NULL DEFAULT '[]'::jsonb,
+        attachments JSONB NOT NULL DEFAULT '[]'::jsonb,
+        selected_approver_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
+        status VARCHAR(30) NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'pending', 'approved', 'sent_to_finance', 'cash_issued', 'completed', 'rejected')),
+        current_stage VARCHAR(30) NOT NULL DEFAULT 'draft' CHECK (current_stage IN ('draft', 'pending', 'finance', 'cash_issued', 'completed', 'rejected')),
+        approver_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        finance_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        deleted_at TIMESTAMP
+      );
+    `, 'vehicle_request_forms');
+
+    try {
+      await pool.query('ALTER TABLE vehicle_request_forms ALTER COLUMN transport_request_id DROP NOT NULL;');
+    } catch (error) {
+      // ignore if column is already nullable or table not ready
+    }
+
+    await addColumnIfNotExists('vehicle_request_forms', 'attachments', "JSONB DEFAULT '[]'::jsonb");
+    await addColumnIfNotExists('vehicle_request_forms', 'line_items', "JSONB DEFAULT '[]'::jsonb");
+    await addColumnIfNotExists('vehicle_request_forms', 'selected_approver_ids', "JSONB DEFAULT '[]'::jsonb");
+    await addColumnIfNotExists('vehicle_request_forms', 'department', 'VARCHAR(255)');
+    await addColumnIfNotExists('vehicle_request_forms', 'requestor_name', 'VARCHAR(255)');
+    await addColumnIfNotExists('vehicle_request_forms', 'purpose', 'TEXT');
+    await addColumnIfNotExists('vehicle_request_forms', 'deliver_to', 'VARCHAR(255)');
+    await addColumnIfNotExists('vehicle_request_forms', 'phone', 'VARCHAR(255)');
+    await addColumnIfNotExists('vehicle_request_forms', 'special_instructions', 'TEXT');
+    await addColumnIfNotExists('vehicle_request_forms', 'order_no', 'VARCHAR(255)');
+    await addColumnIfNotExists('vehicle_request_forms', 'invoice_terms', 'VARCHAR(255)');
+    await addColumnIfNotExists('vehicle_request_forms', 'received_by', 'VARCHAR(255)');
+    await addColumnIfNotExists('vehicle_request_forms', 'status', "VARCHAR(30) NOT NULL DEFAULT 'draft'");
+    await addColumnIfNotExists('vehicle_request_forms', 'current_stage', "VARCHAR(30) NOT NULL DEFAULT 'draft'");
+    await addColumnIfNotExists('vehicle_request_forms', 'deleted_at', 'TIMESTAMP');
+    await addColumnIfNotExists('vehicle_request_forms', 'reference_type', 'VARCHAR(40)');
+    await addColumnIfNotExists('vehicle_request_forms', 'reference_id', 'INTEGER');
+    await addColumnIfNotExists('vehicle_request_forms', 'reference_number', 'VARCHAR(80)');
+    await addColumnIfNotExists('vehicle_request_forms', 'reference_title', 'TEXT');
+    await addColumnIfNotExists('vehicle_request_forms', 'reference_status', 'VARCHAR(80)');
+
+    await migrateVehicleRentalWorkflow();
+
+    await createTableIfNotExists(`
+      CREATE TABLE IF NOT EXISTS fuel_requests (
+        id SERIAL PRIMARY KEY,
+        ref_no VARCHAR(50) UNIQUE NOT NULL,
+        requester_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        requester_name VARCHAR(255) NOT NULL,
+        department VARCHAR(255),
+        project_ticket_ref VARCHAR(255),
+        project_id INTEGER,
+        ticket_id INTEGER,
+        vehicle_plate VARCHAR(100) NOT NULL,
+        fuel_type VARCHAR(50) NOT NULL,
+        quantity_litres NUMERIC(10, 2) NOT NULL,
+        price_per_litre NUMERIC(10, 2),
+        estimated_amount NUMERIC(10, 2) NOT NULL,
+        purpose TEXT,
+        selected_approver_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
+        status VARCHAR(50) NOT NULL DEFAULT 'Pending',
+        current_stage VARCHAR(50) NOT NULL DEFAULT 'approver',
+        receipt_url TEXT,
+        receipt_filename VARCHAR(255),
+        receipt_uploaded_at TIMESTAMP,
+        cash_issued_at TIMESTAMP,
+        cash_issued_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        completed_at TIMESTAMP,
+        completed_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        rejected_at TIMESTAMP,
+        rejected_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        rejection_reason TEXT,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        deleted_at TIMESTAMP
+      );
+    `, 'fuel_requests');
+
+    await addColumnIfNotExists('fuel_requests', 'selected_approver_ids', "JSONB DEFAULT '[]'::jsonb");
+    await addColumnIfNotExists('fuel_requests', 'reference_type', 'VARCHAR(40)');
+    await addColumnIfNotExists('fuel_requests', 'reference_number', 'VARCHAR(255)');
+    await addColumnIfNotExists('fuel_requests', 'reference_title', 'TEXT');
+    await addColumnIfNotExists('fuel_requests', 'reference_id', 'INTEGER');
+    await addColumnIfNotExists('fuel_requests', 'reference_status', 'VARCHAR(80)');
+    try {
+      await pool.query('ALTER TABLE fuel_requests DROP CONSTRAINT IF EXISTS fuel_requests_reference_type_check');
+    } catch (error) {
+      console.warn('fuel_requests reference_type constraint:', error.message);
+    }
+
+    await createTableIfNotExists(`
+      CREATE TABLE IF NOT EXISTS fuel_request_approvals (
+        id SERIAL PRIMARY KEY,
+        request_id INTEGER NOT NULL REFERENCES fuel_requests(id) ON DELETE CASCADE,
+        approver_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        approver_name VARCHAR(255) NOT NULL,
+        stage VARCHAR(50) NOT NULL,
+        decision VARCHAR(50) NOT NULL,
+        reason TEXT,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+    `, 'fuel_request_approvals');
 
     // System notifications (set by superadmin) and per-user read tracking
     await createTableIfNotExists(`
@@ -959,6 +1159,24 @@ export async function initDB() {
       }
     } catch (e) { console.warn('Field admin seed error:', e.message); }
 
+    await createTableIfNotExists(`
+      CREATE TABLE IF NOT EXISTS activity_logs (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        action_type VARCHAR(80) NOT NULL,
+        description TEXT NOT NULL,
+        record_type VARCHAR(80) NOT NULL,
+        record_id INTEGER,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+    `, 'activity_logs');
+    try {
+      await pool.query(`CREATE INDEX IF NOT EXISTS activity_logs_user_created_idx ON activity_logs (user_id, created_at DESC)`);
+      await pool.query(`CREATE INDEX IF NOT EXISTS activity_logs_action_type_idx ON activity_logs (action_type)`);
+    } catch (e) {
+      console.warn('activity_logs indexes:', e.message);
+    }
+
     try {
       const { initProjectRequestTables } = await import('./db/project.js');
       await initProjectRequestTables();
@@ -1079,6 +1297,15 @@ const DEFAULT_WORKFLOW_CONFIG = {
       { min_amount: 1500, requires_director: true, required_approvers_before_director: 2 },
     ],
   },
+  transport: {
+    approver_ids: [],
+    supervisor_id: null,
+    vehicle_request_approver_ids: [],
+    finance_user_ids: [],
+    fuel_request_approver_ids: [],
+    price_per_litre: null,
+    require_reference_link: false,
+  },
   ticket_escalation: DEFAULT_TICKET_ESCALATION,
   ticket_sla: DEFAULT_TICKET_SLA,
 };
@@ -1088,12 +1315,23 @@ export async function getWorkflowConfig() {
     const result = await pool.query(
       "SELECT value FROM settings WHERE key_name = 'workflow_config'"
     );
+    const realm = await getRealmApprovers();
     if (result.rowCount === 0 || !result.rows[0].value) {
-      return {
+      const fallback = {
         ...DEFAULT_WORKFLOW_CONFIG,
+        transport: {
+          approver_ids: normalizeIdList(realm.transport_approver_ids || DEFAULT_WORKFLOW_CONFIG.transport.approver_ids),
+          supervisor_id: normalizeTransportSupervisorId(realm.transport_supervisor_ids) ?? DEFAULT_WORKFLOW_CONFIG.transport.supervisor_id,
+          vehicle_request_approver_ids: normalizeIdList(realm.vehicle_request_approver_ids || DEFAULT_WORKFLOW_CONFIG.transport.vehicle_request_approver_ids),
+          finance_user_ids: normalizeIdList(realm.finance_user_ids || DEFAULT_WORKFLOW_CONFIG.transport.finance_user_ids),
+          fuel_request_approver_ids: normalizeIdList(realm.fuel_request_approver_ids || []),
+          price_per_litre: null,
+          require_reference_link: false,
+        },
         ticket_escalation: normalizeTicketEscalationConfig(DEFAULT_TICKET_ESCALATION),
         ticket_sla: normalizeTicketSlaConfig(DEFAULT_TICKET_SLA),
       };
+      return fallback;
     }
     const parsed = JSON.parse(result.rows[0].value);
     const rawMaterial = parsed.material || {};
@@ -1115,9 +1353,31 @@ export async function getWorkflowConfig() {
       amount_thresholds:
         rawFinance.amount_thresholds || DEFAULT_WORKFLOW_CONFIG.finance.amount_thresholds,
     };
+    const workflowTransport = parsed.transport || {};
+    const workflowApproverIds = normalizeIdList(workflowTransport.approver_ids || []);
+    const workflowVehicleApproverIds = normalizeIdList(workflowTransport.vehicle_request_approver_ids || []);
+    const workflowFinanceIds = normalizeIdList(workflowTransport.finance_user_ids || []);
+    const workflowFuelApproverIds = normalizeIdList(workflowTransport.fuel_request_approver_ids || []);
+    const realmApproverIds = normalizeIdList(realm.transport_approver_ids || []);
+    const realmVehicleApproverIds = normalizeIdList(realm.vehicle_request_approver_ids || []);
+    const realmFinanceIds = normalizeIdList(realm.finance_user_ids || []);
+    const realmFuelApproverIds = normalizeIdList(realm.fuel_request_approver_ids || []);
+
+    const transport = {
+      approver_ids: normalizeIdList([...workflowApproverIds, ...realmApproverIds]),
+      supervisor_id: normalizeTransportSupervisorId(workflowTransport.supervisor_id) ?? normalizeTransportSupervisorId(workflowTransport.transport_supervisor_ids) ?? normalizeTransportSupervisorId(realm.transport_supervisor_ids) ?? null,
+      vehicle_request_approver_ids: normalizeIdList([...workflowVehicleApproverIds, ...realmVehicleApproverIds]),
+      finance_user_ids: normalizeIdList([...workflowFinanceIds, ...realmFinanceIds]),
+      fuel_request_approver_ids: normalizeIdList([...workflowFuelApproverIds, ...realmFuelApproverIds]),
+      price_per_litre: workflowTransport.price_per_litre !== undefined && workflowTransport.price_per_litre !== null && workflowTransport.price_per_litre !== ''
+        ? Number(workflowTransport.price_per_litre)
+        : null,
+      require_reference_link: workflowTransport.require_reference_link === true || workflowTransport.require_reference_link === 'required',
+    };
     return {
       material,
       finance,
+      transport,
       ticket_escalation: normalizeTicketEscalationConfig(
         parsed.ticket_escalation || DEFAULT_WORKFLOW_CONFIG.ticket_escalation
       ),
@@ -1127,6 +1387,7 @@ export async function getWorkflowConfig() {
     console.error('Error fetching workflow config:', error.stack);
     return {
       ...DEFAULT_WORKFLOW_CONFIG,
+      transport: { ...DEFAULT_WORKFLOW_CONFIG.transport },
       ticket_escalation: normalizeTicketEscalationConfig(DEFAULT_TICKET_ESCALATION),
       ticket_sla: normalizeTicketSlaConfig(DEFAULT_TICKET_SLA),
     };
@@ -1162,6 +1423,18 @@ export async function updateWorkflowConfig(config) {
   const incomingFinance = config.finance || existing.finance || {};
   const amountThresholds =
     incomingFinance.amount_thresholds || DEFAULT_WORKFLOW_CONFIG.finance.amount_thresholds;
+  const incomingTransport = config.transport || existing.transport || {};
+  const transportApproverIds = normalizeIdList(incomingTransport.approver_ids || []);
+  const transportSupervisorId = normalizeTransportSupervisorId(incomingTransport.supervisor_id) ?? normalizeTransportSupervisorId(incomingTransport.transport_supervisor_ids) ?? null;
+  const transportSupervisorIds = normalizeIdList(
+    Array.isArray(incomingTransport.transport_supervisor_ids)
+      ? incomingTransport.transport_supervisor_ids
+      : transportSupervisorId ? [transportSupervisorId] : []
+  );
+
+  const priceVal = incomingTransport.price_per_litre !== undefined && incomingTransport.price_per_litre !== null && incomingTransport.price_per_litre !== ''
+    ? Number(incomingTransport.price_per_litre)
+    : null;
 
   const sanitized = {
     material: {
@@ -1174,12 +1447,32 @@ export async function updateWorkflowConfig(config) {
         ? amountThresholds
         : DEFAULT_WORKFLOW_CONFIG.finance.amount_thresholds,
     },
+    transport: {
+      approver_ids: transportApproverIds,
+      supervisor_id: transportSupervisorId,
+      transport_supervisor_ids: transportSupervisorIds,
+      vehicle_request_approver_ids: normalizeIdList(incomingTransport.vehicle_request_approver_ids || []),
+      finance_user_ids: normalizeIdList(incomingTransport.finance_user_ids || []),
+      fuel_request_approver_ids: normalizeIdList(incomingTransport.fuel_request_approver_ids || []),
+      price_per_litre: Number.isFinite(priceVal) && priceVal >= 0 ? priceVal : null,
+      require_reference_link: incomingTransport.require_reference_link === true || incomingTransport.require_reference_link === 'required',
+    },
     ticket_escalation: normalizeTicketEscalationConfig(
       config.ticket_escalation ?? existing.ticket_escalation
     ),
     ticket_sla: normalizeTicketSlaConfig(config.ticket_sla ?? existing.ticket_sla),
   };
   await updateSetting('workflow_config', JSON.stringify(sanitized));
+
+  const realm = await getRealmApprovers();
+  await updateRealmApprovers({
+    ...realm,
+    transport_approver_ids: normalizeIdList([...transportApproverIds, ...(realm.transport_approver_ids || [])]),
+    transport_supervisor_ids: normalizeIdList([...transportSupervisorIds, ...(realm.transport_supervisor_ids || [])]),
+    vehicle_request_approver_ids: normalizeIdList((config.transport || existing.transport || {}).vehicle_request_approver_ids || realm.vehicle_request_approver_ids || []),
+    finance_user_ids: normalizeIdList((config.transport || existing.transport || {}).finance_user_ids || realm.finance_user_ids || []),
+  });
+
   try {
     const { resyncOpenTicketEscalationTimers } = await import('./ticketEscalation.js');
     const sync = await resyncOpenTicketEscalationTimers();
@@ -1195,7 +1488,22 @@ export async function updateWorkflowConfig(config) {
 const DEFAULT_REALM_APPROVERS = {
   material_user_ids: [],
   cash_user_ids: [],
+  transport_approver_ids: [],
+  transport_supervisor_ids: [],
+  vehicle_request_approver_ids: [],
+  finance_user_ids: [],
+  fuel_request_approver_ids: [],
 };
+
+function normalizeTransportSupervisorId(value) {
+  if (Array.isArray(value)) {
+    const ids = normalizeIdList(value);
+    return ids[0] || null;
+  }
+  if (value === null || value === undefined || value === '') return null;
+  const id = Number(value);
+  return Number.isInteger(id) && id > 0 ? id : null;
+}
 
 function normalizeIdList(value) {
   if (!Array.isArray(value)) return [];
@@ -1215,6 +1523,11 @@ export async function getRealmApprovers() {
     const realm = {
       material_user_ids: normalizeIdList(parsed.material_user_ids),
       cash_user_ids: normalizeIdList(parsed.cash_user_ids),
+      transport_approver_ids: normalizeIdList(parsed.transport_approver_ids),
+      transport_supervisor_ids: normalizeIdList(parsed.transport_supervisor_ids),
+      vehicle_request_approver_ids: normalizeIdList(parsed.vehicle_request_approver_ids),
+      finance_user_ids: normalizeIdList(parsed.finance_user_ids),
+      fuel_request_approver_ids: normalizeIdList(parsed.fuel_request_approver_ids),
     };
     setRealmApproverIds(realm);
     return realm;
@@ -1229,8 +1542,32 @@ export async function updateRealmApprovers(payload = {}) {
   const realm = {
     material_user_ids: normalizeIdList(payload.material_user_ids),
     cash_user_ids: normalizeIdList(payload.cash_user_ids),
+    transport_approver_ids: normalizeIdList(payload.transport_approver_ids),
+    transport_supervisor_ids: normalizeIdList(payload.transport_supervisor_ids),
+    vehicle_request_approver_ids: normalizeIdList(payload.vehicle_request_approver_ids),
+    finance_user_ids: normalizeIdList(payload.finance_user_ids),
+    fuel_request_approver_ids: normalizeIdList(payload.fuel_request_approver_ids),
   };
+
+  const configRow = await pool.query("SELECT value FROM settings WHERE key_name = 'workflow_config'");
+  const existingWorkflow = configRow.rowCount > 0 && configRow.rows[0].value ? JSON.parse(configRow.rows[0].value) : { ...DEFAULT_WORKFLOW_CONFIG };
+  const primarySupervisor = normalizeTransportSupervisorId(realm.transport_supervisor_ids) ?? normalizeTransportSupervisorId(existingWorkflow.transport?.supervisor_id) ?? null;
+  const mergedWorkflow = {
+    ...existingWorkflow,
+    transport: {
+      ...DEFAULT_WORKFLOW_CONFIG.transport,
+      ...(existingWorkflow.transport || {}),
+      approver_ids: normalizeIdList(realm.transport_approver_ids),
+      supervisor_id: primarySupervisor,
+      transport_supervisor_ids: normalizeIdList(realm.transport_supervisor_ids),
+      vehicle_request_approver_ids: normalizeIdList(realm.vehicle_request_approver_ids),
+      finance_user_ids: normalizeIdList(realm.finance_user_ids),
+      fuel_request_approver_ids: normalizeIdList(realm.fuel_request_approver_ids),
+    },
+  };
+
   await updateSetting('realm_approvers', JSON.stringify(realm));
+  await updateSetting('workflow_config', JSON.stringify(mergedWorkflow));
   setRealmApproverIds(realm);
   return realm;
 }
@@ -2729,19 +3066,32 @@ export async function getRequests(userRole, userId) {
       SELECT
         r.*,
         r.type, r.reason, r.department, r.purpose, r.total_amount, r.date_needed,
+        COALESCE(
+          (SELECT NULLIF(TRIM(CONCAT(COALESCE(u.first_name, ''), ' ', COALESCE(u.last_name, ''))), '') FROM users u WHERE u.id = r.created_by_id),
+          r.created_by
+        ) AS created_by_display,
         (SELECT reason FROM rejections WHERE request_id = r.id ORDER BY created_at DESC LIMIT 1) AS reject_reason,
         COUNT(ri.id) AS item_count,
         COALESCE(
-          (SELECT STRING_AGG(u.first_name || ' ' || u.last_name, ', ')
+          (SELECT STRING_AGG(NULLIF(TRIM(CONCAT(COALESCE(u.first_name, ''), ' ', COALESCE(u.last_name, ''))), ''), ', ')
            FROM request_approvers ra JOIN users u ON ra.approver_id = u.id
            WHERE ra.request_id = r.id),
           'Unassigned'
         ) AS assigned_approver_name,
-        (SELECT approver_name FROM approvals WHERE request_id = r.id AND approval_stage = 'supervisor' ORDER BY created_at DESC LIMIT 1) AS supervisor_approved_by,
+        (SELECT COALESCE(
+            (SELECT NULLIF(TRIM(CONCAT(COALESCE(u.first_name, ''), ' ', COALESCE(u.last_name, ''))), '') FROM users u WHERE u.id = a.approver_id),
+            a.approver_name
+          ) FROM approvals a WHERE a.request_id = r.id AND a.approval_stage = 'supervisor' ORDER BY a.created_at DESC LIMIT 1) AS supervisor_approved_by,
         (SELECT created_at FROM approvals WHERE request_id = r.id AND approval_stage = 'supervisor' ORDER BY created_at DESC LIMIT 1) AS supervisor_approved_at,
-        (SELECT approver_name FROM approvals WHERE request_id = r.id AND approval_stage = 'director' ORDER BY created_at DESC LIMIT 1) AS director_approved_by,
+        (SELECT COALESCE(
+            (SELECT NULLIF(TRIM(CONCAT(COALESCE(u.first_name, ''), ' ', COALESCE(u.last_name, ''))), '') FROM users u WHERE u.id = a.approver_id),
+            a.approver_name
+          ) FROM approvals a WHERE a.request_id = r.id AND a.approval_stage = 'director' ORDER BY a.created_at DESC LIMIT 1) AS director_approved_by,
         (SELECT created_at FROM approvals WHERE request_id = r.id AND approval_stage = 'director' ORDER BY created_at DESC LIMIT 1) AS director_approved_at,
-        (SELECT approver_name FROM approvals WHERE request_id = r.id AND approval_stage = 'finance' ORDER BY created_at DESC LIMIT 1) AS finance_approved_by,
+        (SELECT COALESCE(
+            (SELECT NULLIF(TRIM(CONCAT(COALESCE(u.first_name, ''), ' ', COALESCE(u.last_name, ''))), '') FROM users u WHERE u.id = a.approver_id),
+            a.approver_name
+          ) FROM approvals a WHERE a.request_id = r.id AND a.approval_stage = 'finance' ORDER BY created_at DESC LIMIT 1) AS finance_approved_by,
         (SELECT created_at FROM approvals WHERE request_id = r.id AND approval_stage = 'finance' ORDER BY created_at DESC LIMIT 1) AS finance_approved_at
       FROM requests r
       LEFT JOIN request_items ri ON r.id = ri.request_id
@@ -2783,6 +3133,7 @@ export async function getRequests(userRole, userId) {
       const approvedSet = new Set(approvedByUser.rows.map((r) => r.request_id));
       rows.forEach((row) => {
         row._approvedByMe = approvedSet.has(row.id);
+        if (row.created_by_display) row.created_by = row.created_by_display;
       });
       const assignedToUser = await pool.query(
         'SELECT request_id FROM request_approvers WHERE approver_id = $1 AND request_id = ANY($2::int[])',
@@ -2791,6 +3142,43 @@ export async function getRequests(userRole, userId) {
       const assignedSet = new Set(assignedToUser.rows.map((r) => r.request_id));
       rows.forEach((row) => {
         row._assignedToMe = assignedSet.has(row.id);
+      });
+      const partiesRes = await pool.query(
+        `SELECT ra.request_id, ra.approver_id, u.first_name, u.last_name, u.username
+         FROM request_approvers ra
+         JOIN users u ON u.id = ra.approver_id
+         WHERE ra.request_id = ANY($1::int[])`,
+        [rows.map((r) => r.id)]
+      );
+      const approvalsRes = await pool.query(
+        `SELECT request_id, approver_id, approver_name, approval_stage, created_at
+         FROM approvals
+         WHERE request_id = ANY($1::int[])
+         ORDER BY created_at ASC`,
+        [rows.map((r) => r.id)]
+      );
+      const partiesByRequest = new Map();
+      for (const party of partiesRes.rows) {
+        const list = partiesByRequest.get(party.request_id) || [];
+        const acted = approvalsRes.rows.filter(
+          (row) => Number(row.request_id) === Number(party.request_id) && Number(row.approver_id) === Number(party.approver_id)
+        ).at(-1);
+        list.push({
+          id: Number(party.approver_id),
+          name: formatPersonName(party, party.username),
+          status: acted ? 'approved' : 'pending',
+          actedAt: acted?.created_at || null,
+        });
+        partiesByRequest.set(party.request_id, list);
+      }
+      rows.forEach((row) => {
+        const parties = partiesByRequest.get(row.id) || [];
+        row.approval_parties = parties;
+        row.approvals_required = parties.length;
+        row.approvals_count = parties.filter((party) => party.status === 'approved').length;
+        row.my_decision = row._approvedByMe ? 'approved' : null;
+        const mine = approvalsRes.rows.filter((item) => Number(item.request_id) === row.id && Number(item.approver_id) === userId).at(-1);
+        row.my_acted_at = mine?.created_at || null;
       });
     }
     const cashPendingIds = rows.filter(r => r.type === 'cash_request' && r.status === 'pending').map(r => r.id);
@@ -3166,12 +3554,81 @@ export async function getNotificationsForUser(userId) {
   }
 }
 
+async function migrateVehicleRentalWorkflow() {
+  await createTableIfNotExists(`
+    CREATE TABLE IF NOT EXISTS vehicle_request_approvals (
+      id SERIAL PRIMARY KEY,
+      request_id INTEGER NOT NULL REFERENCES vehicle_request_forms(id) ON DELETE CASCADE,
+      approver_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      approver_name VARCHAR(255) NOT NULL,
+      stage VARCHAR(50) NOT NULL DEFAULT 'approver',
+      decision VARCHAR(50) NOT NULL CHECK (decision IN ('approved', 'rejected')),
+      reason TEXT,
+      created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+  `, 'vehicle_request_approvals');
+
+  try {
+    await pool.query('ALTER TABLE vehicle_request_forms DROP CONSTRAINT IF EXISTS vehicle_request_forms_status_check');
+    await pool.query('ALTER TABLE vehicle_request_forms DROP CONSTRAINT IF EXISTS vehicle_request_forms_current_stage_check');
+  } catch (error) {
+    console.warn('vehicle_request_forms constraint drop:', error.message);
+  }
+
+  try {
+    await pool.query(`
+      UPDATE vehicle_request_forms SET
+        status = CASE
+          WHEN status IN ('draft') THEN 'draft'
+          WHEN status IN ('submitted', 'pending_manager', 'pending') THEN 'pending'
+          WHEN status IN ('pending_finance', 'approved', 'sent_to_finance') THEN 'approved'
+          WHEN status = 'cash_issued' THEN 'cash_issued'
+          WHEN status = 'completed' THEN 'completed'
+          WHEN status = 'rejected' THEN 'rejected'
+          ELSE 'pending'
+        END,
+        current_stage = CASE
+          WHEN status IN ('draft') THEN 'draft'
+          WHEN status IN ('submitted', 'pending_manager', 'pending') THEN 'pending'
+          WHEN status IN ('pending_finance', 'approved', 'sent_to_finance') THEN 'finance'
+          WHEN status = 'cash_issued' THEN 'cash_issued'
+          WHEN status = 'completed' THEN 'completed'
+          WHEN status = 'rejected' THEN 'rejected'
+          WHEN current_stage IN ('manager', 'approver') THEN 'pending'
+          WHEN current_stage = 'finance' THEN 'finance'
+          ELSE current_stage
+        END
+    `);
+    await pool.query(`ALTER TABLE vehicle_request_forms ALTER COLUMN status SET DEFAULT 'draft'`);
+    await pool.query(`ALTER TABLE vehicle_request_forms ALTER COLUMN current_stage SET DEFAULT 'draft'`);
+    await pool.query(`
+      ALTER TABLE vehicle_request_forms
+      ADD CONSTRAINT vehicle_request_forms_status_check
+      CHECK (status IN ('draft', 'pending', 'approved', 'sent_to_finance', 'cash_issued', 'completed', 'rejected'))
+    `);
+    await pool.query(`
+      ALTER TABLE vehicle_request_forms
+      ADD CONSTRAINT vehicle_request_forms_current_stage_check
+      CHECK (current_stage IN ('draft', 'pending', 'finance', 'cash_issued', 'completed', 'rejected'))
+    `);
+  } catch (error) {
+    console.warn('vehicle_request_forms status migration:', error.message);
+  }
+}
+
 export async function createNotification(
   title,
   message,
   createdBy,
-  { targetUserId = null, linkUrl = null, notificationType = 'broadcast' } = {}
+  fourth,
+  fifth,
+  sixth
 ) {
+  const opts =
+    fourth && typeof fourth === 'object' && !Array.isArray(fourth)
+      ? fourth
+      : { targetUserId: fourth ?? null, linkUrl: fifth ?? null, notificationType: sixth ?? 'broadcast' };
+  const { targetUserId = null, linkUrl = null, notificationType = 'broadcast' } = opts;
   await addColumnIfNotExists('system_notifications', 'target_user_id', 'INTEGER REFERENCES users(id) ON DELETE CASCADE');
   await addColumnIfNotExists('system_notifications', 'link_url', 'TEXT');
   await addColumnIfNotExists('system_notifications', 'notification_type', "VARCHAR(40) DEFAULT 'broadcast'");
@@ -3314,7 +3771,9 @@ export async function approveRequest(requestId, approverData, userId, ip) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    const { approverName, signature, stage } = approverData;
+    const { signature, stage } = approverData;
+    const actorRes = await client.query('SELECT first_name, last_name, username FROM users WHERE id = $1', [userId]);
+    const approverName = formatPersonName(actorRes.rows[0], approverData.approverName);
     const reqCheck = await client.query(
       'SELECT type, status, total_amount, created_by_id FROM requests WHERE id = $1 AND deleted_at IS NULL',
       [requestId]
@@ -3661,6 +4120,10 @@ export async function getRequestDetails(requestId) {
     const request = await pool.query(`
       SELECT
         r.*,
+        COALESCE(
+          NULLIF(TRIM(CONCAT(COALESCE(creator.first_name, ''), ' ', COALESCE(creator.last_name, ''))), ''),
+          r.created_by
+        ) AS created_by,
         t.ticket_id AS ticket_display_id,
         t.title AS ticket_title,
         linked_cash.id AS linked_cash_request_id,
@@ -3670,6 +4133,7 @@ export async function getRequestDetails(requestId) {
         linked_cash.status AS linked_cash_status,
         linked_cash.created_at AS linked_cash_created_at
       FROM requests r
+      LEFT JOIN users creator ON creator.id = r.created_by_id
       LEFT JOIN tickets t ON r.ticket_id = t.id
       LEFT JOIN requests linked_cash
         ON r.linked_cash_request_id = linked_cash.id
@@ -3701,11 +4165,16 @@ export async function getRequestDetails(requestId) {
     }
     const approvals = await pool.query(`
       SELECT a.*,
+             COALESCE(
+               NULLIF(TRIM(CONCAT(COALESCE(u.first_name, ''), ' ', COALESCE(u.last_name, ''))), ''),
+               a.approver_name
+             ) AS approver_name,
              CASE WHEN a.approval_stage = 'supervisor' THEN 'Supervisor Approval'
                   WHEN a.approval_stage = 'finance' THEN 'Finance Approval'
                   WHEN a.approval_stage = 'director' THEN 'Director Approval'
                   ELSE a.approval_stage END AS stage_label
       FROM approvals a
+      LEFT JOIN users u ON u.id = a.approver_id
       WHERE a.request_id = $1
       ORDER BY a.created_at DESC
     `, [requestId]);
@@ -3766,7 +4235,7 @@ export async function getRequestDetails(requestId) {
       rejections: rejections.rows,
       approvers: approvers.rows.map(row => ({
         id: row.id,
-        fullName: `${row.first_name} ${row.last_name}`.trim(),
+        fullName: formatPersonName(row, row.username),
         username: row.username,
         assigned_at: row.assigned_at
       })),

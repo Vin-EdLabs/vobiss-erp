@@ -280,7 +280,7 @@ const CashRequestForm: React.FC = () => {
 
     try {
       await createCashRequest(requestData, selectedApproverIds, lineItems);
-      toast({ title: "Success", description: "Cash request submitted successfully!", variant: "default" });
+      toast({ title: 'Request submitted successfully' });
       setIsFormOpen(false);
       loadRequests();
       setLineItems([{ description: '', qty: '', unitPrice: '', total: '0' }]);

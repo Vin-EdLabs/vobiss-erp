@@ -27,6 +27,7 @@ const UNIT_OPTIONS = [
   { value: 'cx', label: 'CX (Customer Experience)' },
   { value: 'finance', label: 'Finance' },
   { value: 'sales', label: 'Sales' },
+  { value: 'design', label: 'Design Unit' },
   { value: 'procurement', label: 'Procurement' },
   { value: 'operations', label: 'Operations' },
   { value: 'hr', label: 'HR' },
@@ -50,6 +51,8 @@ const POSITION_OPTIONS = [
   { value: 'Relationship Officer', label: 'Relationship Officer' },
   { value: 'Customer Support', label: 'Customer Support' },
   { value: 'Sales', label: 'Sales' },
+  { value: 'Design Manager', label: 'Design Manager' },
+  { value: 'Design Supervisor', label: 'Design Supervisor' },
   { value: 'HR', label: 'HR' },
 ] as const;
 

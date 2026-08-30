@@ -2,6 +2,7 @@
 import { statusToVobiErrorCode, type VobiFieldError } from '@/lib/vobiErrorMessages';
 import { vobiAmbientStore } from '@/stores/vobiAmbientStore';
 import { API_URL } from '@/lib/api';
+import { getActiveShareToken, isSharedRoute, shareTokenHeaders } from '@/lib/shareSession';
 export { default as BASE_URL, API_URL } from '@/lib/api';
 
 // Helper to get auth header
@@ -64,6 +65,7 @@ const apiFetch = async (url: string, options: RequestInit = {}): Promise<Respons
       headers: {
         ...options.headers,
         ...getAuthHeader(),
+        ...shareTokenHeaders(options.method),
       },
     });
   } catch (error) {
@@ -73,6 +75,12 @@ const apiFetch = async (url: string, options: RequestInit = {}): Promise<Respons
   }
 
   if (response.status === 401) {
+    // In a shared (read-only) view there is no session to expire — surface the error
+    // to the caller instead of forcing a logout/redirect that doesn't apply here.
+    if (getActiveShareToken() || isSharedRoute()) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.error || 'This content is not available in the shared view.');
+    }
     clearStaffSession();
     notifyVobiApiError(response.status, { errorCode: 'UNAUTHORIZED', error: 'Session expired. Please log in again.' }, 'Session expired');
     throw new Error('Session expired. Please log in again.');
@@ -93,6 +101,38 @@ export async function registerFcmToken(token: string): Promise<void> {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ token }),
   });
+}
+
+export type ActivityFilterType = 'all' | 'requests' | 'approvals' | 'uploads' | 'notes';
+export type ActivityDateRange = 'all' | 'today' | 'week' | 'month' | 'custom';
+
+export interface PersonalActivity {
+  id: number;
+  action_type: string;
+  category: Exclude<ActivityFilterType, 'all'> | 'other';
+  description: string;
+  you_description: string;
+  record_type: string;
+  record_id: number | null;
+  record_label: string;
+  view_path: string | null;
+  created_at: string;
+}
+
+export async function getMyActivity(filters: {
+  type?: ActivityFilterType;
+  range?: ActivityDateRange;
+  from?: string;
+  to?: string;
+  search?: string;
+} = {}): Promise<PersonalActivity[]> {
+  const query = new URLSearchParams();
+  Object.entries(filters).forEach(([key, value]) => {
+    if (value) query.set(key, value);
+  });
+  const response = await apiFetch(`${API_URL}/activity/me${query.size ? `?${query}` : ''}`);
+  const payload = await response.json();
+  return Array.isArray(payload?.items) ? payload.items : [];
 }
 
 export async function unregisterFcmToken(token: string): Promise<void> {
@@ -278,6 +318,8 @@ export type UserRole =
   | 'superadmin'
   | 'requester'
   | 'approver'
+  | 'transport_unit'
+  | 'transport_supervisor'
   | 'issuer'
   | 'stock_admin'
   | 'field_engineer'
@@ -897,7 +939,8 @@ export interface SystemNotification {
 export const getNotifications = async (): Promise<SystemNotification[]> => {
   try {
     const response = await apiFetch(`${API_URL}/notifications`);
-    return await response.json();
+    const data = await response.json();
+    return Array.isArray(data) ? data : [];
   } catch (error) {
     console.error('Error fetching notifications:', error);
     return [];
@@ -1015,6 +1058,110 @@ export const getRequestDetails = async (id: string | number): Promise<RequestDet
   }
 };
 
+export type SharedLinkPreview = Record<string, any>;
+
+export type SharedLink = {
+  id: number;
+  token: string;
+  recordType: string;
+  recordId: number;
+  pagePath: string;
+  pageTitle: string | null;
+  recordPreview: SharedLinkPreview | null;
+  visibility: 'public' | 'private';
+  createdByUserId: number | null;
+  createdByName: string | null;
+  expiresAt: string | null;
+  revoked: boolean;
+  viewCount: number;
+  createdAt: string;
+  status: 'active' | 'expired' | 'revoked';
+  url: string;
+};
+
+export type ShareExpiry = '24h' | '7d' | '30d' | 'never';
+
+export type GenerateShareLinkPayload = {
+  recordType: string;
+  recordId: number | string;
+  pagePath: string;
+  pageTitle?: string;
+  recordPreview?: SharedLinkPreview;
+  visibility: 'public' | 'private';
+  expiry: ShareExpiry;
+};
+
+export const generateShareLink = async (payload: GenerateShareLinkPayload) => {
+  const response = await apiFetch(`${API_URL}/shared-links/generate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) throw new Error((await response.json().catch(() => ({}))).error || 'Could not create share link');
+  return response.json() as Promise<{ token: string; url: string; link: SharedLink }>;
+};
+
+export type SharedLinkViewResult = {
+  ok: boolean;
+  status: number;
+  link?: SharedLink;
+  error?: string;
+  reason?: 'not_found' | 'revoked' | 'expired' | 'login_required';
+};
+
+// Not routed through apiFetch: this endpoint is often called anonymously, and a 401 here
+// means "login required to view this link", not "your session expired".
+export const viewSharedLink = async (token: string): Promise<SharedLinkViewResult> => {
+  const response = await fetch(`${API_URL}/shared-links/view/${encodeURIComponent(token)}`, {
+    headers: { ...getAuthHeader() },
+  });
+  const data = await response.json().catch(() => ({}));
+  return { ok: response.ok, status: response.status, ...data };
+};
+
+export const getMyShareLinks = async (): Promise<SharedLink[]> => {
+  const response = await apiFetch(`${API_URL}/shared-links/my-links`);
+  if (!response.ok) throw new Error((await response.json().catch(() => ({}))).error || 'Could not load your share links');
+  return (await response.json()).links;
+};
+
+export const revokeShareLink = async (token: string): Promise<SharedLink> => {
+  const response = await apiFetch(`${API_URL}/shared-links/revoke/${encodeURIComponent(token)}`, { method: 'PATCH' });
+  if (!response.ok) throw new Error((await response.json().catch(() => ({}))).error || 'Could not revoke share link');
+  return (await response.json()).link;
+};
+
+export const extendShareLink = async (token: string, expiry: ShareExpiry): Promise<SharedLink> => {
+  const response = await apiFetch(`${API_URL}/shared-links/extend/${encodeURIComponent(token)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ expiry }),
+  });
+  if (!response.ok) throw new Error((await response.json().catch(() => ({}))).error || 'Could not extend share link');
+  return (await response.json()).link;
+};
+
+export type ShareToChatPayload = {
+  recordType: string;
+  recordId: number | string;
+  pagePath: string;
+  pageTitle?: string;
+  recordPreview?: SharedLinkPreview;
+  destinationType: 'channel' | 'dm';
+  destinationId: string;
+  destinationName?: string;
+};
+
+export const shareRecordToChat = async (payload: ShareToChatPayload) => {
+  const response = await apiFetch(`${API_URL}/shared-links/share-to-chat`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) throw new Error((await response.json().catch(() => ({}))).error || 'Could not share to chat');
+  return response.json() as Promise<{ message: any; chatName: string | null }>;
+};
+
 export const approveRequest = async (
   id: string | number,
   data: { approverName: string; signature: string; stage?: 'approver' | 'finance' | 'director' }
@@ -1117,6 +1264,17 @@ export interface WorkflowConfig {
       required_approvers_before_director?: number;
     }>;
   };
+  transport?: {
+    approver_ids: number[];
+    supervisor_id: number | null;
+    vehicle_request_approver_ids?: number[];
+    finance_user_ids?: number[];
+    fuel_request_approver_ids?: number[];
+    price_per_litre?: number | null;
+    require_reference_link?: boolean;
+    require_reference_link_fuel?: boolean;
+    require_reference_link_vehicle?: boolean;
+  };
   ticket_escalation?: {
     enabled: boolean;
     stages: TicketEscalationStage[];
@@ -1130,6 +1288,160 @@ export interface WorkflowConfig {
       low: TicketSlaPriorityRule;
     };
   };
+}
+
+export interface TransportSettings {
+  approver_ids: number[];
+  supervisor_id: number | null;
+  vehicle_request_approver_ids?: number[];
+  finance_user_ids?: number[];
+  fuel_request_approver_ids?: number[];
+  price_per_litre?: number | null;
+  require_reference_link?: boolean;
+  require_reference_link_fuel?: boolean;
+  require_reference_link_vehicle?: boolean;
+}
+
+export interface FuelRequestApproval {
+  id: number;
+  request_id: number;
+  approver_id: number;
+  approver_name: string;
+  stage: string;
+  decision: string;
+  reason?: string;
+  created_at: string;
+}
+
+export interface FuelRequest {
+  id: number;
+  ref_no: string;
+  requester_id: number;
+  requester_name: string;
+  department?: string;
+  project_ticket_ref?: string;
+  reference_type?: 'Ticket' | 'Transport Request' | string;
+  reference_number?: string | null;
+  reference_title?: string | null;
+  reference_id?: number | null;
+  project_id?: number | null;
+  ticket_id?: number | null;
+  vehicle_plate: string;
+  fuel_type: 'Petrol' | 'Diesel' | string;
+  quantity_litres: number;
+  price_per_litre?: number | null;
+  estimated_amount: number;
+  purpose?: string;
+  status: string;
+  current_stage: string;
+  receipt_url?: string | null;
+  receipt_filename?: string | null;
+  receipt_uploaded_at?: string | null;
+  cash_issued_at?: string | null;
+  cash_issued_by?: number | null;
+  completed_at?: string | null;
+  completed_by?: number | null;
+  rejected_at?: string | null;
+  rejected_by?: number | null;
+  rejection_reason?: string | null;
+  created_at: string;
+  updated_at?: string;
+  approvals?: FuelRequestApproval[];
+  selected_approver_ids?: number[];
+  my_decision?: string | null;
+  my_acted_at?: string | null;
+  approvals_count?: number;
+  approvals_required?: number;
+  approval_parties?: { id?: number; name: string; status: string; actedAt?: string | null }[];
+}
+
+export interface FuelRequestReference {
+  id: number;
+  ref: string;
+  title: string;
+  type: 'project' | 'ticket';
+}
+
+export interface TransportRequest {
+  id: number;
+  requester_id: number | null;
+  requester_name: string;
+  site_name: string;
+  location: string;
+  client_name: string;
+  engineer_id: number | null;
+  engineer_name?: string | null;
+  purpose?: string | null;
+  status: 'pending' | 'approved' | 'rejected';
+  current_stage: 'approver' | 'supervisor';
+  created_at: string;
+  updated_at?: string | null;
+  reference_type?: string | null;
+  reference_id?: number | null;
+  reference_number?: string | null;
+  reference_title?: string | null;
+  reference_status?: string | null;
+  selected_approver_ids?: number[];
+  my_decision?: string | null;
+  my_acted_at?: string | null;
+  approvals_count?: number;
+  approvals_required?: number;
+  approval_parties?: { id?: number; name: string; status: string; actedAt?: string | null }[];
+}
+
+export interface TransportApprovalTrail {
+  id: number;
+  stage: 'approver' | 'supervisor';
+  approver_name: string;
+  decision: 'approved' | 'rejected';
+  reason?: string | null;
+  created_at: string;
+}
+
+export interface TransportRequestDetail extends TransportRequest {
+  approvals: TransportApprovalTrail[];
+  vehicle_request?: VehicleRequestForm | null;
+}
+
+export interface VehicleLineItem {
+  id: string;
+  description: string;
+  qty_days: number | string;
+  unit_price: number | string;
+  total: number;
+}
+
+export interface AttachmentItem {
+  id: string;
+  name: string;
+  type: string;
+  url?: string;
+  mimeType?: string;
+  fileSize?: number;
+  isPdf?: boolean;
+}
+
+export interface VehicleRequestForm {
+  id: number;
+  transport_request_id: number;
+  requester_id?: number | null;
+  supervisor_id?: number | null;
+  requester_name?: string;
+  department?: string | null;
+  purpose?: string | null;
+  date_submitted?: string | null;
+  deliver_to?: string | null;
+  phone?: string | null;
+  special_instructions?: string | null;
+  order_no?: string | null;
+  invoice_terms?: string | null;
+  received_by?: string | null;
+  line_items: VehicleLineItem[];
+  attachments: AttachmentItem[];
+  status: 'pending_manager' | 'pending_finance' | 'cash_issued' | 'rejected';
+  current_stage: 'manager' | 'finance' | 'cash_issued';
+  created_at?: string;
+  updated_at?: string;
 }
 
 export type TicketSlaUnit = 'minutes' | 'hours' | 'days';
@@ -1155,6 +1467,155 @@ export const updateWorkflowConfig = async (config: Partial<WorkflowConfig>): Pro
   return await response.json();
 };
 
+export const uploadTransportFiles = async (files: File[]): Promise<AttachmentItem[]> => {
+  if (!files.length) return [];
+  const formData = new FormData();
+  files.forEach((file) => formData.append('files', file));
+  const response = await apiFetch(`${API_URL}/transport/uploads`, {
+    method: 'POST',
+    body: formData,
+  });
+  return await response.json();
+};
+
+export const getTransportSettings = async (): Promise<TransportSettings> => {
+  const response = await apiFetch(`${API_URL}/transport/settings`);
+  return await response.json();
+};
+
+export const updateTransportSettings = async (payload: TransportSettings): Promise<TransportSettings> => {
+  const response = await apiFetch(`${API_URL}/transport/settings`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  return await response.json();
+};
+
+export const createVehicleRequestForm = async (payload: {
+  transport_request_id: number;
+  phone?: string;
+  special_instructions?: string;
+  order_no?: string;
+  invoice_terms?: string;
+  received_by?: string;
+  line_items?: VehicleLineItem[];
+  attachments?: AttachmentItem[];
+  selected_approver_ids?: number[];
+}): Promise<VehicleRequestForm> => {
+  if (!payload.transport_request_id) {
+    throw new Error('A valid transport request is required.');
+  }
+  const response = await apiFetch(`${API_URL}/transport/requests/${payload.transport_request_id}/vehicle-request`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  return await response.json();
+};
+
+export const getVehicleRequestForm = async (transportRequestId: number | string): Promise<VehicleRequestForm | null> => {
+  if (transportRequestId == null || transportRequestId === '' || String(transportRequestId) === 'null' || String(transportRequestId) === 'undefined') {
+    return null;
+  }
+  const response = await apiFetch(`${API_URL}/transport/requests/${transportRequestId}/vehicle-request`);
+  return await response.json();
+};
+
+export const approveVehicleRequestForm = async (
+  id: number | string,
+  payload: { reason?: string | null }
+): Promise<{ message: string; form: VehicleRequestForm }> => {
+  const response = await apiFetch(`${API_URL}/transport/vehicle-requests/${id}/approve`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  return await response.json();
+};
+
+export const rejectVehicleRequestForm = async (
+  id: number | string,
+  payload: { reason?: string | null }
+): Promise<{ message: string; form: VehicleRequestForm }> => {
+  const response = await apiFetch(`${API_URL}/transport/vehicle-requests/${id}/reject`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  return await response.json();
+};
+
+export const issueVehicleCash = async (
+  id: number | string,
+  payload: { note?: string | null; issued_at?: string | null }
+): Promise<{ message: string; form: VehicleRequestForm }> => {
+  const response = await apiFetch(`${API_URL}/transport/vehicle-requests/${id}/issue`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  return await response.json();
+};
+
+export const getTransportRequests = async (): Promise<TransportRequest[]> => {
+  const response = await apiFetch(`${API_URL}/transport/requests`);
+  return await response.json();
+};
+
+export const createTransportRequest = async (payload: {
+  site_name: string;
+  location: string;
+  client_name: string;
+  engineer_id?: number | null;
+  purpose?: string | null;
+  selected_approver_ids?: number[];
+  reference_type?: string | null;
+  reference_id?: number | null;
+  reference_number?: string | null;
+  reference_title?: string | null;
+  linked_references?: Array<{ type: string; id: number }>;
+}): Promise<TransportRequest> => {
+  const response = await apiFetch(`${API_URL}/transport/requests`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  return await response.json();
+};
+
+export const getTransportRequest = async (id: number | string): Promise<TransportRequestDetail> => {
+  if (id == null || id === '' || String(id) === 'null' || String(id) === 'undefined') {
+    throw new Error('A valid transport request id is required.');
+  }
+  const response = await apiFetch(`${API_URL}/transport/requests/${id}`);
+  return await response.json();
+};
+
+export const approveTransportRequest = async (
+  id: number | string,
+  payload: { reason?: string | null }
+): Promise<{ message: string; request: TransportRequest }> => {
+  const response = await apiFetch(`${API_URL}/transport/requests/${id}/approve`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  return await response.json();
+};
+
+export const rejectTransportRequest = async (
+  id: number | string,
+  payload: { reason?: string | null }
+): Promise<{ message: string; request: TransportRequest }> => {
+  const response = await apiFetch(`${API_URL}/transport/requests/${id}/reject`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  return await response.json();
+};
+
 export interface RealmPerson {
   id: number;
   fullName: string;
@@ -1167,6 +1628,11 @@ export interface RealmPerson {
 export interface RealmApprovers {
   material_user_ids: number[];
   cash_user_ids: number[];
+  transport_approver_ids?: number[];
+  transport_supervisor_ids?: number[];
+  vehicle_request_approver_ids?: number[];
+  finance_user_ids?: number[];
+  fuel_request_approver_ids?: number[];
   people?: RealmPerson[];
 }
 
@@ -1178,6 +1644,11 @@ export const getRealmApprovers = async (): Promise<RealmApprovers> => {
 export const updateRealmApprovers = async (payload: {
   material_user_ids: number[];
   cash_user_ids: number[];
+  transport_approver_ids?: number[];
+  transport_supervisor_ids?: number[];
+  vehicle_request_approver_ids?: number[];
+  finance_user_ids?: number[];
+  fuel_request_approver_ids?: number[];
 }): Promise<RealmApprovers> => {
   const response = await apiFetch(`${API_URL}/realm`, {
     method: 'PUT',
@@ -2174,3 +2645,96 @@ export const assetApi = {
   deleteMaintenanceRecord: (id: string) => apiFetch(`${ASSET_API}/maintenance/records/${id}`, { method: 'DELETE' }).then((r) => r.json()),
 };
 
+// =============================================================================
+// FUEL REQUEST MODULE API
+// =============================================================================
+export const getFuelRequests = async (params?: { finance_queue?: boolean; tab?: 'pending_cash' | 'awaiting_receipt' }): Promise<FuelRequest[]> => {
+  const query = new URLSearchParams();
+  if (params?.finance_queue) query.set('finance_queue', 'true');
+  if (params?.tab) query.set('tab', params.tab);
+  const qStr = query.toString() ? `?${query.toString()}` : '';
+  const response = await apiFetch(`${API_URL}/transport/fuel-requests${qStr}`);
+  return await response.json();
+};
+
+export const getFuelRequestDetail = async (id: string | number): Promise<FuelRequest> => {
+  const response = await apiFetch(`${API_URL}/transport/fuel-requests/${id}`);
+  return await response.json();
+};
+
+export const createFuelRequest = async (payload: {
+  project_ticket_ref?: string;
+  project_id?: number | null;
+  ticket_id?: number | null;
+  vehicle_plate: string;
+  fuel_type: string;
+  quantity_litres: number;
+  estimated_amount?: number;
+  purpose?: string;
+  selected_approver_ids?: number[];
+  reference_type?: string;
+  reference_number?: string;
+  reference_title?: string;
+  reference_id?: number;
+  reference_status?: string;
+  linked_references?: Array<{ type: string; id: number }>;
+}): Promise<FuelRequest> => {
+  const response = await apiFetch(`${API_URL}/transport/fuel-requests`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  return await response.json();
+};
+
+export const getFuelRequestReferences = async (): Promise<{ projects: FuelRequestReference[]; tickets: FuelRequestReference[] }> => {
+  const response = await apiFetch(`${API_URL}/transport/fuel-requests/references`);
+  return await response.json();
+};
+
+export const validateFuelReference = async (type: 'Ticket' | 'Transport Request', number: string): Promise<{ valid: boolean; message?: string; type?: string; id?: number; title?: string; link?: string }> => {
+  const response = await apiFetch(`${API_URL}/transport/fuel-requests/validate-reference?type=${encodeURIComponent(type)}&number=${encodeURIComponent(number)}`);
+  return await response.json();
+};
+
+export const approveFuelRequest = async (id: string | number, payload?: { reason?: string }): Promise<any> => {
+  const response = await apiFetch(`${API_URL}/transport/fuel-requests/${id}/approve`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload || {}),
+  });
+  return await response.json();
+};
+
+export const rejectFuelRequest = async (id: string | number, payload: { reason: string }): Promise<any> => {
+  const response = await apiFetch(`${API_URL}/transport/fuel-requests/${id}/reject`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  return await response.json();
+};
+
+export const issueFuelCash = async (id: string | number): Promise<any> => {
+  const response = await apiFetch(`${API_URL}/finance/fuel-requests/${id}/issue-cash`, {
+    method: 'POST',
+  });
+  return await response.json();
+};
+
+export const uploadFuelReceipt = async (id: string | number, file: File): Promise<any> => {
+  const formData = new FormData();
+  formData.append('receipt', file);
+  const response = await apiFetch(`${API_URL}/transport/fuel-requests/${id}/upload-receipt`, {
+    method: 'POST',
+    body: formData,
+  });
+  return await response.json();
+};
+
+export const completeFuelRequest = async (id: string | number): Promise<any> => {
+  const response = await apiFetch(`${API_URL}/finance/fuel-requests/${id}/complete`, {
+    method: 'POST',
+  });
+  return await response.json();
+};

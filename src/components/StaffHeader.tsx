@@ -10,8 +10,10 @@ import {
   LogOut,
   User as UserIcon,
   LayoutDashboard,
+  Activity,
   Clock,
   BookOpen,
+  Share2,
 } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
 import { timeOfDayGreeting } from '@/components/ui/greeting-banner';
@@ -452,6 +454,18 @@ const StaffHeader: React.FC<StaffHeaderProps> = ({
               <Link to="/workspace" className="flex items-center gap-3">
                 <LayoutDashboard className="h-4 w-4" />
                 My Workspace
+              </Link>
+            </DropdownMenuItem>
+            <DropdownMenuItem asChild className="cursor-pointer px-4 py-3">
+              <Link to="/my-activity" className="flex items-center gap-3">
+                <Activity className="h-4 w-4" />
+                My Activity
+              </Link>
+            </DropdownMenuItem>
+            <DropdownMenuItem asChild className="cursor-pointer px-4 py-3">
+              <Link to="/my-shared-links" className="flex items-center gap-3">
+                <Share2 className="h-4 w-4" />
+                Shared Links
               </Link>
             </DropdownMenuItem>
             <DropdownMenuItem

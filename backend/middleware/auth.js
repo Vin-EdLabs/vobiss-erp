@@ -1,6 +1,7 @@
 // backend/middleware/auth.js
 import jwt from 'jsonwebtoken';
 import { isSystemAdminAccount } from '../roles.js';
+import { formatPersonName } from '../utils/displayName.js';
 const JWT_SECRET = process.env.JWT_SECRET || 'your-super-secret-jwt-key-change-this';
 
 export const authenticateToken = (req, res, next) => {
@@ -8,7 +9,7 @@ export const authenticateToken = (req, res, next) => {
   const token = authHeader && authHeader.split(' ')[1];
   if (!token) return res.status(401).json({ error: 'Access token required' });
 
-  jwt.verify(token, JWT_SECRET, (err, user) => {
+  jwt.verify(token, JWT_SECRET, async (err, user) => {
     if (err) {
       const expired = err.name === 'TokenExpiredError';
       return res.status(401).json({
@@ -16,7 +17,22 @@ export const authenticateToken = (req, res, next) => {
         errorCode: expired ? 'TOKEN_EXPIRED' : 'INVALID_TOKEN',
       });
     }
-    req.user = user;
+    try {
+      const { getUserById } = await import('../db.js');
+      const dbUser = await getUserById(user.id || user.userId);
+      if (dbUser) {
+        req.user = {
+          ...user,
+          ...dbUser,
+          id: dbUser.id,
+          full_name: formatPersonName(dbUser, dbUser.username),
+        };
+      } else {
+        req.user = user;
+      }
+    } catch {
+      req.user = user;
+    }
     next();
   });
 };

@@ -4,6 +4,7 @@
 import express from 'express';
 import jwt from 'jsonwebtoken';
 import pool from '../db.js';
+import { authenticateOrShareToken } from '../middleware/shareAuth.js';
 import {
   getProjects,
   createProject,
@@ -45,9 +46,13 @@ import { emitToStaff } from '../realtime/channels.js';
 import { getRealtimeIo } from '../realtime/channels.js';
 import { postTicketSystemMessage } from '../services/chatSystemMessage.js';
 import { ensureTicketThread, syncTicketThreadAssignee } from '../services/chatRecordThreads.js';
-import { TICKET_SUPPORT_ROLES } from '../roles.js';
+import { isSystemAdminAccount, effectiveUnitsForUser } from '../roles.js';
 import { getTicketEscalationConfig, markTicketStageAccepted } from '../ticketEscalation.js';
 import { invalidateOnMutation } from '../services/vobiCache.js';
+import { logUserAction } from '../services/activityLog.js';
+import { recordTimingEvent } from '../services/workflowTimeEngine.js';
+
+const TICKET_TERMINAL_STATUSES = new Set(['CLOSED', 'RESOLVED']);
 
 const router = express.Router();
 const JWT_SECRET = process.env.JWT_SECRET || 'your-super-secret-jwt-key-change-this';
@@ -61,12 +66,15 @@ async function authenticateToken(req, res, next) {
 
   try {
     const decoded = jwt.verify(token, JWT_SECRET);
-    const user = await getUserById(decoded.id || decoded.userId);
+    const user = await getUserById(decoded.id || decoded.userId || decoded.sub);
     if (!user) return res.status(401).json({ error: 'User not found' });
     req.authUser = user;
     next();
   } catch (err) {
-    return res.status(403).json({ error: 'Invalid or expired token' });
+    const expired = err?.name === 'TokenExpiredError';
+    return res.status(401).json({
+      error: expired ? 'Session expired. Please log in again.' : 'Invalid or expired token',
+    });
   }
 }
 
@@ -92,56 +100,134 @@ function getUserRoleSlugs(user) {
   return [...roles].filter(Boolean);
 }
 
+function canonicalizeTicketUnit(value) {
+  const unit = normalize(value);
+  if (['tx', 'field', 'field_engineer', 'ts'].includes(unit)) return 'ts';
+  return unit;
+}
+
 function getUserUnitSlugs(user) {
-  const units = new Set();
-  if (user?.unit) units.add(normalize(user.unit));
-  parseJsonArray(user?.units).forEach((unit) => units.add(normalize(unit)));
-  return [...units].filter(Boolean);
+  return (effectiveUnitsForUser(user) || []).map(canonicalizeTicketUnit).filter(Boolean);
 }
 
 function isTicketManager(user) {
+  if (isSystemAdminAccount(user)) return true;
   const roles = getUserRoleSlugs(user);
   const position = normalize(user?.position);
   return (
-    roles.some((role) => ['superadmin', 'admin', 'director', 'cto'].includes(role)) ||
+    roles.some((role) => ['superadmin', 'admin', 'system_admin', 'director', 'cto'].includes(role)) ||
     position === 'director' ||
     position.includes('manager') ||
     position.includes('supervisor')
   );
 }
 
-function canAccessSupportTickets(user) {
-  const roles = getUserRoleSlugs(user);
-  const units = getUserUnitSlugs(user);
-  const position = normalize(user?.position);
-  return (
-    roles.some((role) => TICKET_SUPPORT_ROLES.includes(role)) ||
-    units.some((unit) => ['cx', 'noc', 'ip', 'tx'].includes(unit)) ||
-    ['customer support', 'relationship officer', 'engineer'].includes(position) ||
-    position.includes('manager') ||
-    position.includes('supervisor') ||
-    position === 'director'
-  );
-}
-
 function canViewTicket(user, ticket) {
-  if (isTicketManager(user)) return true;
+  if (isTicketManager(user) || isSystemAdminAccount(user)) return true;
+  // NOC operates the master ticket desk as well as its own escalation queue.
+  if (getUserRoleSlugs(user).some((role) => ['noc', 'noc_manager', 'noc_supervisor'].includes(role))) return true;
   if (!ticket) return false;
   const userId = Number(user?.id);
-  return Number(ticket.assigned_to) === userId || (ticket.created_by_type === 'staff' && Number(ticket.created_by_id) === userId);
+  if (Number(ticket.assigned_to) === userId) return true;
+  if (ticket.created_by_type === 'staff' && Number(ticket.created_by_id) === userId) return true;
+
+  const ticketStage = canonicalizeTicketUnit(ticket.escalation_stage);
+  const units = getUserUnitSlugs(user).map(canonicalizeTicketUnit);
+  if (ticketStage && units.includes(ticketStage)) return true;
+
+  const roleToStage = {
+    cx: 'cx',
+    noc: 'noc',
+    noc_manager: 'noc',
+    noc_supervisor: 'noc',
+    ip: 'ip',
+    ip_manager: 'ip',
+    ip_supervisor: 'ip',
+    ts_manager: 'ts',
+    ts_supervisor: 'ts',
+    field_engineer: 'ts',
+    field_engineer_admin: 'ts',
+    relationship_officer: 'cx',
+  };
+  return getUserRoleSlugs(user).some((role) => roleToStage[role] === ticketStage);
 }
 
-// Support check — supports both legacy roles and new unit/position access
-function requireSupportRole(req, res, next) {
-  if (!canAccessSupportTickets(req.authUser)) {
-    return res.status(403).json({ error: 'Access denied. Requires support role.' });
+// Registered before the router-wide auth gate below so a valid share token can serve
+// this one read-only detail route without a user session; every other route in this
+// file (including mutations) still requires full authentication.
+router.get('/tickets/:id', authenticateOrShareToken('ticket', authenticateToken), async (req, res) => {
+  try {
+    const id = req.isSharedView ? String(req.shareLink.record_id) : normalizeTicketRef(req.params.id);
+    if (!id || id === 'report') {
+      return res.status(400).json({
+        error: 'Use GET /api/reports/tickets for the ticket report (this path is a ticket ID).',
+      });
+    }
+    const ticket = await getTicketByIdForStaff(id);
+    if (!ticket) return res.status(404).json({ error: 'Ticket not found' });
+    if (!req.isSharedView && !canViewTicket(req.authUser, ticket)) {
+      return res.status(403).json({ error: 'This ticket is not assigned to you.' });
+    }
+
+    // Normalize attachments paths
+    if (ticket.attachments) {
+      try {
+        // Handle both string (JSON) and object formats
+        let parsed;
+        if (typeof ticket.attachments === 'string') {
+          try {
+            parsed = JSON.parse(ticket.attachments);
+          } catch (parseError) {
+            // If parsing fails, try to handle as a single path string
+            parsed = [{ path: ticket.attachments, originalName: 'Attachment' }];
+          }
+        } else if (Array.isArray(ticket.attachments)) {
+          parsed = ticket.attachments;
+        } else if (typeof ticket.attachments === 'object') {
+          // If it's a single object, wrap it in an array
+          parsed = [ticket.attachments];
+        } else {
+          parsed = [];
+        }
+
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          ticket.attachments = parsed.map(att => {
+            const path = att.path || att.savedName || att;
+            const normalizedPath = String(path)
+              .replace(/^[A-Z]:\\.*\\uploads\\/i, '')   // remove absolute Windows prefix if present
+              .replace(/\\/g, '/')                      // normalize slashes
+              .replace(/^\/uploads\//, '')              // remove leading /uploads/
+              .replace(/^uploads\//, '');               // remove leading uploads/
+
+            return {
+              ...att,
+              path: normalizedPath.startsWith('tickets/') ? normalizedPath : `tickets/${normalizedPath}`,
+              originalName: att.originalName || att.name || 'Attachment'
+            };
+          });
+        } else {
+          ticket.attachments = [];
+        }
+      } catch (e) {
+        console.warn('[CX Route] Failed to normalize attachments:', e);
+        // Set to empty array on error to prevent issues
+        ticket.attachments = [];
+      }
+    }
+
+    const timeline = await getTicketTimeline(id);
+    const tags = await getTagsForTicket(id);
+    if (!req.isSharedView) {
+      await logUserAction(req.authUser, { actionType: 'ticket_viewed', recordType: 'ticket', recordId: ticket.id || ticket.row_id, recordRef: ticket.ticket_id, description: `${req.authUser.full_name || req.authUser.username} viewed Ticket #${ticket.ticket_id}` });
+    }
+    res.json({ success: true, data: { ticket: { ...ticket, tags }, timeline } });
+  } catch (err) {
+    console.error('GET /tickets/:id error:', err);
+    res.status(500).json({ error: 'Failed to fetch ticket details' });
   }
-  next();
-}
+});
 
 router.use(authenticateToken);
-
-router.use(requireSupportRole);
 router.use(invalidateOnMutation);
 
 // --- AUTO-FIX: Remove old restrictive role constraint ---
@@ -187,7 +273,7 @@ router.get('/team-members', async (req, res) => {
         role ILIKE '%ts_manager%' OR
         role ILIKE '%ip_manager%' OR
         role ILIKE '%cto%' OR
-        unit IN ('cx', 'noc', 'ip', 'tx') OR
+        unit IN ('cx', 'noc', 'ip', 'tx', 'ts') OR
         LOWER(COALESCE(position, '')) IN ('customer support', 'relationship officer', 'engineer') OR
         LOWER(COALESCE(position, '')) LIKE '%manager%' OR
         LOWER(COALESCE(position, '')) LIKE '%supervisor%'
@@ -426,75 +512,6 @@ router.get('/tickets', async (req, res) => {
   }
 });
 
-router.get('/tickets/:id', async (req, res) => {
-  try {
-    const id = normalizeTicketRef(req.params.id);
-    if (!id || id === 'report') {
-      return res.status(400).json({
-        error: 'Use GET /api/reports/tickets for the ticket report (this path is a ticket ID).',
-      });
-    }
-    const ticket = await getTicketByIdForStaff(id);
-    if (!ticket) return res.status(404).json({ error: 'Ticket not found' });
-    if (!canViewTicket(req.authUser, ticket)) {
-      return res.status(403).json({ error: 'This ticket is not assigned to you.' });
-    }
-
-    // Normalize attachments paths
-    if (ticket.attachments) {
-      try {
-        // Handle both string (JSON) and object formats
-        let parsed;
-        if (typeof ticket.attachments === 'string') {
-          try {
-            parsed = JSON.parse(ticket.attachments);
-          } catch (parseError) {
-            // If parsing fails, try to handle as a single path string
-            parsed = [{ path: ticket.attachments, originalName: 'Attachment' }];
-          }
-        } else if (Array.isArray(ticket.attachments)) {
-          parsed = ticket.attachments;
-        } else if (typeof ticket.attachments === 'object') {
-          // If it's a single object, wrap it in an array
-          parsed = [ticket.attachments];
-        } else {
-          parsed = [];
-        }
-
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          ticket.attachments = parsed.map(att => {
-            const path = att.path || att.savedName || att;
-            const normalizedPath = String(path)
-              .replace(/^[A-Z]:\\.*\\uploads\\/i, '')   // remove absolute Windows prefix if present
-              .replace(/\\/g, '/')                      // normalize slashes
-              .replace(/^\/uploads\//, '')              // remove leading /uploads/
-              .replace(/^uploads\//, '');               // remove leading uploads/
-            
-            return {
-              ...att,
-              path: normalizedPath.startsWith('tickets/') ? normalizedPath : `tickets/${normalizedPath}`,
-              originalName: att.originalName || att.name || 'Attachment'
-            };
-          });
-        } else {
-          ticket.attachments = [];
-        }
-      } catch (e) {
-        console.warn('[CX Route] Failed to normalize attachments:', e);
-        // Set to empty array on error to prevent issues
-        ticket.attachments = [];
-      }
-    }
-
-    const timeline = await getTicketTimeline(id);
-    const tags = await getTagsForTicket(id);
-    res.json({ success: true, data: { ticket: { ...ticket, tags }, timeline } });
-  } catch (err) {
-    console.error('GET /tickets/:id error:', err);
-    res.status(500).json({ error: 'Failed to fetch ticket details' });
-  }
-});
-
 router.post('/tickets', async (req, res) => {
   const {
     customer_id,
@@ -554,6 +571,11 @@ router.post('/tickets', async (req, res) => {
       req.authUser.role.split(',')[0].trim().toUpperCase(),
       targetUnit
     );
+
+    recordTimingEvent({
+      workflowType: 'ticket', recordId: ticket.id, eventType: 'created', stageName: 'new',
+      toUnitSlug: targetUnit || null, toUserId: ticket.assigned_to || null, triggeredByUserId: req.authUser.id,
+    }).catch(() => {});
 
     try {
       const actorName = `${req.authUser.first_name || ''} ${req.authUser.last_name || ''}`.trim() || req.authUser.username;
@@ -713,6 +735,39 @@ router.patch('/tickets/:id', async (req, res) => {
       status: status || result?.status,
     });
 
+    const actor = req.authUser.full_name || `${req.authUser.first_name || ''} ${req.authUser.last_name || ''}`.trim() || req.authUser.username;
+    const ticketRow = await pool.query('SELECT id, ticket_id FROM tickets WHERE ticket_id=$1', [id]);
+    const ticketRecord = ticketRow.rows[0];
+    if (ticketRecord && comment?.trim()) await logUserAction(req.authUser, { actionType: 'ticket_commented', recordType: 'ticket', recordId: ticketRecord.id, recordRef: ticketRecord.ticket_id, description: `${actor} commented on Ticket #${ticketRecord.ticket_id}` });
+    if (ticketRecord && status) {
+      const statusLabel = String(status).replace(/_/g, ' ');
+      await logUserAction(req.authUser, { actionType: 'ticket_status', recordType: 'ticket', recordId: ticketRecord.id, recordRef: ticketRecord.ticket_id, description: `${actor} changed status of Ticket #${ticketRecord.ticket_id} to ${statusLabel}` });
+      if (String(status).toUpperCase() === 'CLOSED') await logUserAction(req.authUser, { actionType: 'ticket_closed', recordType: 'ticket', recordId: ticketRecord.id, recordRef: ticketRecord.ticket_id, description: `${actor} closed Ticket #${ticketRecord.ticket_id}` });
+    }
+    if (ticketRecord && assigned_to) {
+      const assignee = await pool.query(`SELECT COALESCE(NULLIF(trim(concat_ws(' ',first_name,last_name)),''),username,'User') full_name, unit FROM users WHERE id=$1`, [assigned_to]);
+      await logUserAction(req.authUser, { actionType: 'ticket_assigned', recordType: 'ticket', recordId: ticketRecord.id, recordRef: ticketRecord.ticket_id, description: `${actor} assigned Ticket #${ticketRecord.ticket_id} to ${assignee.rows[0]?.full_name || 'User'}` });
+      recordTimingEvent({
+        workflowType: 'ticket', recordId: ticketRecord.id, eventType: 'assigned', stageName: 'assigned',
+        toUnitSlug: assignee.rows[0]?.unit || null, toUserId: Number(assigned_to), triggeredByUserId: req.authUser.id,
+      }).catch(() => {});
+    }
+    if (ticketRecord && status) {
+      // Preserve current ownership on a pure status change (not a reassignment) so the new
+      // segment doesn't lose who/which unit the ticket is still actually held by.
+      const owner = await pool.query(
+        `SELECT t.assigned_to, u.unit FROM tickets t LEFT JOIN users u ON u.id = t.assigned_to WHERE t.id = $1`,
+        [ticketRecord.id]
+      );
+      recordTimingEvent({
+        workflowType: 'ticket', recordId: ticketRecord.id,
+        eventType: TICKET_TERMINAL_STATUSES.has(String(status).toUpperCase()) ? 'completed' : 'started',
+        stageName: String(status).toLowerCase(),
+        toUnitSlug: owner.rows[0]?.unit || null, toUserId: owner.rows[0]?.assigned_to || null,
+        triggeredByUserId: req.authUser.id,
+      }).catch(() => {});
+    }
+
     res.json({ success: true, data: result });
   } catch (err) {
     console.error('Ticket update error:', err);
@@ -809,7 +864,7 @@ router.patch('/tickets/:id/assign', async (req, res) => {
 
   try {
     const userRes = await pool.query(
-      `SELECT id, first_name, last_name FROM users WHERE id = $1 AND deleted_at IS NULL`,
+      `SELECT id, first_name, last_name, unit FROM users WHERE id = $1 AND deleted_at IS NULL`,
       [assigned_to]
     );
 
@@ -857,6 +912,15 @@ router.patch('/tickets/:id/assign', async (req, res) => {
       }
     } catch (e) {
       console.warn('[chat] assign ticket system message failed:', e.message);
+    }
+    const ticketRowForActivity = await pool.query('SELECT id, ticket_id FROM tickets WHERE ticket_id=$1', [id]);
+    const ticketForActivity = ticketRowForActivity.rows[0];
+    if (ticketForActivity) await logUserAction(req.authUser, { actionType: 'ticket_assigned', recordType: 'ticket', recordId: ticketForActivity.id, recordRef: ticketForActivity.ticket_id, description: `${req.authUser.full_name || req.authUser.username} assigned Ticket #${ticketForActivity.ticket_id} to ${assignedName}` });
+    if (ticketForActivity) {
+      recordTimingEvent({
+        workflowType: 'ticket', recordId: ticketForActivity.id, eventType: 'assigned', stageName: 'assigned',
+        toUnitSlug: assignedUser.unit || null, toUserId: assignedUser.id, triggeredByUserId: req.authUser.id,
+      }).catch(() => {});
     }
 
     res.json({

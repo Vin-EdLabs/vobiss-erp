@@ -10,7 +10,8 @@ export type GlobalSearchResultKind =
   | 'cash_request'
   | 'material_request'
   | 'item_return'
-  | 'project_request';
+  | 'project_request'
+  | (string & {});
 
 export interface GlobalSearchResult {
   kind: GlobalSearchResultKind;

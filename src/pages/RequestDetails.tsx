@@ -9,6 +9,11 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ArrowLeft, Edit, Save, X, Plus, Printer } from 'lucide-react';
 import { RecordChatButton } from '@/components/chat/RecordChatButton';
+import { ShareButton } from '@/components/ShareButton';
+import { buildPreviewTable } from '@/lib/shareRecord';
+import { PersonName } from '@/components/PersonName';
+import { useSharedView } from '@/context/SharedViewContext';
+import { WorkflowTimeline } from '@/components/timeline/WorkflowTimeline';
 // GLOBAL DATE FORMAT — EXACTLY LIKE PENDING APPROVALS
 const formatDateTime = (dateString: string | null | undefined): string => {
   if (!dateString) return '—';
@@ -99,7 +104,9 @@ interface EditableItem {
   serial_number?: string;
 }
 const RequestDetails: React.FC = () => {
-  const { id } = useParams<{ id: string }>();
+  const { isSharedView, routeParams } = useSharedView();
+  const { id: routeId } = useParams<{ id: string }>();
+  const id = isSharedView ? routeParams?.id : routeId;
   const navigate = useNavigate();
   const location = useLocation();
   const navState = location.state as { returnTo?: string; returnLabel?: string } | null;
@@ -249,26 +256,75 @@ const RequestDetails: React.FC = () => {
         <div className="mb-8 flex items-center justify-between">
           <Button
             variant="outline"
-            onClick={() => (navState?.returnTo ? navigate(navState.returnTo) : navigate(-1))}
+            onClick={() => (navState?.returnTo ? navigate(navState.returnTo) : navigate('/request-forms'))}
             className="border-[var(--border-strong)] hover:bg-[var(--surface-hover)]"
           >
             <ArrowLeft className="h-5 w-5 mr-2" />
             {navState?.returnLabel || 'Back to List'}
           </Button>
           <div className="flex space-x-3">
-            <RecordChatButton
-              recordType={isReturn ? 'item_return' : 'material_request'}
-              recordId={request.id}
-              chatChannelId={request.chat_channel_id}
-            />
-            <ActionButtons
-              isEditable={isEditable}
-              editing={editing}
-              onEdit={() => setEditing(true)}
-              onCancel={handleCancelEdit}
-              onSave={handleSaveEdit}
-            />
-            {request.status === 'completed' && (
+            {!isSharedView && (
+              <ShareButton
+                recordType={isReturn ? 'item_return' : 'material_request'}
+                recordId={request.id}
+                pagePath={window.location.pathname}
+                pageTitle={`${isReturn ? 'Item Return' : 'Material Request'} #${request.id}`}
+                recordPreview={{
+                  title: `${isReturn ? 'Item Return' : 'Material Request'} #${request.id}`,
+                  reference: `#${request.id}`,
+                  status: statusText,
+                  requester: request.created_by,
+                  project: request.project_name,
+                  location: request.location,
+                  deployment_type: request.deployment_type,
+                  team_leader: request.team_leader_name,
+                  reason: request.reason,
+                  submitted: request.created_at,
+                  tables: [
+                    buildPreviewTable(
+                      'Items',
+                      request.items?.map((i) => ({
+                        item: i.item_name,
+                        requested: i.quantity_requested,
+                        received: i.quantity_received,
+                        returned: i.quantity_returned,
+                      })),
+                      [
+                        { key: 'item', label: 'Item' },
+                        { key: 'requested', label: 'Qty Requested' },
+                        { key: 'received', label: 'Qty Received' },
+                        { key: 'returned', label: 'Qty Returned' },
+                      ]
+                    ),
+                    buildPreviewTable(
+                      'Approvals',
+                      request.approvals?.map((a) => ({ approver: a.approver_name, approved_at: new Date(a.approved_at).toLocaleString() })),
+                      [
+                        { key: 'approver', label: 'Approver' },
+                        { key: 'approved_at', label: 'Approved At' },
+                      ]
+                    ),
+                  ].filter(Boolean),
+                }}
+              />
+            )}
+            {!isSharedView && (
+              <RecordChatButton
+                recordType={isReturn ? 'item_return' : 'material_request'}
+                recordId={request.id}
+                chatChannelId={request.chat_channel_id}
+              />
+            )}
+            {!isSharedView && (
+              <ActionButtons
+                isEditable={isEditable}
+                editing={editing}
+                onEdit={() => setEditing(true)}
+                onCancel={handleCancelEdit}
+                onSave={handleSaveEdit}
+              />
+            )}
+            {!isSharedView && request.status === 'completed' && (
               <Button
                 onClick={handlePrint}
                 className="bg-blue-600 hover:bg-blue-700 text-white"
@@ -297,7 +353,7 @@ const RequestDetails: React.FC = () => {
             </h2>
             <div className="bg-[var(--content-bg)] rounded-lg p-6">
               <div className="mb-6 italic text-[var(--text-secondary)] text-center border-b border-[var(--border)] pb-3">
-                <p className="text-lg">{requesterLabel}: <span className="font-semibold">{request.created_by}</span></p>
+                <p className="text-lg">{requesterLabel}: <span className="font-semibold"><PersonName value={request.created_by} /></span></p>
               </div>
               {editing ? (
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -493,7 +549,7 @@ const RequestDetails: React.FC = () => {
               {isReturn ? 'Return Information' : 'Project Information'}
             </h2>
             <div className="italic text-gray-600 mb-1 text-center border-b border-gray-200 pb-0.5 font-serif">
-              <p className="text-sm">{requesterLabel}: <span className="font-medium text-gray-900">{request.created_by}</span></p>
+              <p className="text-sm">{requesterLabel}: <span className="font-medium text-gray-900"><PersonName value={request.created_by} /></span></p>
             </div>
             <div className="overflow-hidden rounded border border-gray-300">
               <table className="w-full text-xs bg-white">
@@ -600,7 +656,7 @@ const RequestDetails: React.FC = () => {
                   <h3 className="font-bold text-blue-900 mb-1">Approvals</h3>
                   {request.approvals.map((approval, index) => (
                     <div key={approval.id} className={`pb-2 ${index < request.approvals.length - 1 ? 'border-b border-gray-200 mb-2' : ''}`}>
-                      <div className="flex mb-0.5 font-bold text-gray-900"><span className="w-16">Approver:</span><span className="ml-1">{approval.approver_name}</span></div>
+                      <div className="flex mb-0.5 font-bold text-gray-900"><span className="w-16">Approver:</span><span className="ml-1"><PersonName value={approval.approver_name} /></span></div>
                       <div className="flex mb-0.5 text-gray-700"><span className="w-16 font-medium">Signature:</span><span className="ml-1 italic">{approval.signature}</span></div>
                       <div className="flex text-gray-700"><span className="w-16">Date:</span><span className="ml-1 font-medium">{formatDateTime(approval.approved_at)}</span></div>
                     </div>
@@ -624,6 +680,11 @@ const RequestDetails: React.FC = () => {
               )}
             </div>
           </section>
+          {!isSharedView && (
+            <section className="mb-4">
+              <WorkflowTimeline workflowType={request.type || 'material_request'} recordId={request.id} />
+            </section>
+          )}
           {isWaybill && (
             <section className="mb-4">
               <h2 className="text-base font-bold mb-1 border-b border-gray-300 pb-0.5 text-gray-800">Waybill Details</h2>
@@ -1068,7 +1129,7 @@ const HistorySection: React.FC<HistorySectionProps> = ({ approvals, rejections, 
           <h3 className="text-sm font-semibold text-blue-800 mb-2">Approvals</h3>
           {approvals.map((approval) => (
             <div key={approval.id} className="border-l-4 border-blue-500 pl-4 py-2 mb-3 bg-blue-50 rounded">
-              <p className="text-sm font-medium text-gray-800">{approval.approver_name}</p>
+              <p className="text-sm font-medium text-gray-800"><PersonName value={approval.approver_name} /></p>
               <p className="text-sm text-gray-600">Signature: {approval.signature}</p>
               <p className="text-sm text-gray-600">Approved: {formatDateTime(approval.approved_at)}</p>
             </div>

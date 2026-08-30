@@ -10,6 +10,9 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import Modal from '../components/Modal';
+import { classifyApprovalQueueItem, type ApprovalQueueTab } from '../lib/approvalQueue';
+import { QueueStatusBadge } from '../components/approvals/ApprovalProgress';
+import { PersonName } from '@/components/PersonName';
 
 interface Request {
   id: number;
@@ -41,6 +44,11 @@ interface Request {
   requires_director_approval?: boolean;
   _approvedByMe?: boolean;
   _assignedToMe?: boolean;
+  my_decision?: string | null;
+  my_acted_at?: string | null;
+  approvals_count?: number;
+  approvals_required?: number;
+  approval_parties?: { id?: number; name: string; status: string; actedAt?: string | null }[];
 }
 
 type ApprovalMode = 'all' | 'material' | 'cash';
@@ -56,7 +64,7 @@ const PendingApprovals: React.FC<PendingApprovalsProps> = ({ mode = 'all' }) => 
   const [allRequests, setAllRequests] = useState<Request[]>([]);
   const [filteredRequests, setFilteredRequests] = useState<Request[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
-  const [activeTab, setActiveTab] = useState<'pending' | 'director' | 'approved' | 'released' | 'completed' | 'rejected'>('pending');
+  const [activeTab, setActiveTab] = useState<ApprovalQueueTab>('pending_mine');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isRejectModalOpen, setIsRejectModalOpen] = useState(false);
   const [selectedRequestId, setSelectedRequestId] = useState<number | null>(null);
@@ -74,7 +82,7 @@ const PendingApprovals: React.FC<PendingApprovalsProps> = ({ mode = 'all' }) => 
   useEffect(() => {
     const openTab = (location.state as { openTab?: string })?.openTab;
     if (openTab === 'director' && ['director', 'superadmin'].includes(user?.main_role || user?.role || '')) {
-      setActiveTab('director');
+      setActiveTab('pending_mine');
       navigate(location.pathname, { replace: true, state: {} });
     }
   }, [location.state, user?.main_role, user?.role, navigate, location.pathname]);
@@ -124,20 +132,7 @@ const PendingApprovals: React.FC<PendingApprovalsProps> = ({ mode = 'all' }) => 
       );
     }
 
-    if (activeTab === 'director') {
-      filtered = filtered.filter(
-        r => r.type === 'cash_request' && r.status === 'pending' && r.requires_director_approval
-      );
-    } else if (activeTab === 'approved') {
-      filtered = filtered.filter(r =>
-        r.status === 'supervisor_approved' || r.status === 'finance_approved'
-      );
-    } else if (activeTab === 'released') {
-      filtered = filtered.filter(r => r.status === 'finance_approved');
-    } else {
-      // Default: filter by status tab
-      filtered = filtered.filter(r => r.status === activeTab);
-    }
+    filtered = filtered.filter((r) => classifyApprovalQueueItem(r) === activeTab);
 
     if (searchTerm.trim()) {
       const lowerSearch = searchTerm.toLowerCase();
@@ -316,11 +311,7 @@ const PendingApprovals: React.FC<PendingApprovalsProps> = ({ mode = 'all' }) => 
     if (isCashMode) return r.type === 'cash_request';
     return true;
   });
-  const countByStatus = (status: string) => scopedRequests.filter(r => r.status === status).length;
-  const directorQueueCount = scopedRequests.filter(
-    r => r.type === 'cash_request' && r.status === 'pending' && r.requires_director_approval
-  ).length;
-  const approvedCount = scopedRequests.filter(r => r.status === 'supervisor_approved' || r.status === 'finance_approved').length;
+  const countByTab = (tab: ApprovalQueueTab) => scopedRequests.filter((r) => classifyApprovalQueueItem(r) === tab).length;
 
   if (loading) {
     return (
@@ -355,16 +346,11 @@ const PendingApprovals: React.FC<PendingApprovalsProps> = ({ mode = 'all' }) => 
         </div>
       </div>
 
-      <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as any)} className="w-full">
-        <TabsList className={`grid w-full ${isMaterialMode ? 'grid-cols-4' : 'grid-cols-5'}`}>
-          <TabsTrigger value="pending">Pending ({countByStatus('pending')})</TabsTrigger>
-          {!isMaterialMode && ['director', 'superadmin'].includes(user?.main_role || user?.role || '') && (
-            <TabsTrigger value="director">Director Approval ({directorQueueCount})</TabsTrigger>
-          )}
-          <TabsTrigger value="approved">Approved ({approvedCount})</TabsTrigger>
-          {!isMaterialMode && <TabsTrigger value="released">Released ({countByStatus('finance_approved')})</TabsTrigger>}
-          <TabsTrigger value="completed">Completed ({countByStatus('completed')})</TabsTrigger>
-          <TabsTrigger value="rejected">Rejected ({countByStatus('rejected')})</TabsTrigger>
+      <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as ApprovalQueueTab)} className="w-full">
+        <TabsList className="grid w-full grid-cols-3">
+          <TabsTrigger value="pending_mine">Pending My Action ({countByTab('pending_mine')})</TabsTrigger>
+          <TabsTrigger value="waiting_others">Waiting for Others ({countByTab('waiting_others')})</TabsTrigger>
+          <TabsTrigger value="completed">Completed ({countByTab('completed')})</TabsTrigger>
         </TabsList>
 
         <TabsContent value={activeTab} className="mt-6">
@@ -411,23 +397,15 @@ const PendingApprovals: React.FC<PendingApprovalsProps> = ({ mode = 'all' }) => 
                       </td>
 
                       <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="text-sm text-gray-900">{request.created_by}</div>
+                        <div className="text-sm text-gray-900"><PersonName value={request.created_by} /></div>
                       </td>
 
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="text-sm text-gray-900">{new Date(request.created_at).toLocaleDateString()}</div>
                       </td>
 
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${statusColor(request.status)}`}>
-                          {statusIcon(request.status)}
-                          {statusLabel(request.status, request.type)}
-                          {request.type === 'cash_request' && request.requires_director_approval && (
-                            <span className="ml-2 text-xs font-medium px-2 py-0.5 rounded bg-amber-100 text-amber-800">
-                              Director required
-                            </span>
-                          )}
-                        </span>
+                      <td className="px-6 py-4">
+                        <QueueStatusBadge item={request} tab={activeTab} />
                       </td>
 
                       <td className="px-6 py-4 whitespace-nowrap">
@@ -439,7 +417,7 @@ const PendingApprovals: React.FC<PendingApprovalsProps> = ({ mode = 'all' }) => 
                             View Details
                           </Link>
 
-                          {canApproveRequest(request) && (
+                          {activeTab === 'pending_mine' && canApproveRequest(request) && (
                             <Button
                               onClick={() => {
                                 setSelectedRequestId(request.id);
@@ -452,7 +430,7 @@ const PendingApprovals: React.FC<PendingApprovalsProps> = ({ mode = 'all' }) => 
                             </Button>
                           )}
 
-                          {request.status === 'pending' && !request._approvedByMe && (
+                          {activeTab === 'pending_mine' && request.status === 'pending' && !request._approvedByMe && (
                             <Button
                               onClick={() => {
                                 setSelectedRequestId(request.id);
@@ -464,11 +442,6 @@ const PendingApprovals: React.FC<PendingApprovalsProps> = ({ mode = 'all' }) => 
                             >
                               Reject
                             </Button>
-                          )}
-                          {request._approvedByMe && request.status === 'pending' && (
-                            <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">
-                              Approved by you
-                            </span>
                           )}
                         </div>
                       </td>

@@ -28,6 +28,9 @@ import ConfigurationPage from './ConfigurationPage';
 import RealmPage from './RealmPage';
 import SystemGuide from './SystemGuide';
 import ProfilePage from './ProfilePage';
+import MyActivityPage from './MyActivityPage';
+import MySharedLinksPage from './MySharedLinksPage';
+import NetworkAssets from './NetworkAssets';
 import MyWorkspace from './MyWorkspace';
 import Chat from './Chat';
 import { RealtimeProvider } from '../context/RealtimeContext';
@@ -36,6 +39,7 @@ import { VobiRoot } from '../components/vobi';
 import { PushNotificationSetup } from '../components/PushNotificationSetup';
 import { PWAUpdateToast } from '../components/PWAUpdateToast';
 import StaffHeader from '../components/StaffHeader';
+import DetailBreadcrumbs from '../components/DetailBreadcrumbs';
 import { MobileBottomNav } from '../components/MobileBottomNav';
 import { useIsMobile } from '@/hooks/useIsMobile';
 import { applyTheme, readStoredTheme } from '@/lib/theme';
@@ -91,6 +95,10 @@ import ServiceRequestReport from './staff/reports/ServiceRequestReport';
 // NOC DASHBOARD
 import NOCDashboard from './staff/noc/Dashboard';
 import NOCAllTickets from './staff/noc/NOCAllTickets';
+import IncidentNotes from './staff/noc/IncidentNotes';
+import ShiftSchedule from './staff/noc/ShiftSchedule';
+import WorkflowPerformance from './admin/WorkflowPerformance';
+import WorkflowTimeConfig from './admin/WorkflowTimeConfig';
 import IPDashboard from './staff/ip/Dashboard';
 import IPAllTickets from './staff/ip/IPAllTickets';
 import FieldTicketDashboard from './staff/field/TicketDashboard';
@@ -110,9 +118,14 @@ import TicketDetail from './customer/TicketDetail';
 
 import ProductionHub from './production/ProductionHub';
 import ProjectUnitHub from './production/ProjectUnitHub';
+import WipPage from './production/WipPage';
+import SignoffFormPage, { SignoffFormsList } from './production/SignoffForms';
 import ProductionCreate from './production/ProductionCreate';
 import ProductionDetail from './production/ProductionDetail';
 import ProductionUnitsPage from './production/ProductionUnitsPage';
+import DesignUnitPage from './production/DesignUnitPage';
+import DesignConfigurationPage from './production/DesignConfigurationPage';
+import SalesUnitPage from './production/SalesUnitPage';
 import HrDashboard from './hr/Dashboard';
 import HrEmployees from './hr/Employees';
 import HrEmployeeProfile from './hr/EmployeeProfile';
@@ -130,6 +143,23 @@ import HrSelfAttendance from './hr-self/Attendance';
 import HrSelfLeave from './hr-self/Leave';
 import HrSelfForms from './hr-self/Forms';
 import HrSelfPayslips from './hr-self/Payslips';
+import TransportRequestForm from './transport/TransportRequestForm';
+import TransportSupervisorDashboard from './transport/TransportSupervisorDashboard';
+import TransportApprovals from './transport/TransportApprovals';
+import TransportDetail from './transport/TransportDetail';
+import VehicleRequestPage from './transport/VehicleRequestPage';
+import VehicleRentalRequestsListPage from './transport/VehicleRentalRequestsListPage';
+import NewRentalVehicleRequestPage from './transport/NewRentalVehicleRequestPage';
+import VehicleRentalRequestDetailPage from './transport/VehicleRentalRequestDetailPage';
+import RentalApprovalsPage from './transport/RentalApprovalsPage';
+import VehicleFinanceQueuePage from './transport/VehicleFinanceQueuePage';
+import FuelRequestsListPage from './transport/FuelRequestsListPage';
+import FuelRequestFormPage from './transport/FuelRequestFormPage';
+import FuelRequestDetailPage from './transport/FuelRequestDetailPage';
+import FuelApprovalsPage from './transport/FuelApprovalsPage';
+import FinanceFuelRequestsPage from './finance/FinanceFuelRequestsPage';
+import FinanceDashboardPage from './finance/FinanceDashboardPage';
+import ApprovalHistoryPage from './finance/ApprovalHistoryPage';
 import {
   WORKSPACE_ROLES,
   TICKET_SUPPORT_ROLES,
@@ -160,6 +190,9 @@ import {
   SERVICE_REQUEST_REPORT_ROLES,
   REPORT_SYSTEM_ROLES,
 } from '../config/roles';
+
+/** Mirrors backend/routes/timeEngine.js's TIME_ENGINE_MANAGER_ROLES — system admins always pass via ProtectedRoute's isAdminSuper bypass. */
+const WORKFLOW_TIME_ENGINE_ROLES = ['noc_manager', 'ts_manager', 'ip_manager', 'finance_manager', 'noc_supervisor', 'ts_supervisor', 'ip_supervisor', 'approver', 'director', 'cto'];
 
 const Index = () => {
   const { user, ackUnsuspendNotice } = useAuth();
@@ -314,6 +347,7 @@ const Index = () => {
                 </div>
               </div>
             )}
+            {!isChatRoute && <DetailBreadcrumbs />}
             <Routes>
               {/* MY WORKSPACE — ALL STAFF ROLES */}
               <Route
@@ -342,6 +376,22 @@ const Index = () => {
                 element={
                   <ProtectedRoute allowedRoles={WORKSPACE_ROLES}>
                     <ProfilePage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/my-activity"
+                element={
+                  <ProtectedRoute allowedRoles={WORKSPACE_ROLES}>
+                    <MyActivityPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/my-shared-links"
+                element={
+                  <ProtectedRoute allowedRoles={WORKSPACE_ROLES}>
+                    <MySharedLinksPage />
                   </ProtectedRoute>
                 }
               />
@@ -382,6 +432,164 @@ const Index = () => {
                 }
               />
 
+              {/* TRANSPORT REQUESTS */}
+              <Route
+                path="/transport-request"
+                element={
+                  <ProtectedRoute allowedRoles={WORKSPACE_ROLES}>
+                    <TransportRequestForm />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/transport-supervisor-dashboard"
+                element={
+                  <ProtectedRoute allowedRoles={WORKSPACE_ROLES}>
+                    <TransportSupervisorDashboard />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/transport-approvals"
+                element={
+                  <ProtectedRoute allowedRoles={WORKSPACE_ROLES}>
+                    <TransportApprovals />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/transport-requests/:id"
+                element={
+                  <ProtectedRoute allowedRoles={WORKSPACE_ROLES}>
+                    <TransportDetail />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/transport/rental-vehicle-requests"
+                element={
+                  <ProtectedRoute allowedRoles={WORKSPACE_ROLES}>
+                    <VehicleRentalRequestsListPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/transport/vehicle-rental-requests"
+                element={<Navigate to="/transport/rental-vehicle-requests" replace />}
+              />
+              <Route
+                path="/transport/vehicle-rental-requests/:id"
+                element={
+                  <ProtectedRoute allowedRoles={WORKSPACE_ROLES}>
+                    <VehicleRentalRequestDetailPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/transport/rental-approvals"
+                element={
+                  <ProtectedRoute allowedRoles={WORKSPACE_ROLES}>
+                    <RentalApprovalsPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/transport/new-rental-vehicle-request"
+                element={
+                  <ProtectedRoute allowedRoles={WORKSPACE_ROLES}>
+                    <NewRentalVehicleRequestPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/transport/vehicle-request/:transportRequestId"
+                element={
+                  <ProtectedRoute allowedRoles={WORKSPACE_ROLES}>
+                    <VehicleRequestPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/transport/finance-queue"
+                element={
+                  <ProtectedRoute allowedRoles={FINANCE_ROLES} allowedUnits={['finance']}>
+                    <VehicleFinanceQueuePage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/transport/fuel-requests"
+                element={
+                  <ProtectedRoute allowedRoles={WORKSPACE_ROLES}>
+                    <FuelRequestsListPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/transport/fuel-requests/new"
+                element={
+                  <ProtectedRoute allowedRoles={WORKSPACE_ROLES}>
+                    <FuelRequestFormPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/transport/fuel-requests/:id"
+                element={
+                  <ProtectedRoute allowedRoles={WORKSPACE_ROLES}>
+                    <FuelRequestDetailPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/transport/fuel-approvals"
+                element={
+                  <ProtectedRoute allowedRoles={WORKSPACE_ROLES}>
+                    <FuelApprovalsPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/finance/dashboard"
+                element={
+                  <ProtectedRoute allowedRoles={WORKSPACE_ROLES}>
+                    <FinanceDashboardPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/finance/fuel-requests"
+                element={
+                  <ProtectedRoute allowedRoles={WORKSPACE_ROLES}>
+                    <FinanceFuelRequestsPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/finance/fuel-requests/:id"
+                element={
+                  <ProtectedRoute allowedRoles={WORKSPACE_ROLES}>
+                    <FuelRequestDetailPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/approval-history"
+                element={
+                  <ProtectedRoute allowedRoles={WORKSPACE_ROLES}>
+                    <ApprovalHistoryPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/finance/approval-history"
+                element={
+                  <ProtectedRoute allowedRoles={WORKSPACE_ROLES}>
+                    <ApprovalHistoryPage />
+                  </ProtectedRoute>
+                }
+              />
+
               {/* REQUEST FORMS & RETURNS */}
               <Route
                 path="/request-forms"
@@ -418,6 +626,10 @@ const Index = () => {
 
               {/* APPROVALS */}
               <Route
+                path="/network-assets/*"
+                element={<ProtectedRoute><NetworkAssets /></ProtectedRoute>}
+              />
+              <Route
                 path="/material-approvals"
                 element={
                   <ProtectedRoute allowedRoles={WORKSPACE_ROLES}>
@@ -452,9 +664,33 @@ const Index = () => {
                 }
               />
               <Route
+                path="/project-request/design"
+                element={
+                  <ProtectedRoute allowedRoles={['design_manager', 'design_supervisor']} allowedUnits={['design']}>
+                    <DesignUnitPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/project-request/sales"
+                element={
+                  <ProtectedRoute allowedRoles={['sales']} allowedUnits={['sales']}>
+                    <SalesUnitPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/settings/design-configuration"
+                element={
+                  <ProtectedRoute allowedRoles={['design_manager', 'design_supervisor']} allowedUnits={['design']}>
+                    <DesignConfigurationPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
                 path="/project-request/create"
                 element={
-                  <ProtectedRoute allowedRoles={PRODUCTION_ACCESS_ROLES} allowedUnits={['project', 'tx', 'ts', 'ip', 'noc']}>
+                  <ProtectedRoute allowedRoles={PRODUCTION_ACCESS_ROLES} allowedUnits={['design', 'project', 'sales', 'tx', 'ts', 'ip', 'noc']}>
                     <ProductionCreate />
                   </ProtectedRoute>
                 }
@@ -462,7 +698,7 @@ const Index = () => {
               <Route
                 path="/project-request/:unitSlug/:id"
                 element={
-                  <ProtectedRoute allowedRoles={PRODUCTION_ACCESS_ROLES} allowedUnits={['project', 'tx', 'ts', 'ip', 'noc']}>
+                  <ProtectedRoute allowedRoles={PRODUCTION_ACCESS_ROLES} allowedUnits={['design', 'project', 'sales', 'tx', 'ts', 'ip', 'noc']}>
                     <ProductionDetail />
                   </ProtectedRoute>
                 }
@@ -470,15 +706,18 @@ const Index = () => {
               <Route
                 path="/project-request/project"
                 element={
-                  <ProtectedRoute allowedRoles={PRODUCTION_ACCESS_ROLES} allowedUnits={['project', 'tx', 'ts', 'ip', 'noc']}>
+                  <ProtectedRoute allowedRoles={PRODUCTION_ACCESS_ROLES} allowedUnits={['project', 'sales', 'tx', 'ts', 'ip', 'noc']}>
                     <ProjectUnitHub />
                   </ProtectedRoute>
                 }
               />
+              <Route path="/project-unit/wip" element={<ProtectedRoute allowedRoles={PRODUCTION_ACCESS_ROLES}><WipPage /></ProtectedRoute>} />
+              <Route path="/project-unit/signoff" element={<ProtectedRoute allowedRoles={PRODUCTION_ACCESS_ROLES}><SignoffFormsList /></ProtectedRoute>} />
+              <Route path="/project-unit/signoff/:id" element={<ProtectedRoute allowedRoles={PRODUCTION_ACCESS_ROLES}><SignoffFormPage /></ProtectedRoute>} />
               <Route
                 path="/project-request/:unitSlug"
                 element={
-                  <ProtectedRoute allowedRoles={PRODUCTION_ACCESS_ROLES} allowedUnits={['project', 'tx', 'ts', 'ip', 'noc']}>
+                  <ProtectedRoute allowedRoles={PRODUCTION_ACCESS_ROLES} allowedUnits={['project', 'sales', 'tx', 'ts', 'ip', 'noc']}>
                     <ProductionHub />
                   </ProtectedRoute>
                 }
@@ -662,6 +901,26 @@ const Index = () => {
                     <NOCAllTickets />
                   </ProtectedRoute>
                 }
+              />
+              <Route
+                path="/noc/incident-notes"
+                element={<ProtectedRoute allowedRoles={NOC_DASHBOARD_ROLES} allowedUnits={['noc']}><IncidentNotes /></ProtectedRoute>}
+              />
+              <Route
+                path="/noc/incident-notes/:id"
+                element={<ProtectedRoute allowedRoles={NOC_DASHBOARD_ROLES} allowedUnits={['noc']}><IncidentNotes /></ProtectedRoute>}
+              />
+              <Route
+                path="/noc/shift-schedule"
+                element={<ProtectedRoute allowedRoles={NOC_DASHBOARD_ROLES} allowedUnits={['noc']}><ShiftSchedule /></ProtectedRoute>}
+              />
+              <Route
+                path="/workflow-performance"
+                element={<ProtectedRoute allowedRoles={WORKFLOW_TIME_ENGINE_ROLES}><WorkflowPerformance /></ProtectedRoute>}
+              />
+              <Route
+                path="/settings/workflow-time-config"
+                element={<ProtectedRoute allowedRoles={WORKFLOW_TIME_ENGINE_ROLES}><WorkflowTimeConfig /></ProtectedRoute>}
               />
               <Route
                 path="/staff/noc-manager/escalations"

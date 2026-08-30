@@ -10,6 +10,10 @@ import { cxApi, getRequestsByTicketId } from '../../../api';
 import { API_URL } from '@/lib/api';
 import { useAuth } from '../../../context/AuthContext';
 import { RecordChatButton } from '@/components/chat/RecordChatButton';
+import { ShareButton } from '@/components/ShareButton';
+import { useSharedView } from '@/context/SharedViewContext';
+import { WorkflowTimeline } from '@/components/timeline/WorkflowTimeline';
+import { buildPreviewTable } from '@/lib/shareRecord';
 import { staffCxTicketPath, toFullTicketNumber } from '@/lib/ticketPaths';
 import { vobiAmbientStore } from '@/stores/vobiAmbientStore';
 import { TicketTagsEditor } from '@/components/tickets/TicketTagsEditor';
@@ -35,6 +39,7 @@ interface TimelineEntry {
 }
 
 interface Ticket {
+  id?: number;
   ticket_id: string;
   title: string;
   status: string;
@@ -152,7 +157,9 @@ const ManualEmailForm: React.FC<{ ticketId: string; customerEmail: string }> = (
 };
 
 const TicketDetailPage: React.FC = () => {
-  const { id: rawRouteId } = useParams<{ id: string }>();
+  const { isSharedView, routeParams } = useSharedView();
+  const { id: paramRouteId } = useParams<{ id: string }>();
+  const rawRouteId = isSharedView ? routeParams?.id : paramRouteId;
   const ticketRouteId = rawRouteId
     ? decodeURIComponent(rawRouteId).trim().replace(/^#/, '')
     : '';
@@ -333,7 +340,7 @@ const TicketDetailPage: React.FC = () => {
 
       setTicket(processed);
 
-      if (ticketRouteId && publicId && ticketRouteId.toUpperCase() !== publicId.toUpperCase()) {
+      if (!isSharedView && ticketRouteId && publicId && ticketRouteId.toUpperCase() !== publicId.toUpperCase()) {
         navigate(staffCxTicketPath(publicId), { replace: true, state: location.state });
       }
     } catch (err: any) {
@@ -605,44 +612,99 @@ const TicketDetailPage: React.FC = () => {
                 </div>
                 <p className="text-sm text-slate-500 font-mono">{ticket.ticket_id}</p>
                 <div className="mt-3">
-                  <TicketTagsEditor
-                    ticketId={ticket.ticket_id}
-                    initialTags={ticket.tags || []}
-                    onChange={(tags) => setTicket((prev) => (prev ? { ...prev, tags } : prev))}
-                    onMutated={() => {
-                      void (async () => {
-                        try {
-                          const data = await cxApi.getTicketDetails(ticketRouteId);
-                          const detailData = data.data || data;
-                          const timeline = detailData.timeline || [];
-                          setTicket((prev) =>
-                            prev
-                              ? {
-                                  ...prev,
-                                  timeline: timeline.map((entry: any) => ({
-                                    action: entry.action,
-                                    message: entry.message,
-                                    visibility: entry.visibility || 'public',
-                                    actor_role: entry.actor_role || 'Staff',
-                                    actor_name: entry.actor_name || 'Unknown',
-                                    created_at: entry.created_at,
-                                  })),
-                                }
-                              : prev
-                          );
-                        } catch {
-                          /* ignore soft refresh errors */
-                        }
-                      })();
-                    }}
-                  />
+                  {isSharedView ? (
+                    (ticket.tags || []).length > 0 && (
+                      <div className="flex flex-wrap gap-1.5">
+                        {(ticket.tags || []).map((tag: any) => (
+                          <span
+                            key={tag.id}
+                            className="rounded-full px-2.5 py-0.5 text-xs font-medium text-white"
+                            style={{ backgroundColor: tag.color || '#64748b' }}
+                          >
+                            {tag.name}
+                          </span>
+                        ))}
+                      </div>
+                    )
+                  ) : (
+                    <TicketTagsEditor
+                      ticketId={ticket.ticket_id}
+                      initialTags={ticket.tags || []}
+                      onChange={(tags) => setTicket((prev) => (prev ? { ...prev, tags } : prev))}
+                      onMutated={() => {
+                        void (async () => {
+                          try {
+                            const data = await cxApi.getTicketDetails(ticketRouteId);
+                            const detailData = data.data || data;
+                            const timeline = detailData.timeline || [];
+                            setTicket((prev) =>
+                              prev
+                                ? {
+                                    ...prev,
+                                    timeline: timeline.map((entry: any) => ({
+                                      action: entry.action,
+                                      message: entry.message,
+                                      visibility: entry.visibility || 'public',
+                                      actor_role: entry.actor_role || 'Staff',
+                                      actor_name: entry.actor_name || 'Unknown',
+                                      created_at: entry.created_at,
+                                    })),
+                                  }
+                                : prev
+                            );
+                          } catch {
+                            /* ignore soft refresh errors */
+                          }
+                        })();
+                      }}
+                    />
+                  )}
                 </div>
               </div>
-              <RecordChatButton
-                recordType="ticket"
-                recordId={ticket.ticket_id}
-                chatChannelId={ticket.chat_channel_id}
-              />
+              <div className="flex items-center gap-2">
+                {!isSharedView && (
+                <ShareButton
+                  recordType="ticket"
+                  recordId={ticket.id ?? Number(ticketRouteId)}
+                  pagePath={window.location.pathname}
+                  pageTitle={`${ticket.title} (${ticket.ticket_id})`}
+                  recordPreview={{
+                    title: ticket.title,
+                    reference: ticket.ticket_id,
+                    status: ticket.status,
+                    client: ticket.customer_name,
+                    priority: ticket.priority,
+                    site: ticket.site_name,
+                    project: ticket.project_name,
+                    creator: ticket.creator_name,
+                    assignee: ticket.assignee_name,
+                    description: ticket.description,
+                    submitted: ticket.created_at,
+                    tables: [
+                      buildPreviewTable(
+                        'Timeline',
+                        ticket.timeline
+                          ?.filter((t) => t.visibility === 'public')
+                          .map((t) => ({ action: t.action, message: t.message, actor: t.actor_role, when: new Date(t.created_at).toLocaleString() })),
+                        [
+                          { key: 'action', label: 'Action' },
+                          { key: 'message', label: 'Message' },
+                          { key: 'actor', label: 'Actor' },
+                          { key: 'when', label: 'When' },
+                        ]
+                      ),
+                    ].filter(Boolean),
+                  }}
+                />
+                )}
+                {!isSharedView && (
+                <RecordChatButton
+                  recordType="ticket"
+                  recordId={ticket.ticket_id}
+                  chatChannelId={ticket.chat_channel_id}
+                />
+                )}
+              </div>
             </div>
           </div>
         </div>
@@ -745,6 +807,8 @@ const TicketDetailPage: React.FC = () => {
 
             <TicketFullReportPanel ticketId={ticket.ticket_id} status={ticket.status} />
 
+            {!isSharedView && <WorkflowTimeline workflowType="ticket" recordId={ticket.id ?? Number(ticketRouteId)} />}
+
             {linkedRequests.length > 0 && (
               <div className="bg-white rounded-2xl shadow-[var(--shadow-md)] border border-slate-200 p-6">
                 <h2 className="text-lg font-bold text-slate-900 mb-4 flex items-center gap-2">
@@ -780,6 +844,7 @@ const TicketDetailPage: React.FC = () => {
               </div>
             )}
 
+            {!isSharedView && (
             <div className="bg-gradient-to-r from-[var(--accent-green-light)] to-[#f8f1e8] rounded-xl p-5 border border-[#e0c4a0]">
               <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2">
                 <UserCheck className="w-5 h-5 text-[var(--primary)]" />
@@ -815,6 +880,7 @@ const TicketDetailPage: React.FC = () => {
                 </p>
               )}
             </div>
+            )}
 
             <div className="bg-white rounded-2xl shadow-[var(--shadow-md)] border border-slate-200 p-6">
               <h2 className="text-lg font-bold text-slate-900 mb-4 flex items-center gap-2">
@@ -852,6 +918,7 @@ const TicketDetailPage: React.FC = () => {
               </div>
             </div>
 
+            {!isSharedView && (
             <div className="bg-white rounded-2xl shadow-[var(--shadow-md)] border border-slate-200 p-6">
               <h2 className="text-lg font-bold text-slate-900 mb-4 flex items-center gap-2">
                 <MessageSquare className="w-5 h-5 text-[var(--primary)]" />
@@ -873,9 +940,11 @@ const TicketDetailPage: React.FC = () => {
                 Post Comment
               </button>
             </div>
+            )}
           </div>
 
           <div className="space-y-6">
+            {!isSharedView && (
             <div className="bg-white rounded-2xl shadow-[var(--shadow-md)] border border-slate-200 p-6">
               <h3 className="text-lg font-bold text-slate-900 mb-4">Quick Actions</h3>
               <div className="space-y-3">
@@ -916,8 +985,9 @@ const TicketDetailPage: React.FC = () => {
                 </button>
               </div>
             </div>
+            )}
 
-            {(ticket.customer_email || ticket.contact_email) && (
+            {!isSharedView && (ticket.customer_email || ticket.contact_email) && (
               <div className="bg-gradient-to-r from-[var(--accent-green-light)] to-[#f8f1e8] rounded-xl p-5 border border-blue-100">
                 <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2">
                   <Mail className="w-5 h-5 text-[var(--primary)]" />

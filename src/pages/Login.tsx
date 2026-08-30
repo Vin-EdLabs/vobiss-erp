@@ -1,6 +1,6 @@
 // src/pages/Login.tsx — all users land on My Workspace after sign-in
 import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { loginUser } from '../api';
 import { POST_LOGIN_PATH } from '../config/roles';
@@ -17,7 +17,10 @@ const Login = () => {
   const [rememberMe, setRememberMe] = useState(false);
   const [showForgotInfo, setShowForgotInfo] = useState(false);
   const navigate = useNavigate();
+  const location = useLocation();
   const { user, login } = useAuth();
+  const redirectFrom = (location.state as { from?: Location } | null)?.from;
+  const redirectTo = redirectFrom ? `${redirectFrom.pathname}${redirectFrom.search || ''}` : POST_LOGIN_PATH;
 
   useEffect(() => {
     const rememberedLogin = localStorage.getItem(REMEMBERED_LOGIN_KEY);
@@ -37,9 +40,9 @@ const Login = () => {
   // Redirect if already logged in
   useEffect(() => {
     if (user?.role || user?.main_role) {
-      navigate(POST_LOGIN_PATH, { replace: true });
+      navigate(redirectTo, { replace: true });
     }
-  }, [user, navigate]);
+  }, [user, navigate, redirectTo]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -57,7 +60,7 @@ const Login = () => {
           localStorage.removeItem(REMEMBERED_LOGIN_KEY);
         }
         login(data.token, data.user);
-        navigate(POST_LOGIN_PATH, { replace: true });
+        navigate(redirectTo, { replace: true });
       } catch (err: any) {
         setError(err.message || 'Invalid credentials. Please try again.');
       } finally {

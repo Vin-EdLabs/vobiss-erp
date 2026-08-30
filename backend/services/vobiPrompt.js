@@ -1,6 +1,29 @@
 /**
  * Vobi Intelligence system prompt — identity, persistent memory, ERP tools, live data.
  */
+
+/** Cap prompt size so Gemini stays fast. */
+function compactForPrompt(value, depth = 0) {
+  if (value == null) return value;
+  if (typeof value === 'string') return value.length > 500 ? `${value.slice(0, 500)}…` : value;
+  if (typeof value !== 'object') return value;
+  if (depth > 5) return '[…]';
+  if (Array.isArray(value)) {
+    return value.slice(0, 8).map((v) => compactForPrompt(v, depth + 1));
+  }
+  const out = {};
+  const entries = Object.entries(value);
+  for (const [k, v] of entries.slice(0, 40)) {
+    if (k === 'instruction_extra') {
+      out[k] = typeof v === 'string' && v.length > 6000 ? `${v.slice(0, 6000)}…` : v;
+      continue;
+    }
+    out[k] = compactForPrompt(v, depth + 1);
+  }
+  if (entries.length > 40) out._truncated_keys = entries.length - 40;
+  return out;
+}
+
 export function buildVobiSystemPrompt(systemData) {
   const ctx = systemData?.role_context || {};
   const role = ctx.role || 'staff';
@@ -14,6 +37,7 @@ export function buildVobiSystemPrompt(systemData) {
   const memories = Array.isArray(memory.persistent_memories) ? memory.persistent_memories : [];
   const summaries = Array.isArray(memory.conversation_summaries) ? memory.conversation_summaries : [];
   const older = Array.isArray(memory.relevant_older_turns) ? memory.relevant_older_turns : [];
+  const lightMode = Boolean(systemData?.light_mode);
 
   const memoryBlock =
     memories.length > 0
@@ -61,7 +85,15 @@ ${ctx.access_note || ctx.scoped_to_units ? `- Access note: ${ctx.access_note || 
 Use their preferred name naturally — greetings, important findings, or empathy — **not every sentence**.
 Prefer "you" in mid-conversation.
 If scoped_to_units is true: NEVER claim company-wide visibility. Only answer from modules/queues they have.
-
+${
+  lightMode
+    ? `
+════════════════════════════════════
+LIGHT REPLY MODE
+════════════════════════════════════
+This is a short / greeting message. Reply in 1–3 friendly sentences. Do not teach pages or dump briefings.
+`
+    : `
 ════════════════════════════════════
 ANSWER FOCUS (ROLE FIRST — NOT THE PAGE)
 ════════════════════════════════════
@@ -80,18 +112,20 @@ ${
 - Explain how this page works, main actions, common mistakes, and next step.
 - Never invent UI controls that contradict the LIVE UI SNAPSHOT.
 CURRENT PAGE CONTEXT:
-${JSON.stringify(systemData.current_page, null, 2)}
+${JSON.stringify(compactForPrompt(systemData.current_page), null, 2)}
 ${
   systemData?.live_ui_snapshot
-    ? `LIVE UI SNAPSHOT:\n${JSON.stringify(systemData.live_ui_snapshot, null, 2)}`
+    ? `LIVE UI SNAPSHOT:\n${JSON.stringify(compactForPrompt(systemData.live_ui_snapshot), null, 2)}`
     : ''
 }
 ${
   systemData?.related_docs
-    ? `RELATED DOCS EXCERPTS:\n${JSON.stringify(systemData.related_docs, null, 2)}`
+    ? `RELATED DOCS EXCERPTS:\n${JSON.stringify(compactForPrompt(systemData.related_docs), null, 2)}`
     : ''
 }`
     : 'PAGE HELP MODE: off (no page context this turn — stay role/work focused).'
+}
+`
 }
 
 ════════════════════════════════════
@@ -144,6 +178,7 @@ DATA & TOOLS
 - LIVE SYSTEM DATA below is role-filtered real-time context.
 - Call tools for precise lookups (client, ticket, inventory, employee, audit, docs, etc.).
 - Audit logs include full details (item_name, old/new qty, reason) — use them for "who changed/deleted".
+- Operational incident docs (server downtime + login history) in TOOL LOOKUP are the primary answer for **server changes / outage / who logged in**. Lead with those. Then add ERP audit_logs as a separate “App audit” section. If the report says the actor is unknown, say **unknown**.
 - Never invent people, tickets, amounts, sites, or statuses.
 - If can_see_payroll is false: never mention salaries or payroll totals.
 
@@ -169,6 +204,27 @@ ROLE FOCUS:
 ════════════════════════════════════
 LIVE SYSTEM DATA
 ════════════════════════════════════
-${JSON.stringify(systemData, null, 2)}
+${JSON.stringify(
+  lightMode
+    ? {
+        light_mode: true,
+        role_context: ctx,
+        note: 'Short message — reply briefly. Do not dump ERP tours or page guides.',
+        user_memory: memory.persistent_memories?.length
+          ? { persistent_memories: memory.persistent_memories.slice(0, 4) }
+          : undefined,
+      }
+    : compactForPrompt({
+        role_context: systemData?.role_context,
+        system: systemData?.system,
+        my_work: systemData?.my_work,
+        tool_lookup_results: systemData?.tool_lookup_results,
+        focused_ticket_report: systemData?.focused_ticket_report,
+        instruction_extra: systemData?.instruction_extra,
+        user_memory: systemData?.user_memory,
+      }),
+  null,
+  2
+)}
 `.trim();
 }

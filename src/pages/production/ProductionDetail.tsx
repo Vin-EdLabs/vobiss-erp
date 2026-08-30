@@ -24,14 +24,22 @@ import {
   uploadProjectRequestAttachment,
   tsAcceptProjectRequest,
   ipForwardProjectRequest,
+  nocApproveProjectRequest,
   projectCompleteProjectRequest,
+  projectForwardProjectRequest,
+  salesForwardProjectRequest,
   type ProjectRequest,
 } from '@/api/project';
+import { useSharedView } from '@/context/SharedViewContext';
+import { WorkflowTimeline } from '@/components/timeline/WorkflowTimeline';
 
-type WorkflowView = 'project' | 'ts' | 'ip' | 'noc';
+type WorkflowView = 'design' | 'sales' | 'project' | 'ts' | 'ip' | 'noc';
 
 export default function ProductionDetail() {
-  const { id, unitSlug: rawSlug } = useParams<{ id: string; unitSlug: string }>();
+  const { isSharedView, routeParams } = useSharedView();
+  const { id: routeId, unitSlug: routeSlug } = useParams<{ id: string; unitSlug: string }>();
+  const id = isSharedView ? routeParams?.id : routeId;
+  const rawSlug = isSharedView ? routeParams?.unitSlug : routeSlug;
   const unitSlug = rawSlug === 'tx' ? 'ts' : rawSlug;
   const navigate = useNavigate();
   const { toast } = useToast();
@@ -54,6 +62,8 @@ export default function ProductionDetail() {
   const isIp = isAdmin || units.includes('ip');
   const isNoc = isAdmin || units.includes('noc');
   const isProject = isAdmin || units.includes('project');
+  const isSales = isAdmin || units.includes('sales') || user?.main_role === 'sales' || user?.role === 'sales';
+  const isDesign = isAdmin || units.includes('design') || ['design_manager', 'design_supervisor'].includes(String(user?.main_role || user?.role || ''));
   const isCreator = request?.created_by_user_id === user?.id;
   const fullPipeline = request?.fullPipeline ?? (units.includes('project') || isAdmin);
 
@@ -116,18 +126,20 @@ export default function ProductionDetail() {
   }
 
   const workflowView: WorkflowView =
-    unitSlug === 'ts' || unitSlug === 'ip' || unitSlug === 'noc'
+    unitSlug === 'design' || unitSlug === 'sales' || unitSlug === 'ts' || unitSlug === 'ip' || unitSlug === 'noc'
       ? unitSlug
       : fullPipeline
         ? 'project'
         : 'project';
 
   const canTsAct =
+    !isSharedView &&
     workflowView === 'ts' &&
     isTs &&
     request.current_stage === 'ts' &&
     request.status === 'pending';
   const canIpAct =
+    !isSharedView &&
     workflowView === 'ip' &&
     isIp &&
     request.current_stage === 'ip' &&
@@ -135,13 +147,17 @@ export default function ProductionDetail() {
   const isLocked =
     request.status === 'completed' || request.current_stage === 'done';
 
-  const awaitingProjectSignOff =
-    request.status === 'integrated' || request.status === 'noc_approved';
+  const awaitingProjectSignOff = request.status === 'noc_approved';
   const canProjectComplete =
+    !isSharedView &&
     workflowView === 'project' &&
     (isProject || isCreator || isAdmin) &&
     !isLocked &&
     awaitingProjectSignOff;
+  const canSalesForward = !isSharedView && workflowView === 'sales' && isSales && request.current_stage === 'sales' && request.status === 'submitted_to_sales';
+  const canProjectRoute = !isSharedView && workflowView === 'project' && isProject && request.current_stage === 'project' && request.status === 'pending';
+  const canProjectSendNoc = !isSharedView && workflowView === 'project' && isProject && request.current_stage === 'project' && request.status === 'integrated';
+  const canNocApprove = !isSharedView && workflowView === 'noc' && isNoc && request.current_stage === 'noc' && request.status === 'integrated';
 
   const showIpIntegration =
     !!(request.circuit_id || request.ip_address || request.mac_address || request.integrated_by);
@@ -173,13 +189,35 @@ export default function ProductionDetail() {
       backLabel={backLabel}
       header={<ProjectRequestDetailHeader request={request} />}
     >
+      {!isSharedView && (
+        <div className="mb-6">
+          <WorkflowTimeline workflowType={request.is_design_request ? 'design_request' : 'service_request'} recordId={request.id} />
+        </div>
+      )}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         <div className="min-w-0 space-y-6 lg:col-span-2">
+          {workflowView === 'design' && (
+            <>
+              <DesignRequestOutput request={request} />
+              <DetailCard title="Request status" icon={FileText}><p className="text-sm text-[var(--text-secondary)]">{request.current_stage === 'design' ? 'This request is awaiting survey completion. Return to the Design Unit queue and choose Complete survey.' : 'This request has been submitted to Sales.'}</p></DetailCard>
+              <DetailCard title="Attachments" icon={FileText}><AttachmentZone attachments={attachments} allowUpload={false} /></DetailCard>
+            </>
+          )}
+          {workflowView === 'sales' && (
+            <>
+              <DesignRequestOutput request={request} />
+              <DetailCard title="Design attachments" icon={FileText}><AttachmentZone attachments={attachments} allowUpload={false} /></DetailCard>
+              {canSalesForward && <DetailCard title="Sales action" icon={Send}><p className="mb-4 text-sm text-[var(--text-secondary)]">Review the Design survey and material estimate, then send the completed request to Project Unit.</p><Button disabled={actionLoading} onClick={async () => { setActionLoading(true); try { await salesForwardProjectRequest(request.id); toast({ title: 'Sent to Project Unit' }); navigate(`/project-request/project/${request.id}`); } catch (e: unknown) { toast({ title: 'Could not forward', description: e instanceof Error ? e.message : 'Try again', variant: 'destructive' }); } finally { setActionLoading(false); } }}><Send className="mr-2 h-4 w-4" />Forward to Project Unit</Button></DetailCard>}
+            </>
+          )}
           {/* ── Project Unit: full monitor view (no tabs) ── */}
           {workflowView === 'project' && (
             <>
+              {request.is_design_request && <DesignRequestOutput request={request} />}
               <SubmittedRequestDetails request={request} />
               {showIpIntegration && <IpIntegrationDetails request={request} />}
+              {canProjectRoute && <DetailCard title="Project Unit routing" icon={Send}><p className="mb-4 text-sm text-[var(--text-secondary)]">Choose the next technical unit to start the implementation work.</p><div className="flex flex-wrap gap-3"><Button disabled={actionLoading} onClick={async () => { setActionLoading(true); try { await projectForwardProjectRequest(request.id, 'ts'); navigate(`/project-request/ts/${request.id}`); } finally { setActionLoading(false); } }}>Send to TS</Button><Button disabled={actionLoading} variant="outline" onClick={async () => { setActionLoading(true); try { await projectForwardProjectRequest(request.id, 'ip'); navigate(`/project-request/ip/${request.id}`); } finally { setActionLoading(false); } }}>Send to IP</Button></div></DetailCard>}
+              {canProjectSendNoc && <DetailCard title="Project Unit routing" icon={Send}><p className="mb-4 text-sm text-[var(--text-secondary)]">TS has returned the request. Send the completed package to NOC for review.</p><Button disabled={actionLoading} onClick={async () => { setActionLoading(true); try { await projectForwardProjectRequest(request.id, 'noc'); navigate(`/project-request/noc/${request.id}`); } finally { setActionLoading(false); } }}>Send to NOC</Button></DetailCard>}
               {canProjectComplete && (
                 <DetailCard title="Project Unit — mark complete" icon={Check}>
                   <p className="mb-4 text-sm text-[var(--text-secondary)]">
@@ -258,6 +296,7 @@ export default function ProductionDetail() {
               <DetailCard title="Comment / Remarks" icon={MessageSquare}>
                 <PipelineHistory request={request} remarks={remarks} />
               </DetailCard>
+              {!isSharedView && (
               <DetailCard title="TS — your action" icon={MessageSquare}>
                 <RemarksThread
                   remarks={remarks}
@@ -318,6 +357,7 @@ export default function ProductionDetail() {
                   </div>
                 )}
               </DetailCard>
+              )}
               {canTsAct && !isLocked && (
                 <DetailCard title="TS attachments" icon={FileText}>
                   <AttachmentZone
@@ -508,6 +548,7 @@ export default function ProductionDetail() {
                   <RemarksThread remarks={ipRemarks} stage="ip" readOnly />
                 </DetailCard>
               )}
+              {canNocApprove && <DetailCard title="NOC action" icon={Check} accent="noc"><p className="mb-4 text-sm text-[var(--text-secondary)]">Confirm the network review and return this request to Project Unit for final completion.</p><Button disabled={actionLoading} onClick={async () => { setActionLoading(true); try { await nocApproveProjectRequest(request.id); toast({ title: 'Approved by NOC' }); navigate(`/project-request/project/${request.id}`); } catch (e: unknown) { toast({ title: 'Could not approve', description: e instanceof Error ? e.message : 'Try again', variant: 'destructive' }); } finally { setActionLoading(false); } }}><Check className="mr-2 h-4 w-4" />Approve and return to Project</Button></DetailCard>}
             </>
           )}
         </div>
@@ -527,6 +568,24 @@ export default function ProductionDetail() {
       </div>
     </ProductionPageShell>
   );
+}
+
+function DesignRequestOutput({ request }: { request: ProjectRequest }) {
+  const materials = request.design_materials || [];
+  const total = materials.reduce((sum, item) => sum + Number(item.line_cost ?? item.quantity * item.unit_price), 0);
+  return <>
+    <DetailCard title="Design survey details" icon={FileText}>
+      <InfoGrid>
+        <InfoField label="ISP" value={request.isp || '—'} />
+        <InfoField label="Survey date" value={request.survey_date ? new Date(request.survey_date).toLocaleDateString() : '—'} />
+        <InfoField label="Reference" value={request.design_reference || '—'} />
+      </InfoGrid>
+      {request.design_specification && <p className="mt-4 whitespace-pre-wrap rounded-lg bg-[var(--surface-secondary)] p-3 text-sm text-[var(--text-body)]">{request.design_specification}</p>}
+    </DetailCard>
+    <DetailCard title="Design material request" icon={FileText}>
+      <div className="overflow-x-auto"><table className="w-full min-w-[520px] text-sm"><thead className="text-left text-[var(--text-muted)]"><tr><th className="pb-2">Material</th><th className="pb-2">Quantity</th><th className="pb-2">Unit price</th><th className="pb-2 text-right">Line cost</th></tr></thead><tbody>{materials.map((item) => <tr key={item.id || item.material_name} className="border-t border-[var(--border)]"><td className="py-2.5 font-medium">{item.material_name}</td><td className="py-2.5">{item.quantity} {item.unit}</td><td className="py-2.5">GH₵ {Number(item.unit_price).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td><td className="py-2.5 text-right">GH₵ {Number(item.line_cost ?? item.quantity * item.unit_price).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td></tr>)}</tbody><tfoot><tr className="border-t-2 border-[var(--border-strong)]"><td colSpan={3} className="pt-3 text-right font-bold">Grand total</td><td className="pt-3 text-right font-bold text-[var(--primary)]">GH₵ {total.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td></tr></tfoot></table></div>
+    </DetailCard>
+  </>;
 }
 
 const summaryFields = [

@@ -2,7 +2,7 @@
 // Unified Request Routes – Material + Cash Advance + All Actions
 
 import express from 'express';
-import { 
+import {
   createRequest, 
   getRequests, 
   updateRequest, 
@@ -21,6 +21,7 @@ import {
   canExecuteMaterial,
   canReleaseCash,
 } from '../permissions.js';
+import { logUserAction } from '../services/activityLog.js';
 
 const router = express.Router();
 
@@ -28,6 +29,9 @@ const router = express.Router();
 const getClientIp = (req) => {
   return req.headers['x-forwarded-for']?.split(',')[0].trim() || req.ip || req.connection?.remoteAddress || 'unknown';
 };
+
+const activityRecordType = (request) =>
+  String(request?.type || request?.request_type || 'material_request').toLowerCase();
 
 // CREATE REQUEST (Material or Cash)
 router.post('/', async (req, res) => {
@@ -77,6 +81,11 @@ router.post('/', async (req, res) => {
         total_amount: requestData.totalAmount || null
       }
     );
+    await logUserAction(req.user, {
+      actionType: 'submit',
+      recordType: requestType,
+      recordId: newRequest.id,
+    });
 
     res.status(201).json(newRequest);
   } catch (error) {
@@ -135,6 +144,8 @@ router.post('/:id/reject', async (req, res) => {
       getClientIp(req),
       { reason: reason.trim(), rejectorName }
     );
+    const request = await getRequestDetails(req.params.id);
+    await logUserAction(req.user, { actionType: 'reject', recordType: activityRecordType(request), recordId: req.params.id });
 
     res.json(result);
   } catch (error) {
@@ -163,6 +174,8 @@ router.post('/:id/approve', async (req, res) => {
       req.user.id,
       getClientIp(req)
     );
+    const request = await getRequestDetails(req.params.id);
+    await logUserAction(req.user, { actionType: 'approve', recordType: activityRecordType(request), recordId: req.params.id });
 
     res.json(result);
   } catch (error) {
@@ -183,6 +196,7 @@ router.post('/:id/cash-received', async (req, res) => {
       req.user.id,
       getClientIp(req)
     );
+    await logUserAction(req.user, { actionType: 'status_change', recordType: 'cash_request', recordId: req.params.id, statusText: 'marked cash received for' });
 
     res.json(result);
   } catch (error) {
@@ -206,6 +220,7 @@ router.post('/:id/finalize', async (req, res) => {
       req.user.id,
       getClientIp(req)
     );
+    await logUserAction(req.user, { actionType: 'complete', recordType: 'material_request', recordId: req.params.id });
 
     res.json(result);
   } catch (error) {

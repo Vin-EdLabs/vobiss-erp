@@ -53,7 +53,7 @@ const SystemMessages: React.FC = () => {
       setError(null);
       try {
         const [data] = await Promise.all([getNotifications(), refreshStats()]);
-        setNotifications(data);
+        setNotifications(Array.isArray(data) ? data : []);
       } catch (err: any) {
         setError(err?.message || 'Failed to load messages');
       } finally {

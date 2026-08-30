@@ -44,6 +44,7 @@ const ADMIN_SYSTEM_PATHS = [
   '/settings',
   '/system-messages',
   '/configuration',
+  '/settings/design-configuration',
   '/project-request/admin/units',
   '/audit-logs',
 ];

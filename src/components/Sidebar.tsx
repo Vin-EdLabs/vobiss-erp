@@ -1,4 +1,4 @@
-﻿// src/components/Sidebar.tsx â€” FULLY UPDATED & FIXED (January 10, 2026)
+// src/components/Sidebar.tsx â€” FULLY UPDATED & FIXED (January 10, 2026)
 import React, { useState, useEffect, useRef } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { 
@@ -8,9 +8,11 @@ import {
   DollarSign, HandCoins, Sliders, MessageCircle, ChevronsRight, ChevronDown, ChevronRight,
   Headphones, Ticket, MessagesSquare, Users2, User, FilePlus, Headset,
   Globe, CircleAlert, AlertCircle, Search, Network, LayoutDashboard,
-  Briefcase, CalendarDays, CalendarCheck, CalendarOff, Wallet, ClipboardCheck, FolderOpen, PanelLeftClose, PanelLeft, Landmark, ShieldCheck
+  Briefcase, CalendarDays, CalendarCheck, CalendarOff, Wallet, ClipboardCheck, FolderOpen, PanelLeftClose, PanelLeft, Landmark, ShieldCheck,
+  Truck, Fuel, FileSignature
 } from 'lucide-react';
 import { getRequests, getLowStockItems, getNotifications, getWorkspace, cxApi } from '../api';
+import { formatPersonName } from '@/lib/displayName';
 import { resolvePrimaryRole, normalizeMenuRole, userHasAnyRole, formatRoleLabel, isHrStaff, SYSTEM_ADMIN_LABEL } from '../config/roles';
 import { getMyProjectUnits, getProjectRequestDashboard, type ProjectUnit } from '../api/project';
 import { getChatUnreadTotal } from '../api/chat';
@@ -20,6 +22,7 @@ import { useQuery } from '@tanstack/react-query';
 import { hrSelfApi } from '@/api/hrSelf';
 import { hrApi } from '@/api/hr';
 import { UserAvatar } from '@/components/UserAvatar';
+import { isMenuPathActive } from '@/lib/menuActivePath';
 
 const OPEN_TICKET_STATUSES = new Set(['NEW', 'OPEN', 'IN_PROGRESS', 'ON_HOLD']);
 
@@ -120,6 +123,7 @@ const serviceRequestSlugsForUnits = (
     .filter(Boolean)
     .forEach((unit) => {
       if (unit === 'project' || unit === 'project unit' || unit.startsWith('project')) slugs.add('project');
+      if (unit === 'sales') slugs.add('sales');
       if (unit === 'tx' || unit === 'ts') slugs.add('ts');
       if (unit === 'ip') slugs.add('ip');
       if (unit === 'noc') slugs.add('noc');
@@ -128,6 +132,53 @@ const serviceRequestSlugsForUnits = (
   if (pos === 'project manager' || pos === 'project supervisor') slugs.add('project');
   return slugs;
 };
+
+const SIDEBAR_SECTION_IDS = [
+  'transport', 'inventory', 'finance', 'approveRequest', 'settings', 'fieldActivities',
+  'assetsManager', 'cx', 'relationshipOffice', 'noc', 'ip', 'fieldEngineering',
+  'customerPortal', 'reports', 'serviceRequests', 'projectUnit', 'networkAssets',
+  'hr', 'myHr', 'nocManager', 'directors', 'tickets',
+] as const;
+type SidebarSectionId = (typeof SIDEBAR_SECTION_IDS)[number];
+type SidebarSectionState = Record<SidebarSectionId, boolean>;
+
+const CLOSED_SIDEBAR_SECTIONS: SidebarSectionState = Object.fromEntries(
+  SIDEBAR_SECTION_IDS.map((id) => [id, false])
+) as SidebarSectionState;
+
+function readSidebarSectionState(userId: number | string): SidebarSectionState | null {
+  try {
+    const saved = localStorage.getItem(`sidebar_state_${userId}`);
+    if (!saved) return null;
+    const parsed = JSON.parse(saved);
+    if (!parsed || typeof parsed !== 'object') return null;
+    return { ...CLOSED_SIDEBAR_SECTIONS, ...parsed };
+  } catch {
+    return null;
+  }
+}
+
+function defaultSidebarSectionForPath(pathname: string): SidebarSectionId | null {
+  if (pathname.startsWith('/transport')) return 'transport';
+  if (pathname === '/material-approvals' || pathname === '/cash-approvals') return 'approveRequest';
+  if (pathname.startsWith('/network-assets')) return 'networkAssets';
+  if (pathname.startsWith('/project-unit')) return 'projectUnit';
+  if (pathname.startsWith('/project-request')) return 'serviceRequests';
+  if (pathname.startsWith('/finance') || pathname.startsWith('/cash')) return 'finance';
+  if (pathname.startsWith('/hr-self')) return 'myHr';
+  if (pathname.startsWith('/hr')) return 'hr';
+  if (pathname.startsWith('/inventory') || pathname.startsWith('/categories') || pathname.startsWith('/low-stock') || pathname.startsWith('/items-out')) return 'inventory';
+  if (pathname.startsWith('/staff/noc') || pathname.startsWith('/noc/')) return 'noc';
+  if (pathname.startsWith('/staff/ip')) return 'ip';
+  if (pathname.startsWith('/staff/field')) return 'fieldEngineering';
+  if (pathname.startsWith('/assets')) return 'assetsManager';
+  if (pathname.startsWith('/field/')) return 'fieldActivities';
+  if (pathname.startsWith('/staff/cx')) return 'cx';
+  if (pathname.startsWith('/staff/reports') || pathname === '/reports') return 'reports';
+  if (pathname.startsWith('/customer')) return 'customerPortal';
+  if (pathname.startsWith('/configuration') || pathname.startsWith('/settings') || pathname.startsWith('/audit-logs') || pathname.startsWith('/realm')) return 'settings';
+  return null;
+}
 
 const Sidebar = ({
   desktopMode,
@@ -169,32 +220,32 @@ const Sidebar = ({
   };
 
   const hasRefreshedUser = useRef(false);
-  const previousAccessMode = useRef(accessMode);
+  const [sidebarSections, setSidebarSections] = useState<SidebarSectionState>(CLOSED_SIDEBAR_SECTIONS);
+  const sidebarSectionsUserId = useRef<number | string | null>(null);
+
+  useEffect(() => {
+    if (!user?.id || sidebarSectionsUserId.current === user.id) return;
+    sidebarSectionsUserId.current = user.id;
+    const saved = readSidebarSectionState(user.id);
+    const activeSection = defaultSidebarSectionForPath(location.pathname);
+    setSidebarSections(saved || { ...CLOSED_SIDEBAR_SECTIONS, ...(activeSection ? { [activeSection]: true } : {}) });
+  }, [user?.id, location.pathname]);
+
+  const sectionOpen = (section: SidebarSectionId) => sidebarSections[section];
+  const toggleSection = (section: SidebarSectionId) => {
+    setSidebarSections((current) => {
+      const updated = { ...current, [section]: !current[section] };
+      if (user?.id) localStorage.setItem(`sidebar_state_${user.id}`, JSON.stringify(updated));
+      return updated;
+    });
+  };
+
   useEffect(() => {
     if (user?.id && !hasRefreshedUser.current) {
       hasRefreshedUser.current = true;
       refreshUser();
     }
   }, [user?.id, refreshUser]);
-
-  useEffect(() => {
-    const switchedToSystemMode = previousAccessMode.current !== 'system' && accessMode === 'system';
-    if (switchedToSystemMode && !isAdminSuper && canUseSystemMode) {
-      setIsAssetsOpen(false);
-      setIsFieldOpen(false);
-      setIsCXOpen(false);
-      setIsReportsOpen(false);
-      setIsSettingsOpen(false);
-      setIsInventoryOpen(false);
-      setIsNOCOpen(false);
-      setIsIPOpen(false);
-      setIsFieldEngOpen(false);
-      setIsCustomerOpen(false);
-      setIsProjectRequestOpen(false);
-      setIsHrOpen(false);
-    }
-    previousAccessMode.current = accessMode;
-  }, [accessMode, canUseSystemMode, isAdminSuper]);
 
   const [pendingCount, setPendingCount] = useState(0);
   const [materialApprovalCount, setMaterialApprovalCount] = useState(0);
@@ -205,19 +256,6 @@ const Sidebar = ({
   const [workspaceAttentionCount, setWorkspaceAttentionCount] = useState(0);
   const [chatUnreadCount, setChatUnreadCount] = useState(0);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
-  const [isAssetsOpen, setIsAssetsOpen] = useState(false);
-  const [isFieldOpen, setIsFieldOpen] = useState(true);
-  const [isCXOpen, setIsCXOpen] = useState(true);
-  const [isReportsOpen, setIsReportsOpen] = useState(true);
-  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [isInventoryOpen, setIsInventoryOpen] = useState(true);
-  const [isNOCOpen, setIsNOCOpen] = useState(true);
-  const [isIPOpen, setIsIPOpen] = useState(true);
-  const [isFieldEngOpen, setIsFieldEngOpen] = useState(true);
-  const [isCustomerOpen, setIsCustomerOpen] = useState(true);
-  const [isProjectRequestOpen, setIsProjectRequestOpen] = useState(true);
-  const [isHrOpen, setIsHrOpen] = useState(true);
-  const [isMyHrOpen, setIsMyHrOpen] = useState(true);
   const [menuQuery, setMenuQuery] = useState('');
   const searchRef = useRef<HTMLInputElement>(null);
   const [projectUnits, setProjectUnits] = useState<ProjectUnit[]>([]);
@@ -302,7 +340,7 @@ const Sidebar = ({
       clearInterval(interval);
       window.removeEventListener('project-requests:changed', loadProjectCounts);
     };
-  }, [projectUnits, user?.id, user?.main_role, user?.role, user?.position, isAdminSuper, isSystemMode]);
+  }, [projectUnits.length, user?.id, user?.main_role, user?.role, user?.position, isAdminSuper, isSystemMode]);
 
   useEffect(() => {
     if (!user?.id) return;
@@ -364,7 +402,7 @@ const Sidebar = ({
           getNotifications(),
           getWorkspace().catch(() => null),
         ]);
-        setUnreadNotifCount(list.filter((n) => !n.read).length);
+        setUnreadNotifCount(Array.isArray(list) ? list.filter((n) => !n.read).length : 0);
         setWorkspaceAttentionCount(workspace?.stats?.attentionCount || 0);
       } catch {
         setUnreadNotifCount(0);
@@ -496,12 +534,25 @@ const Sidebar = ({
     // Common items
     const requestForms     = { icon: ClipboardList,  label: 'Material Requests', path: '/request-forms' };
     const itemReturns      = { icon: ArrowLeftCircle,label: 'Item Returns',      path: '/item-returns' };
+    const transportRequest = { icon: Truck,          label: 'Transport Requests', path: '/transport-request' };
+    const transportSupervisorDashboard = { icon: ShieldCheck, label: 'Dashboard', path: '/transport-supervisor-dashboard' };
+    const fuelRequests = { icon: Fuel, label: 'Fuel Requests', path: '/transport/fuel-requests' };
+    const rentalVehicleRequests = { icon: FileText, label: 'Vehicle Rental Requests', path: '/transport/rental-vehicle-requests' };
+    const transportApprovals = { icon: Clock,        label: 'Transport Approvals', path: '/transport-approvals' };
+    const rentalApprovals = { icon: Clock, label: 'Rental Approvals', path: '/transport/rental-approvals' };
+    const fuelApprovals = { icon: Clock, label: 'Fuel Approvals', path: '/transport/fuel-approvals' };
+    const financeDashboard = { icon: BarChart3, label: 'Finance Dashboard', path: '/finance/dashboard' };
+    const financeApprovalHistory = { icon: CheckCircle, label: 'Approval History', path: '/finance/approval-history' };
+    const transportSettings = { icon: Settings, label: 'Settings', path: '/configuration' };
     const materialApprovals = { icon: Clock,          label: 'Material Approvals', path: '/material-approvals', notificationCount: materialApprovalCount };
     const cashApprovals    = { icon: HandCoins,      label: 'Cash Approvals',    path: '/cash-approvals', notificationCount: cashApprovalCount };
     const issueItem        = { icon: CheckCircle,    label: 'Issue Item',        path: '/approved-forms', notificationCount: approvedCount };
     const approvalSubItems = [
       ...(canApproveMaterialInSidebar ? [materialApprovals] : []),
       ...(canApproveCashInSidebar ? [cashApprovals] : []),
+      transportApprovals,
+      rentalApprovals,
+      fuelApprovals,
     ];
     const reportSubItems = [
       { icon: BarChart3, label: 'Reports Home', path: '/staff/reports' },
@@ -516,8 +567,8 @@ const Sidebar = ({
             icon: BarChart2,
             label: 'Report System',
             isCollapsible: true,
-            isOpen: isReportsOpen,
-            onToggle: () => setIsReportsOpen((prev) => !prev),
+            isOpen: sectionOpen('reports'),
+            onToggle: () => toggleSection('reports'),
             badge: 'Reports',
             badgeColor: SIDEBAR_LABEL_BADGE,
             subItems: reportSubItems,
@@ -532,6 +583,22 @@ const Sidebar = ({
     // Cash & Finance
     const cashRequest      = { icon: DollarSign,     label: 'Request Cash Advance', path: '/cash-request' };
     const financeApprovals = { icon: HandCoins,      label: 'Finance Approvals',    path: '/finance-approvals' };
+    const vehicleFinanceQueue = { icon: HandCoins, label: 'Vehicle Cash Issuance', path: '/transport/finance-queue' };
+    const fuelFinanceQueue = { icon: HandCoins, label: 'Fuel Cash & Receipts', path: '/finance/fuel-requests' };
+    const financeSection = {
+      icon: Wallet,
+      label: 'Finance',
+      isCollapsible: true,
+      isOpen: sectionOpen('finance'),
+      onToggle: () => toggleSection('finance'),
+      subItems: [
+        financeDashboard,
+        financeApprovals,
+        vehicleFinanceQueue,
+        fuelFinanceQueue,
+        financeApprovalHistory,
+      ],
+    };
 
     // Inventory core
     const dashboard        = { icon: BarChart3,      label: 'Dashboard',         path: '/dashboard' };
@@ -541,8 +608,8 @@ const Sidebar = ({
       icon: ClipboardList,
       label: 'Approve Request',
       isCollapsible: true,
-      isOpen: true,
-      onToggle: () => {},
+      isOpen: sectionOpen('approveRequest'),
+      onToggle: () => toggleSection('approveRequest'),
       notificationCount: pendingCount,
       subItems: approvalSubItems,
     };
@@ -550,8 +617,8 @@ const Sidebar = ({
       icon: ClipboardList,
       label: 'Approve Request',
       isCollapsible: true,
-      isOpen: true,
-      onToggle: () => {},
+      isOpen: sectionOpen('approveRequest'),
+      onToggle: () => toggleSection('approveRequest'),
       badge: pendingCount > 0 ? String(pendingCount) : undefined,
       badgeColor: SIDEBAR_ALERT_BADGE,
       notificationCount: pendingCount,
@@ -569,19 +636,33 @@ const Sidebar = ({
             icon: Package,
             label: 'Inventory',
             isCollapsible: true,
-            isOpen: isInventoryOpen,
-            onToggle: () => setIsInventoryOpen((prev) => !prev),
+            isOpen: sectionOpen('inventory'),
+            onToggle: () => toggleSection('inventory'),
             notificationCount: subItems.reduce((sum: number, item: any) => sum + (item.notificationCount || 0), 0),
             subItems,
           }
         : null;
 
+    const transportSection = {
+      icon: Truck,
+      label: 'Transport',
+      isCollapsible: true,
+      isOpen: sectionOpen('transport'),
+      onToggle: () => toggleSection('transport'),
+      subItems: [
+        transportSupervisorDashboard,
+        transportRequest,
+        fuelRequests,
+        rentalVehicleRequests,
+      ],
+    };
+
     const systemSettingsSection = {
       icon: Settings,
       label: 'Settings',
       isCollapsible: true,
-      isOpen: isSettingsOpen,
-      onToggle: () => setIsSettingsOpen((prev) => !prev),
+      isOpen: sectionOpen('settings'),
+      onToggle: () => toggleSection('settings'),
       badge: 'System',
       badgeColor: SIDEBAR_LABEL_BADGE,
       subItems: [
@@ -589,7 +670,10 @@ const Sidebar = ({
         { icon: Users2, label: 'Manage Clients', path: '/admin/clients' },
         { icon: Network, label: 'Units Configuration', path: '/project-request/admin/units' },
         { icon: AuditIcon, label: 'Audit Logs', path: '/audit-logs' },
+        { icon: Activity, label: 'Workflow Performance', path: '/workflow-performance' },
+        { icon: Sliders, label: 'Workflow Time Config', path: '/settings/workflow-time-config' },
         { icon: Sliders, label: 'System Configuration', path: '/configuration' },
+        { icon: Sliders, label: 'Design Configuration', path: '/settings/design-configuration' },
         { icon: Landmark, label: 'Realm', path: '/realm' },
         { icon: Bell, label: 'System Messages', path: '/system-messages' },
         { icon: Settings, label: 'System Settings', path: '/settings' },
@@ -600,13 +684,18 @@ const Sidebar = ({
       ],
     };
 
+    const isDesignMember = hasUnit('design', 'design unit') || ['design_manager', 'design_supervisor'].includes(role);
+    const designSettingsSection = isDesignMember
+      ? { icon: Settings, label: 'Settings', isCollapsible: true, isOpen: sectionOpen('settings'), onToggle: () => toggleSection('settings'), subItems: [{ icon: Sliders, label: 'Design Configuration', path: '/settings/design-configuration' }] }
+      : null;
+
     // Field Activities
     const fieldActivities = {
       icon: Map,
       label: 'Field Activities',
       isCollapsible: true,
-      isOpen: isFieldOpen,
-      onToggle: () => setIsFieldOpen(prev => !prev),
+      isOpen: sectionOpen('fieldActivities'),
+      onToggle: () => toggleSection('fieldActivities'),
       subItems: [
         { icon: Home,       label: 'Dashboard',      path: '/field/dashboard' },
         { icon: MapPin,     label: 'Map View',       path: '/field/map' },
@@ -620,8 +709,8 @@ const Sidebar = ({
       icon: Monitor,
       label: 'Assets Manager',
       isCollapsible: true,
-      isOpen: isAssetsOpen,
-      onToggle: () => setIsAssetsOpen(prev => !prev),
+      isOpen: sectionOpen('assetsManager'),
+      onToggle: () => toggleSection('assetsManager'),
       subItems: [
         { icon: Package,   label: 'All Assets',     path: '/assets' },
         { icon: Plus,      label: 'Add New Asset',  path: '/assets/new' },
@@ -639,8 +728,8 @@ const Sidebar = ({
       icon: Headphones,
       label: 'CX System',
       isCollapsible: true,
-      isOpen: isCXOpen,
-      onToggle: () => setIsCXOpen(prev => !prev),
+      isOpen: sectionOpen('cx'),
+      onToggle: () => toggleSection('cx'),
       badge: ticketAttention.cx > 0 ? String(ticketAttention.cx) : undefined,
       badgeColor: SIDEBAR_ALERT_BADGE,
       notificationCount: ticketAttention.cx,
@@ -663,8 +752,8 @@ const Sidebar = ({
       icon: Users2,
       label: 'Relationship Officer',
       isCollapsible: true,
-      isOpen: isCXOpen,
-      onToggle: () => setIsCXOpen((prev) => !prev),
+      isOpen: sectionOpen('relationshipOffice'),
+      onToggle: () => toggleSection('relationshipOffice'),
       badge: ticketAttention.ro > 0 ? String(ticketAttention.ro) : 'R.O',
       badgeColor: ticketAttention.ro > 0 ? SIDEBAR_ALERT_BADGE : SIDEBAR_LABEL_BADGE,
       notificationCount: ticketAttention.ro,
@@ -678,8 +767,8 @@ const Sidebar = ({
       icon: Ticket,
       label: 'NOC Manager',
       isCollapsible: true,
-      isOpen: isNOCOpen,
-      onToggle: () => setIsNOCOpen((prev) => !prev),
+      isOpen: sectionOpen('nocManager'),
+      onToggle: () => toggleSection('nocManager'),
       badge: ticketAttention.noc_manager > 0 ? String(ticketAttention.noc_manager) : 'Mgr',
       badgeColor: ticketAttention.noc_manager > 0 ? SIDEBAR_ALERT_BADGE : SIDEBAR_LABEL_BADGE,
       notificationCount: ticketAttention.noc_manager,
@@ -692,8 +781,8 @@ const Sidebar = ({
       icon: AlertCircle,
       label: 'CTO / Directors',
       isCollapsible: true,
-      isOpen: isCXOpen,
-      onToggle: () => setIsCXOpen((prev) => !prev),
+      isOpen: sectionOpen('directors'),
+      onToggle: () => toggleSection('directors'),
       badge: ticketAttention.director > 0 ? String(ticketAttention.director) : 'Exec',
       badgeColor: ticketAttention.director > 0 ? SIDEBAR_ALERT_BADGE : SIDEBAR_LABEL_BADGE,
       notificationCount: ticketAttention.director,
@@ -707,8 +796,8 @@ const Sidebar = ({
       icon: Network,
       label: 'Service Requests',
       isCollapsible: true,
-      isOpen: isProjectRequestOpen,
-      onToggle: () => setIsProjectRequestOpen((p) => !p),
+      isOpen: sectionOpen('serviceRequests'),
+      onToggle: () => toggleSection('serviceRequests'),
       badge: (projectUnitCounts.project || 0) > 0 ? String(projectUnitCounts.project) : undefined,
       badgeColor: SIDEBAR_ALERT_BADGE,
       subItems: [
@@ -726,8 +815,8 @@ const Sidebar = ({
       icon: Ticket,
       label: 'Tickets',
       isCollapsible: true,
-      isOpen: isCXOpen,
-      onToggle: () => setIsCXOpen((prev) => !prev),
+      isOpen: sectionOpen('tickets'),
+      onToggle: () => toggleSection('tickets'),
       badge: ticketAttention.cx > 0 ? String(ticketAttention.cx) : undefined,
       badgeColor: SIDEBAR_ALERT_BADGE,
       notificationCount: ticketAttention.cx,
@@ -743,14 +832,17 @@ const Sidebar = ({
       icon: Ticket,
       label: 'NOC Ticketing',
       isCollapsible: true,
-      isOpen: isNOCOpen,
-      onToggle: () => setIsNOCOpen(prev => !prev),
+      isOpen: sectionOpen('noc'),
+      onToggle: () => toggleSection('noc'),
       badge: ticketAttention.noc > 0 ? String(ticketAttention.noc) : undefined,
       badgeColor: SIDEBAR_ALERT_BADGE,
       notificationCount: ticketAttention.noc,
       subItems: [
         { icon: Home,        label: 'Dashboard',             path: '/staff/noc/dashboard' },
         { icon: Ticket,      label: 'NOC Ticket Queue',      path: '/staff/noc/tickets', notificationCount: ticketAttention.noc },
+        { icon: Ticket,      label: 'Master Tickets',        path: '/staff/cx/tickets' },
+        { icon: ClipboardList, label: 'Incident Notes',       path: '/noc/incident-notes' },
+        { icon: Clock,         label: 'Shift Schedule',       path: '/noc/shift-schedule' },
         { icon: FilePlus,    label: 'Create Ticket',         path: '/staff/cx/create-ticket' },
         { icon: CircleAlert, label: 'NOC Escalation',        path: '/staff/cx/escalate', notificationCount: ticketAttention.escalate },
       ]
@@ -761,8 +853,8 @@ const Sidebar = ({
       icon: Globe,
       label: 'IP Ticketing',
       isCollapsible: true,
-      isOpen: isIPOpen,
-      onToggle: () => setIsIPOpen(prev => !prev),
+      isOpen: sectionOpen('ip'),
+      onToggle: () => toggleSection('ip'),
       badge: ticketAttention.ip > 0 ? String(ticketAttention.ip) : undefined,
       badgeColor: SIDEBAR_ALERT_BADGE,
       notificationCount: ticketAttention.ip,
@@ -779,8 +871,8 @@ const Sidebar = ({
       icon: Wrench,
       label: 'TS Ticketing',
       isCollapsible: true,
-      isOpen: isFieldEngOpen,
-      onToggle: () => setIsFieldEngOpen(prev => !prev),
+      isOpen: sectionOpen('fieldEngineering'),
+      onToggle: () => toggleSection('fieldEngineering'),
       badge: ticketAttention.tx > 0 ? String(ticketAttention.tx) : undefined,
       badgeColor: SIDEBAR_ALERT_BADGE,
       notificationCount: ticketAttention.tx,
@@ -797,8 +889,8 @@ const Sidebar = ({
       icon: User,
       label: 'Customer Portal',
       isCollapsible: true,
-      isOpen: isCustomerOpen,
-      onToggle: () => setIsCustomerOpen(prev => !prev),
+      isOpen: sectionOpen('customerPortal'),
+      onToggle: () => toggleSection('customerPortal'),
       badge: undefined,
       badgeColor: SIDEBAR_LABEL_BADGE,
       subItems: [
@@ -832,8 +924,8 @@ const Sidebar = ({
       icon: Briefcase,
       label: 'Human Resources',
       isCollapsible: true,
-      isOpen: isHrOpen,
-      onToggle: () => setIsHrOpen((p) => !p),
+      isOpen: sectionOpen('hr'),
+      onToggle: () => toggleSection('hr'),
       badge: hrAttentionCount > 0 ? String(hrAttentionCount) : undefined,
       badgeColor: SIDEBAR_ALERT_BADGE,
       notificationCount: hrAttentionCount,
@@ -856,8 +948,8 @@ const Sidebar = ({
       icon: Briefcase,
       label: 'My HR',
       isCollapsible: true,
-      isOpen: isMyHrOpen,
-      onToggle: () => setIsMyHrOpen((p) => !p),
+      isOpen: sectionOpen('myHr'),
+      onToggle: () => toggleSection('myHr'),
       badge: myHrAttentionCount > 0 ? String(myHrAttentionCount) : undefined,
       badgeColor: SIDEBAR_ALERT_BADGE,
       notificationCount: myHrAttentionCount,
@@ -874,8 +966,8 @@ const Sidebar = ({
       icon: Briefcase,
       label: 'Human Resources',
       isCollapsible: true,
-      isOpen: isHrOpen,
-      onToggle: () => setIsHrOpen((p) => !p),
+      isOpen: sectionOpen('hr'),
+      onToggle: () => toggleSection('hr'),
       badge: hrAttentionCount > 0 ? String(hrAttentionCount) : undefined,
       badgeColor: SIDEBAR_ALERT_BADGE,
       notificationCount: hrAttentionCount,
@@ -892,12 +984,14 @@ const Sidebar = ({
 
     const isAdmin = hasSystemWideMode || isLegacyStockAdmin || isGlobalPosition;
     const FIXED_LABELS: Record<string, string> = {
+      design: 'Design Unit',
+      sales: 'Sales Unit',
       project: 'Project Unit',
       ts: 'TS — Transmission',
       ip: 'IP',
       noc: 'NOC',
     };
-    const order = ['project', 'ts', 'ip', 'noc'] as const;
+    const order = ['design', 'sales', 'project', 'ts', 'ip', 'noc'] as const;
     const userServiceSlugs = serviceRequestSlugsForUnits(
       [user?.unit, ...(Array.isArray(user?.units) ? user.units : [])],
       user?.position
@@ -909,7 +1003,7 @@ const Sidebar = ({
         projectSubItems.push({
           icon: Network,
           label: FIXED_LABELS[slug],
-          path: `/project-request/${slug}`,
+          path: slug === 'design' ? '/project-request/design' : slug === 'sales' ? '/project-request/sales' : `/project-request/${slug}`,
           notificationCount: projectUnitCounts[slug] || 0,
         });
       });
@@ -920,7 +1014,7 @@ const Sidebar = ({
         projectSubItems.push({
           icon: Network,
           label: FIXED_LABELS[slug] || u?.name || slug,
-          path: `/project-request/${slug}`,
+          path: slug === 'design' ? '/project-request/design' : slug === 'sales' ? '/project-request/sales' : `/project-request/${slug}`,
           notificationCount: projectUnitCounts[slug] || 0,
         });
       });
@@ -937,16 +1031,29 @@ const Sidebar = ({
             icon: Network,
             label: 'Service Requests',
             isCollapsible: true,
-            isOpen: isProjectRequestOpen,
-            onToggle: () => setIsProjectRequestOpen((p) => !p),
+            isOpen: sectionOpen('serviceRequests'),
+            onToggle: () => toggleSection('serviceRequests'),
             badge: projectRequestBadgeCount > 0 ? String(projectRequestBadgeCount) : undefined,
             badgeColor: SIDEBAR_ALERT_BADGE,
             subItems: projectSubItems,
           }
         : null;
 
-    const prependProjectRequest = (items: any[]) =>
-      projectRequestSection ? [projectRequestSection, ...items] : items;
+    const projectUnitSection = (isAdmin || userServiceSlugs.has('project')) ? {
+      icon: Briefcase, label: 'Project Unit', isCollapsible: true, isOpen: sectionOpen('projectUnit'),
+      onToggle: () => toggleSection('projectUnit'),
+      subItems: [
+        { icon: LayoutDashboard, label: 'Dashboard', path: '/project-request/project' },
+        { icon: FileText, label: 'Service Requests', path: '/project-request/project' },
+        { icon: ClipboardList, label: 'WIP', path: '/project-unit/wip' },
+        { icon: FileSignature, label: 'Sign-Off Forms', path: '/project-unit/signoff' },
+      ],
+    } : null;
+
+    const networkAssetsSection = { icon: Network, label: 'Network Assets', isCollapsible: true, isOpen: sectionOpen('networkAssets'), onToggle: () => toggleSection('networkAssets'), subItems: [
+      { icon: LayoutDashboard, label: 'Dashboard', path: '/network-assets' }, { icon: MapPin, label: 'PoP Register', path: '/network-assets/pops' }, { icon: Package, label: 'Equipment Inventory', path: '/network-assets/equipment' }, { icon: Network, label: 'Passive Infrastructure', path: '/network-assets/passive' }, { icon: Network, label: 'ECG Metro', path: '/network-assets/metro' }, { icon: Network, label: 'NEDCO Metro', path: '/network-assets/nedcoMetro' }, { icon: Network, label: 'Master Backhaul', path: '/network-assets/backhaul' }, { icon: Network, label: 'NEDCO Backhaul', path: '/network-assets/nedcoBackhaul' }, { icon: Package, label: 'Backhaul Accessories', path: '/network-assets/backhaulAccessories' }, { icon: Package, label: 'Metro Accessories', path: '/network-assets/metroAccessories' }, { icon: MapPin, label: 'Poles Register', path: '/network-assets/poles' }, { icon: Settings, label: 'Equipment Catalogue', path: '/network-assets/catalogue' }, { icon: FileText, label: 'Reports & Exports', path: '/network-assets/reports' },
+    ]};
+    const prependProjectRequest = (items: any[]) => [ networkAssetsSection, ...(projectUnitSection ? [projectUnitSection] : []), ...(projectRequestSection ? [projectRequestSection] : []), ...items ];
     const composeItems = (items: any[], inventoryItems: any[] = []) => {
       const inv = inventorySection(inventoryItems);
       return prependProjectRequest(inv ? [inv, ...items] : items);
@@ -957,9 +1064,11 @@ const Sidebar = ({
     if (isAdminSuper) {
       baseItems = composeItems([
         directorDashboard,
+        transportSection,
         requestApprovalsSection,
         aiAssistant,
-        cashRequest, financeApprovals,
+        financeSection,
+        cashRequest,
         assetsManager, fieldActivities,
         cxSection, ...(reportSystemSection ? [reportSystemSection] : []), nocSection, ipSection, fieldEngSection,
         customerPortal,
@@ -972,9 +1081,11 @@ const Sidebar = ({
     }
     else if (isLegacyStockAdmin) {
       baseItems = composeItems([
+        transportSection,
         requestApprovalsSection,
         aiAssistant,
-        cashRequest, financeApprovals,
+        financeSection,
+        cashRequest,
         assetsManager, fieldActivities,
         cxSection, ...(reportSystemSection ? [reportSystemSection] : []), nocSection, ipSection, fieldEngSection, customerPortal,
         { icon: AuditIcon, label: 'Audit Logs',      path: '/audit-logs' },
@@ -991,6 +1102,7 @@ const Sidebar = ({
       ]);
       baseItems = [
         directorDashboard,
+        transportSection,
         directorProjectRequestsSection,
         ...(directorReportSystemSection ? [directorReportSystemSection] : []),
         approvalsSection,
@@ -1033,14 +1145,15 @@ const Sidebar = ({
           hasUnit('operations', 'project');
 
         if (!isSystemOperator) {
-          unitItems.push(cashRequest);
-          if (!isHrUser) inventoryItems.push(requestForms, itemReturns);
+          unitItems.push(cashRequest, transportRequest);
+          if (!isHrUser) inventoryItems.push(requestForms, itemReturns, transportRequest);
         } else if (unitNeedsStaffRequests && !isHrUser) {
-          unitItems.push(cashRequest);
-          inventoryItems.push(requestForms, itemReturns);
+          unitItems.push(cashRequest, transportRequest);
+          inventoryItems.push(requestForms, itemReturns, transportRequest);
         }
 
         if (approvalSubItems.length) unitItems.push(requestApprovalsSection);
+        unitItems.push(transportSection);
         if (isManagerOrSupervisor && reportSystemSection) unitItems.push(reportSystemSection);
 
         if (isNocUser) unitItems.push(nocSection);
@@ -1049,7 +1162,7 @@ const Sidebar = ({
         if (isTxUser) unitItems.push(fieldEngSection, fieldActivities);
         if (isCxUser) unitItems.push(cxSection, customerPortal);
         if (hasPosition('relationship officer')) unitItems.push(roSection);
-        if (isFinance) unitItems.push(financeApprovals);
+        if (isFinance) unitItems.push(financeSection);
         if (isSalesUser && !isCxUser) unitItems.push(customerPortal);
         if (hasUnit('operations')) unitItems.push(fieldActivities);
 
@@ -1065,6 +1178,9 @@ const Sidebar = ({
     }
     if (isSystemOperator) {
       baseItems = [...baseItems, systemSettingsSection];
+    }
+    if (designSettingsSection) {
+      baseItems = [...baseItems, designSettingsSection];
     }
 
     const menuHasApproveRequest = (items: any[]): boolean =>
@@ -1119,7 +1235,7 @@ const Sidebar = ({
     String(user?.position || '').trim() ||
     formatRoleLabel(resolvePrimaryRole(user)) ||
     getUserDisplayLabel();
-  const displayName = isAdminSuper ? SYSTEM_ADMIN_LABEL : user?.full_name || user?.username || 'User';
+  const displayName = isAdminSuper ? SYSTEM_ADMIN_LABEL : formatPersonName(user, 'User');
 
   return (
     <>
@@ -1241,7 +1357,7 @@ const Sidebar = ({
             {visibleMenuItems.map((item: any, index) => {
               if (item.isCollapsible) {
                 const Icon = item.icon;
-                const active = item.subItems.some((sub: any) => location.pathname.startsWith(sub.path));
+                const active = item.subItems.some((sub: any) => isMenuPathActive(location.pathname, sub.path));
 
                 return (
                   <div
@@ -1309,13 +1425,11 @@ const Sidebar = ({
                               (other: any) =>
                                 other.path !== sub.path &&
                                 other.path.startsWith(`${sub.path}/`) &&
-                                (location.pathname === other.path ||
-                                  location.pathname.startsWith(`${other.path}/`))
+                                isMenuPathActive(location.pathname, other.path)
                             );
                             const subActive =
                               !moreSpecific &&
-                              (location.pathname === sub.path ||
-                                location.pathname.startsWith(`${sub.path}/`));
+                              isMenuPathActive(location.pathname, sub.path);
                             return (
                               <Link
                                 key={sub.path}
@@ -1341,7 +1455,7 @@ const Sidebar = ({
               }
 
               const Icon = item.icon;
-              const isActive = location.pathname === item.path;
+              const isActive = isMenuPathActive(location.pathname, item.path);
               const prev = visibleMenuItems[index - 1];
 
               return (

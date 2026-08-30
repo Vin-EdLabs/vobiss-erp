@@ -73,8 +73,86 @@ export async function initProjectRequestTables() {
       ip_address VARCHAR(120),
       mac_address VARCHAR(120),
       integrated_by VARCHAR(255),
+      isp VARCHAR(255),
+      survey_date DATE,
+      design_specification TEXT,
+      design_reference TEXT,
+      is_design_request BOOLEAN NOT NULL DEFAULT false,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
+
+  await pool.query(`ALTER TABLE project_requests ADD COLUMN IF NOT EXISTS isp VARCHAR(255);`);
+  await pool.query(`ALTER TABLE project_requests ADD COLUMN IF NOT EXISTS survey_date DATE;`);
+  await pool.query(`ALTER TABLE project_requests ADD COLUMN IF NOT EXISTS design_specification TEXT;`);
+  await pool.query(`ALTER TABLE project_requests ADD COLUMN IF NOT EXISTS design_reference TEXT;`);
+  await pool.query(`ALTER TABLE project_requests ADD COLUMN IF NOT EXISTS is_design_request BOOLEAN NOT NULL DEFAULT false;`);
+  await pool.query(`ALTER TABLE project_requests ADD COLUMN IF NOT EXISTS adss TEXT;`);
+  await pool.query(`ALTER TABLE project_requests ADD COLUMN IF NOT EXISTS drop_cable TEXT;`);
+
+  await pool.query(`CREATE TABLE IF NOT EXISTS project_wip_entries (
+    id SERIAL PRIMARY KEY, deleted_at TIMESTAMP, customer_name TEXT, site_name TEXT, location TEXT, region TEXT,
+    capacity TEXT, bandwidth TEXT, planned_adss_distance TEXT, planned_drop_cable_distance TEXT, service_type TEXT, cpe TEXT,
+    start_date DATE, completion_date DATE, confirmation_date DATE, status VARCHAR(30) NOT NULL DEFAULT 'In Progress',
+    mrc TEXT, sale_price TEXT, through_value TEXT, existing_poles TEXT, remarks TEXT,
+    created_by INTEGER REFERENCES users(id), created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  )`);
+  await pool.query(`CREATE TABLE IF NOT EXISTS project_wip_history (
+    id SERIAL PRIMARY KEY, entry_id INTEGER NOT NULL, field_name TEXT NOT NULL, old_value TEXT, new_value TEXT,
+    changed_by INTEGER REFERENCES users(id), changed_by_name TEXT NOT NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  )`);
+  await pool.query(`CREATE TABLE IF NOT EXISTS project_wip_remarks (
+    id SERIAL PRIMARY KEY, entry_id INTEGER NOT NULL, user_id INTEGER REFERENCES users(id), author_name TEXT NOT NULL,
+    note_text TEXT NOT NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  )`);
+
+  // Project Unit customer acceptance documents.  Signatures are stored as data
+  // URLs so a form remains self-contained and can be rendered/printed later.
+  await pool.query(`CREATE TABLE IF NOT EXISTS project_signoff_forms (
+    id SERIAL PRIMARY KEY,
+    reference_no VARCHAR(40) UNIQUE,
+    status VARCHAR(30) NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'pending', 'approved', 'rejected')),
+    contractor VARCHAR(255) NOT NULL DEFAULT 'Vobiss Solutions Ltd',
+    site_name VARCHAR(255) NOT NULL,
+    circuit_id VARCHAR(120), type_of_service VARCHAR(160), contractual_bandwidth VARCHAR(120), test_date DATE,
+    device_type VARCHAR(160), device_model VARCHAR(160), device_serial_number VARCHAR(160),
+    packet_loss VARCHAR(120), latency VARCHAR(120), jitter VARCHAR(120), billing_date DATE,
+    client_signature TEXT, client_name VARCHAR(255), client_date DATE, client_telephone VARCHAR(80), client_company_name VARCHAR(255),
+    vobiss_signature TEXT, vobiss_name VARCHAR(255), vobiss_date DATE, vobiss_telephone VARCHAR(80),
+    manager_signature TEXT, manager_name VARCHAR(255), manager_date DATE, rejection_reason TEXT,
+    linked_record_type VARCHAR(40), linked_record_id INTEGER, linked_record_ref VARCHAR(120),
+    created_by INTEGER NOT NULL REFERENCES users(id), created_by_name VARCHAR(255) NOT NULL,
+    submitted_at TIMESTAMP, approved_at TIMESTAMP, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  )`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_project_signoff_status ON project_signoff_forms(status, created_at DESC)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_project_signoff_creator ON project_signoff_forms(created_by)`);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS design_materials (
+      id SERIAL PRIMARY KEY,
+      material_name VARCHAR(255) NOT NULL,
+      unit VARCHAR(80) NOT NULL,
+      unit_price DECIMAL(14,2) NOT NULL DEFAULT 0,
+      calculation_formula TEXT,
+      is_primary_input BOOLEAN NOT NULL DEFAULT false,
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
+  await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_one_design_primary ON design_materials ((is_primary_input)) WHERE is_primary_input;`);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS project_request_design_materials (
+      id SERIAL PRIMARY KEY,
+      request_id INTEGER NOT NULL REFERENCES project_requests(id) ON DELETE CASCADE,
+      material_id INTEGER REFERENCES design_materials(id) ON DELETE SET NULL,
+      material_name VARCHAR(255) NOT NULL,
+      unit VARCHAR(80) NOT NULL,
+      unit_price DECIMAL(14,2) NOT NULL DEFAULT 0,
+      quantity DECIMAL(14,4) NOT NULL DEFAULT 0,
+      line_cost DECIMAL(14,2) NOT NULL DEFAULT 0,
+      calculation_formula TEXT
     );
   `);
 
@@ -142,15 +220,27 @@ async function dropProjectRequestCheckConstraints() {
 
 async function migrateProjectRequestConstraints() {
   try {
-    await dropProjectRequestCheckConstraints();
-    await pool.query(`
-      ALTER TABLE project_requests ADD CONSTRAINT project_requests_status_check
-      CHECK (status IN ('pending','ongoing','integrated','rejected','completed','noc_approved'));
-    `);
-    await pool.query(`
-      ALTER TABLE project_requests ADD CONSTRAINT project_requests_current_stage_check
-      CHECK (current_stage IN ('ts','ip','noc','done','rejected','project'));
-    `);
+    const existingStatus = await pool.query(
+      `SELECT 1 FROM pg_constraint WHERE conrelid = 'project_requests'::regclass AND conname = 'project_requests_status_check'`
+    );
+    const existingStage = await pool.query(
+      `SELECT 1 FROM pg_constraint WHERE conrelid = 'project_requests'::regclass AND conname = 'project_requests_current_stage_check'`
+    );
+
+    if (!existingStatus.rowCount) {
+      await pool.query(`
+        ALTER TABLE project_requests ADD CONSTRAINT project_requests_status_check
+        CHECK (status IN ('pending','ongoing','integrated','rejected','completed','noc_approved','submitted_to_sales'));
+      `);
+    }
+
+    if (!existingStage.rowCount) {
+      await pool.query(`
+        ALTER TABLE project_requests ADD CONSTRAINT project_requests_current_stage_check
+        CHECK (current_stage IN ('ts','ip','noc','done','rejected','project','design'));
+      `);
+    }
+
     await pool.query(`
       UPDATE project_requests
       SET current_stage = 'project', updated_at = CURRENT_TIMESTAMP
@@ -372,10 +462,10 @@ export async function createProjectRequest(data, user) {
   const { rows } = await pool.query(
     `INSERT INTO project_requests (
       customer_name, site_name, location, region, capacity, bandwidth,
-      cable_displacement, service_type, cpe, start_date, completion_date, confirmation_date,
+      cable_displacement, adss, drop_cable, service_type, cpe, start_date, completion_date, confirmation_date,
       status, current_stage, mrc, nrc, initial_remarks,
       project_unit_id, project_unit_name, created_by_user_id, created_by_name
-    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)
+    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23)
     RETURNING *`,
     [
       data.customer_name,
@@ -385,20 +475,14 @@ export async function createProjectRequest(data, user) {
       data.capacity || null,
       data.bandwidth || null,
       data.cable_displacement || null,
+      data.adss || null,
+      data.drop_cable || null,
       data.service_type || null,
       data.cpe || null,
       data.start_date || null,
       data.completion_date || null,
       data.confirmation_date || null,
-      initialStatus,
-      initialStage,
-      data.mrc ?? null,
-      data.nrc ?? null,
-      data.initial_remarks || null,
-      unit?.id || null,
-      unit?.name || 'Project Unit',
-      user.id,
-      authorName,
+      initialStatus, initialStage, data.mrc ?? null, data.nrc ?? null, data.initial_remarks || null, unit?.id || null, unit?.name || 'Project Unit', user.id, authorName,
     ]
   );
   const created = mapRequestRow(rows[0]);
@@ -425,11 +509,136 @@ export async function getProjectRequestById(id) {
     `SELECT * FROM project_request_attachments WHERE request_id = $1 ORDER BY created_at ASC`,
     [id]
   );
+  const designMaterials = await pool.query(
+    `SELECT id, material_id, material_name, unit, unit_price::float, quantity::float, line_cost::float, calculation_formula
+     FROM project_request_design_materials WHERE request_id = $1 ORDER BY id`,
+    [id]
+  );
   return {
     ...request,
     remarks: remarks.rows,
     attachments: attachments.rows,
+    design_materials: designMaterials.rows,
   };
+}
+
+export async function getDesignMaterials() {
+  const { rows } = await pool.query(
+    `SELECT id, material_name, unit, unit_price::float, calculation_formula, is_primary_input, sort_order
+     FROM design_materials ORDER BY sort_order, material_name`
+  );
+  return rows;
+}
+
+export async function saveDesignMaterial(data, id = null) {
+  const name = String(data.material_name || '').trim();
+  const unit = String(data.unit || '').trim();
+  if (!name || !unit) throw new Error('Material name and unit are required');
+  const price = Number(data.unit_price);
+  if (!Number.isFinite(price) || price < 0) throw new Error('Unit price must be a valid positive amount');
+  const primary = Boolean(data.is_primary_input);
+  if (primary) await pool.query('UPDATE design_materials SET is_primary_input = false WHERE is_primary_input = true');
+  const values = [name, unit, price, String(data.calculation_formula || '').trim() || null, primary, Number(data.sort_order) || 0];
+  const query = id
+    ? `UPDATE design_materials SET material_name=$1, unit=$2, unit_price=$3, calculation_formula=$4, is_primary_input=$5, sort_order=$6, updated_at=CURRENT_TIMESTAMP WHERE id=$7 RETURNING id, material_name, unit, unit_price::float, calculation_formula, is_primary_input, sort_order`
+    : `INSERT INTO design_materials (material_name, unit, unit_price, calculation_formula, is_primary_input, sort_order) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id, material_name, unit, unit_price::float, calculation_formula, is_primary_input, sort_order`;
+  if (id) values.push(Number(id));
+  const { rows } = await pool.query(query, values);
+  if (!rows[0]) throw new Error('Material not found');
+  return rows[0];
+}
+
+export async function deleteDesignMaterial(id) {
+  const { rowCount } = await pool.query('DELETE FROM design_materials WHERE id = $1', [id]);
+  if (!rowCount) throw new Error('Material not found');
+}
+
+export async function createDesignRequest(data, user) {
+  const siteName = String(data.site_name || '').trim();
+  if (!siteName) throw new Error('Site name is required');
+  const authorName = `${user.first_name || ''} ${user.last_name || ''}`.trim() || user.username;
+  const { rows } = await pool.query(
+    `INSERT INTO project_requests (customer_name, site_name, location, region, isp, survey_date, design_specification, design_reference,
+      status, current_stage, project_unit_name, created_by_user_id, created_by_name, is_design_request)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'submitted_to_sales','project','Sales',$9,$10,true) RETURNING *`,
+    [data.customer_name || siteName, siteName, data.location || null, data.region || null, data.isp || null, data.survey_date || null,
+      data.design_specification || null, data.design_reference || null, user.id, authorName]
+  );
+  const request = rows[0];
+  const materials = Array.isArray(data.materials) ? data.materials : [];
+  for (const item of materials) {
+    const quantity = Number(item.quantity) || 0;
+    const unitPrice = Number(item.unit_price) || 0;
+    await pool.query(
+      `INSERT INTO project_request_design_materials (request_id, material_id, material_name, unit, unit_price, quantity, line_cost, calculation_formula)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+      [request.id, item.material_id || null, item.material_name, item.unit, unitPrice, quantity, quantity * unitPrice, item.calculation_formula || null]
+    );
+  }
+  return getProjectRequestById(request.id);
+}
+
+export async function createSalesRequest(data, user) {
+  const siteName = String(data.site_name || '').trim();
+  if (!siteName) throw new Error('Site name is required');
+  const authorName = `${user.first_name || ''} ${user.last_name || ''}`.trim() || user.username;
+  const { rows } = await pool.query(
+    `INSERT INTO project_requests (customer_name, site_name, location, region, isp, initial_remarks, status, current_stage,
+      project_unit_name, created_by_user_id, created_by_name, is_design_request)
+     VALUES ($1,$2,$3,$4,$5,$6,'pending','design','Design Unit',$7,$8,true) RETURNING *`,
+    [data.customer_name || siteName, siteName, data.location || null, data.region || null, data.isp || null,
+      data.initial_remarks || null, user.id, authorName]
+  );
+  return getProjectRequestById(rows[0].id);
+}
+
+export async function submitDesignRequest(id, data, user) {
+  const siteName = String(data.site_name || '').trim();
+  if (!siteName) throw new Error('Site name is required');
+  const { rows } = await pool.query(
+    `UPDATE project_requests SET site_name=$2, location=$3, region=$4, isp=$5, survey_date=$6, design_specification=$7,
+      design_reference=$8, status='submitted_to_sales', current_stage='sales', project_unit_name='Sales', updated_at=CURRENT_TIMESTAMP
+     WHERE id=$1 AND is_design_request=true AND current_stage='design' RETURNING *`,
+    [id, siteName, data.location || null, data.region || null, data.isp || null, data.survey_date || null,
+      data.design_specification || null, data.design_reference || null]
+  );
+  if (!rows[0]) throw new Error('Request is not awaiting Design Unit work');
+  await pool.query('DELETE FROM project_request_design_materials WHERE request_id = $1', [id]);
+  for (const item of Array.isArray(data.materials) ? data.materials : []) {
+    const quantity = Number(item.quantity) || 0;
+    const unitPrice = Number(item.unit_price) || 0;
+    await pool.query(
+      `INSERT INTO project_request_design_materials (request_id, material_id, material_name, unit, unit_price, quantity, line_cost, calculation_formula)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+      [id, item.material_id || null, item.material_name, item.unit, unitPrice, quantity, quantity * unitPrice, item.calculation_formula || null]
+    );
+  }
+  if (data.design_specification?.trim()) await addProjectRequestRemark(id, { comment_text: 'Design survey submitted to Sales.', stage: 'design' }, user);
+  return getProjectRequestById(id);
+}
+
+export async function forwardWorkflowRequest(id, fromStage, toStage) {
+  const transitions = {
+    sales: { project: { status: 'pending', stage: 'project' } },
+    project: { ts: { status: 'pending', stage: 'ts' }, ip: { status: 'ongoing', stage: 'ip' }, noc: { status: 'integrated', stage: 'noc' } },
+  };
+  const next = transitions[fromStage]?.[toStage];
+  if (!next) throw new Error('Invalid workflow route');
+  const { rows } = await pool.query(
+    `UPDATE project_requests SET status=$3, current_stage=$4, project_unit_name=$5, updated_at=CURRENT_TIMESTAMP
+     WHERE id=$1 AND current_stage=$2 RETURNING *`,
+    [id, fromStage, next.status, next.stage, toStage === 'ts' ? 'TS — Transmission' : toStage === 'ip' ? 'IP' : toStage === 'noc' ? 'NOC' : 'Project Unit']
+  );
+  if (!rows[0]) throw new Error(`Request is no longer awaiting ${fromStage} action`);
+  return getProjectRequestById(id);
+}
+
+export async function listDesignRequests() {
+  const { rows } = await pool.query(
+    `SELECT id, customer_name, site_name, location, region, isp, survey_date, status, current_stage, created_by_name, created_at, updated_at
+     FROM project_requests WHERE is_design_request = true ORDER BY updated_at DESC`
+  );
+  return rows;
 }
 
 /** Can user view this request? */
@@ -465,6 +674,10 @@ export function canViewRequestV2(request, user, userUnits) {
   if (user.role === 'superadmin' || user.main_role === 'superadmin') return true;
   if (canViewFullPipeline(user, userUnits)) return true;
 
+  const designRoles = [user?.role, user?.main_role, ...(Array.isArray(user?.roles) ? user.roles : [])]
+    .map((value) => String(value || '').toLowerCase());
+  if (request.is_design_request && (userUnits.includes('design') || designRoles.includes('design_manager') || designRoles.includes('design_supervisor'))) return true;
+
   const { current_stage: stage, status } = request;
 
   if (userUnits.includes('ts')) {
@@ -483,10 +696,12 @@ export function canViewRequestV2(request, user, userUnits) {
     if (stage === 'noc' && status === 'integrated') return true;
   }
   if (userUnits.includes('project')) {
+    if (request.is_design_request && status === 'submitted_to_sales') return true;
     if (status === 'completed' || stage === 'done') return true;
     if (status === 'integrated' && stage === 'project') return true;
     if (status === 'noc_approved' && stage === 'project') return true;
   }
+  if (userUnits.includes('sales') && request.is_design_request && status === 'submitted_to_sales') return true;
   return false;
 }
 
@@ -691,4 +906,3 @@ export async function projectCompleteRequest(requestId, user) {
 }
 
 export { PIPELINE_STAGES };
-

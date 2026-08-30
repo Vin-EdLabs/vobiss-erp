@@ -853,3 +853,34 @@ export async function getVobiSystemData(userId, role, position) {
     my_work: userData,
   };
 }
+
+/** Fast path for greetings / small talk — no global ERP snapshot. */
+export async function getVobiLightSystemData(userId, role, position) {
+  const ctx = await resolveUserContext(userId, role, position);
+  const access = getRoleAccess(ctx.role, ctx.position, accessOptsFromCtx(ctx));
+  return {
+    generated_at: new Date().toISOString(),
+    light_mode: true,
+    role_context: {
+      role: ctx.role,
+      position: ctx.position,
+      first_name: ctx.first_name,
+      last_name: ctx.last_name,
+      full_name: ctx.full_name,
+      preferred_name: ctx.preferred_name,
+      units: access.units || [],
+      access_key: access.key,
+      is_system_admin: Boolean(ctx.is_system_admin),
+      sees_everything: Boolean(access.sees_everything),
+      scoped_to_units: Boolean(access.scoped_to_units),
+      can_see_payroll: canSeePayroll(access),
+      modules: access.modules,
+      description: access.description,
+      access_note: access.scoped_to_units
+        ? 'This admin is limited to assigned units/departments — not company-wide Vobi access.'
+        : null,
+    },
+    system: { note: 'Light mode — full ERP snapshot not loaded for this short message.' },
+    my_work: null,
+  };
+}

@@ -3,6 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { ArrowLeft, Wrench, Calendar, User, DollarSign, AlertCircle, Clock, CheckCircle, Package, Edit2, X, Camera, Save, Loader2 } from 'lucide-react';
 import { assetApi } from '../../../api';
+import { ShareButton } from '@/components/ShareButton';
 
 interface Maintenance {
   id: string;
@@ -139,13 +140,33 @@ export default function MaintenanceDetailPage() {
           </Link>
 
           {!isEditing ? (
-            <button
-              onClick={() => setIsEditing(true)}
-              className="inline-flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 font-medium text-sm shadow-md transition"
-            >
-              <Edit2 className="h-4 w-4" />
-              Update
-            </button>
+            <div className="flex items-center gap-2">
+              <ShareButton
+                recordType="maintenance"
+                recordId={current.id}
+                pagePath={window.location.pathname}
+                pageTitle={`${current.asset_name || 'Maintenance'} — ${statusLabel}`}
+                recordPreview={{
+                  title: current.asset_name || `Asset ${current.asset_tag || current.asset_id}`,
+                  reference: current.asset_tag,
+                  status: statusLabel,
+                  type: current.type,
+                  technician: current.technician,
+                  cost: current.cost != null ? `GHS ${Number(current.cost).toLocaleString()}` : undefined,
+                  start_date: current.start_date,
+                  completion_date: current.completion_date,
+                  description: current.description,
+                  notes: current.notes,
+                }}
+              />
+              <button
+                onClick={() => setIsEditing(true)}
+                className="inline-flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 font-medium text-sm shadow-md transition"
+              >
+                <Edit2 className="h-4 w-4" />
+                Update
+              </button>
+            </div>
           ) : (
             <div className="flex gap-2">
               <button

@@ -3,6 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Building2, Phone, Mail, MapPin, Globe, Package, Wrench, Users, Calendar, User, Edit2, Trash2, Save, X, Loader2 } from 'lucide-react';
 import { assetApi } from '../../../api';
+import { ShareButton } from '@/components/ShareButton';
 
 interface Vendor {
   id: number | string;
@@ -103,6 +104,22 @@ export default function VendorDetailPage() {
           </Link>
           {!isEditing ? (
             <div className="flex gap-3">
+              <ShareButton
+                recordType="vendor"
+                recordId={current.id}
+                pagePath={window.location.pathname}
+                pageTitle={current.name}
+                recordPreview={{
+                  title: current.name,
+                  type: typeConfig[current.type].label,
+                  contact_person: current.contact_person,
+                  phone: current.phone,
+                  email: current.email,
+                  address: current.address,
+                  services: current.services,
+                  website: current.website,
+                }}
+              />
               <button onClick={() => setIsEditing(true)} className="flex items-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-xl hover:bg-blue-700 font-medium">
                 <Edit2 className="h-5 w-5" /> Edit Vendor
               </button>

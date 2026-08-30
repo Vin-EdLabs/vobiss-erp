@@ -3,6 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { ArrowLeft, User, Mail, Phone, Building, Package, Calendar, CheckCircle, Loader2 } from 'lucide-react';
 import { assetApi } from '../../../api';
+import { ShareButton } from '@/components/ShareButton';
 
 interface Person {
   id: number | string;
@@ -125,9 +126,25 @@ export default function PersonDetail() {
   return (
     <div className="min-h-screen bg-gray-50 py-12">
       <div className="max-w-7xl mx-auto px-6">
-        <Link to="/assets/assignments" className="inline-flex items-center gap-2 text-gray-600 hover:text-gray-900 mb-8 text-lg font-medium">
-          <ArrowLeft className="h-5 w-5" /> Back to People
-        </Link>
+        <div className="mb-8 flex items-center justify-between">
+          <Link to="/assets/assignments" className="inline-flex items-center gap-2 text-gray-600 hover:text-gray-900 text-lg font-medium">
+            <ArrowLeft className="h-5 w-5" /> Back to People
+          </Link>
+          <ShareButton
+            recordType="asset_assignment"
+            recordId={person.id}
+            pagePath={window.location.pathname}
+            pageTitle={`${person.first_name} ${person.last_name}`}
+            recordPreview={{
+              title: `${person.first_name} ${person.last_name}`,
+              reference: `#${person.personnel_number || person.id}`,
+              role: person.job_title,
+              department: person.group,
+              email: person.email,
+              phone: person.phone,
+            }}
+          />
+        </div>
 
         <div className="bg-white rounded-2xl shadow-[var(--shadow-md)] border border-gray-200 overflow-hidden mb-8">
           <div className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white p-8">

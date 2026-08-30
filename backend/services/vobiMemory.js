@@ -621,15 +621,18 @@ export async function processMemoryAfterTurn(userId, userMessage, { channelId, m
 }
 
 /** Bundle for askVobi prompt injection — always user-scoped. */
-export async function buildMemoryContextForPrompt(userId, userMessage) {
+export async function buildMemoryContextForPrompt(userId, userMessage, options = {}) {
   await ensureVobiMemorySchema();
   const id = uid(userId);
+  const light = Boolean(options.light);
   const settings = await getMemorySettings(id);
   const memories = settings.memory_enabled
-    ? await getRelevantMemories(id, userMessage, { limit: 12 })
+    ? await getRelevantMemories(id, userMessage, { limit: light ? 4 : 12 })
     : [];
-  const summaries = await getLatestSummaries(id, 2);
-  const olderSnippets = await searchUserConversationContext(id, userMessage, { limit: 6 });
+  const summaries = light ? [] : await getLatestSummaries(id, 2);
+  const olderSnippets = light
+    ? []
+    : await searchUserConversationContext(id, userMessage, { limit: 6 });
 
   const preferred = memories.find((m) =>
     /prefers to be called|call me/i.test(m.memory_content)

@@ -44,6 +44,7 @@ import {
   recordTypesForCategoryHub,
   type ActionRequiredAlert,
 } from '@/components/chat/RecordChatUI';
+import { SharedRecordCard } from '@/components/chat/SharedRecordCard';
 import {
   ForwardMessageModal,
   ForwardedOriginBanner,
@@ -2810,10 +2811,14 @@ const Chat: React.FC<{
                               {msg.forwardedOrigin && (
                                 <ForwardedOriginBanner origin={msg.forwardedOrigin} />
                               )}
-                              {shouldShowMessageBody(msg) && (
-                                <p className="chat-msg-body whitespace-pre-wrap">
-                                  {renderBody(msg.body)}
-                                </p>
+                              {msg.message_type === 'shared_record' && msg.meta?.sharedRecord ? (
+                                <SharedRecordCard sharedRecord={msg.meta.sharedRecord} />
+                              ) : (
+                                shouldShowMessageBody(msg) && (
+                                  <p className="chat-msg-body whitespace-pre-wrap">
+                                    {renderBody(msg.body)}
+                                  </p>
+                                )
                               )}
                               {(activeChannelId || activeDmId) && (
                                 <div

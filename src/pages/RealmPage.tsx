@@ -1,11 +1,11 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Landmark, Package, DollarSign, Plus, Trash2, Loader2, AlertCircle } from 'lucide-react';
+import { Landmark, Package, DollarSign, Plus, Trash2, Loader2, AlertCircle, Shield, Truck } from 'lucide-react';
 import { getUsers, getRealmApprovers, updateRealmApprovers, type User } from '../api';
 import { useAuth } from '../context/AuthContext';
 import { Button } from '@/components/ui/button';
 
-type Kind = 'material' | 'cash';
+type Kind = 'material' | 'cash' | 'transport' | 'transport_supervisor' | 'vehicle' | 'finance';
 
 const RealmPage = () => {
   const { user, isAdminSuper } = useAuth();
@@ -13,8 +13,16 @@ const RealmPage = () => {
   const [users, setUsers] = useState<User[]>([]);
   const [materialIds, setMaterialIds] = useState<number[]>([]);
   const [cashIds, setCashIds] = useState<number[]>([]);
+  const [transportIds, setTransportIds] = useState<number[]>([]);
+  const [transportSupervisorIds, setTransportSupervisorIds] = useState<number[]>([]);
+  const [vehicleIds, setVehicleIds] = useState<number[]>([]);
+  const [financeIds, setFinanceIds] = useState<number[]>([]);
   const [materialPick, setMaterialPick] = useState('');
   const [cashPick, setCashPick] = useState('');
+  const [transportPick, setTransportPick] = useState('');
+  const [transportSupervisorPick, setTransportSupervisorPick] = useState('');
+  const [vehiclePick, setVehiclePick] = useState('');
+  const [financePick, setFinancePick] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -38,6 +46,10 @@ const RealmPage = () => {
       setUsers(userRows || []);
       setMaterialIds(realm.material_user_ids || []);
       setCashIds(realm.cash_user_ids || []);
+      setTransportIds(realm.transport_approver_ids || []);
+      setTransportSupervisorIds(realm.transport_supervisor_ids || []);
+      setVehicleIds(realm.vehicle_request_approver_ids || []);
+      setFinanceIds(realm.finance_user_ids || []);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load Realm');
     } finally {
@@ -60,11 +72,30 @@ const RealmPage = () => {
   };
 
   const available = (kind: Kind) => {
-    const taken = new Set(kind === 'material' ? materialIds : cashIds);
+    const taken = new Set(
+      kind === 'material'
+        ? materialIds
+        : kind === 'cash'
+          ? cashIds
+          : kind === 'transport'
+            ? transportIds
+            : kind === 'transport_supervisor'
+              ? transportSupervisorIds
+              : kind === 'vehicle'
+                ? vehicleIds
+                : financeIds
+    );
     return users.filter((u) => !taken.has(Number(u.id)));
   };
 
-  const persist = async (nextMaterial: number[], nextCash: number[]) => {
+  const persist = async (
+    nextMaterial: number[],
+    nextCash: number[],
+    nextTransport: number[] = transportIds,
+    nextTransportSupervisor: number[] = transportSupervisorIds,
+    nextVehicle: number[] = vehicleIds,
+    nextFinance: number[] = financeIds,
+  ) => {
     setSaving(true);
     setError(null);
     setSuccess(null);
@@ -72,10 +103,18 @@ const RealmPage = () => {
       const saved = await updateRealmApprovers({
         material_user_ids: nextMaterial,
         cash_user_ids: nextCash,
+        transport_approver_ids: nextTransport,
+        transport_supervisor_ids: nextTransportSupervisor,
+        vehicle_request_approver_ids: nextVehicle,
+        finance_user_ids: nextFinance,
       });
       setMaterialIds(saved.material_user_ids || nextMaterial);
       setCashIds(saved.cash_user_ids || nextCash);
-      setSuccess('Realm saved. Each person sees only the list they were added to (Material, Cash, or both). They may need to refresh once.');
+      setTransportIds(saved.transport_approver_ids || nextTransport);
+      setTransportSupervisorIds(saved.transport_supervisor_ids || nextTransportSupervisor);
+      setVehicleIds(saved.vehicle_request_approver_ids || nextVehicle);
+      setFinanceIds(saved.finance_user_ids || nextFinance);
+      setSuccess('Realm saved. Approval lists for Material, Cash, Transport, Vehicle, and Finance are updated.');
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to save Realm');
     } finally {
@@ -84,23 +123,55 @@ const RealmPage = () => {
   };
 
   const addPerson = (kind: Kind) => {
-    const raw = kind === 'material' ? materialPick : cashPick;
+    const raw =
+      kind === 'material'
+        ? materialPick
+        : kind === 'cash'
+          ? cashPick
+          : kind === 'transport'
+            ? transportPick
+            : kind === 'transport_supervisor'
+              ? transportSupervisorPick
+              : kind === 'vehicle'
+                ? vehiclePick
+                : financePick;
     const id = Number(raw);
     if (!id) return;
+
     if (kind === 'material') {
       if (materialIds.includes(id)) return;
       setMaterialPick('');
-      persist([...materialIds, id], cashIds);
-    } else {
+      persist([...materialIds, id], cashIds, transportIds, transportSupervisorIds, vehicleIds, financeIds);
+    } else if (kind === 'cash') {
       if (cashIds.includes(id)) return;
       setCashPick('');
-      persist(materialIds, [...cashIds, id]);
+      persist(materialIds, [...cashIds, id], transportIds, transportSupervisorIds, vehicleIds, financeIds);
+    } else if (kind === 'transport') {
+      if (transportIds.includes(id)) return;
+      setTransportPick('');
+      persist(materialIds, cashIds, [...transportIds, id], transportSupervisorIds, vehicleIds, financeIds);
+    } else if (kind === 'transport_supervisor') {
+      if (transportSupervisorIds.includes(id)) return;
+      setTransportSupervisorPick('');
+      persist(materialIds, cashIds, transportIds, [...transportSupervisorIds, id], vehicleIds, financeIds);
+    } else if (kind === 'vehicle') {
+      if (vehicleIds.includes(id)) return;
+      setVehiclePick('');
+      persist(materialIds, cashIds, transportIds, transportSupervisorIds, [...vehicleIds, id], financeIds);
+    } else {
+      if (financeIds.includes(id)) return;
+      setFinancePick('');
+      persist(materialIds, cashIds, transportIds, transportSupervisorIds, vehicleIds, [...financeIds, id]);
     }
   };
 
   const removePerson = (kind: Kind, id: number) => {
-    if (kind === 'material') persist(materialIds.filter((x) => x !== id), cashIds);
-    else persist(materialIds, cashIds.filter((x) => x !== id));
+    if (kind === 'material') persist(materialIds.filter((x) => x !== id), cashIds, transportIds, transportSupervisorIds, vehicleIds, financeIds);
+    else if (kind === 'cash') persist(materialIds, cashIds.filter((x) => x !== id), transportIds, transportSupervisorIds, vehicleIds, financeIds);
+    else if (kind === 'transport') persist(materialIds, cashIds, transportIds.filter((x) => x !== id), transportSupervisorIds, vehicleIds, financeIds);
+    else if (kind === 'transport_supervisor') persist(materialIds, cashIds, transportIds, transportSupervisorIds.filter((x) => x !== id), vehicleIds, financeIds);
+    else if (kind === 'vehicle') persist(materialIds, cashIds, transportIds, transportSupervisorIds, vehicleIds.filter((x) => x !== id), financeIds);
+    else persist(materialIds, cashIds, transportIds, transportSupervisorIds, vehicleIds, financeIds.filter((x) => x !== id));
   };
 
   if (loading) {
@@ -112,15 +183,78 @@ const RealmPage = () => {
   }
 
   const column = (kind: Kind) => {
-    const ids = kind === 'material' ? materialIds : cashIds;
-    const pick = kind === 'material' ? materialPick : cashPick;
-    const setPick = kind === 'material' ? setMaterialPick : setCashPick;
-    const Icon = kind === 'material' ? Package : DollarSign;
-    const title = kind === 'material' ? 'Material Approvals' : 'Cash Approvals';
+    const ids =
+      kind === 'material'
+        ? materialIds
+        : kind === 'cash'
+          ? cashIds
+          : kind === 'transport'
+            ? transportIds
+            : kind === 'transport_supervisor'
+              ? transportSupervisorIds
+              : kind === 'vehicle'
+                ? vehicleIds
+                : financeIds;
+    const pick =
+      kind === 'material'
+        ? materialPick
+        : kind === 'cash'
+          ? cashPick
+          : kind === 'transport'
+            ? transportPick
+            : kind === 'transport_supervisor'
+              ? transportSupervisorPick
+              : kind === 'vehicle'
+                ? vehiclePick
+                : financePick;
+    const setPick =
+      kind === 'material'
+        ? setMaterialPick
+        : kind === 'cash'
+          ? setCashPick
+          : kind === 'transport'
+            ? setTransportPick
+            : kind === 'transport_supervisor'
+              ? setTransportSupervisorPick
+              : kind === 'vehicle'
+                ? setVehiclePick
+                : setFinancePick;
+    const Icon =
+      kind === 'material'
+        ? Package
+        : kind === 'cash'
+          ? DollarSign
+          : kind === 'transport'
+            ? Shield
+            : kind === 'transport_supervisor'
+              ? Shield
+              : kind === 'vehicle'
+                ? Truck
+                : Landmark;
+    const title =
+      kind === 'material'
+        ? 'Material Approvals'
+        : kind === 'cash'
+          ? 'Cash Approvals'
+          : kind === 'transport'
+            ? 'Transport Approvers'
+            : kind === 'transport_supervisor'
+              ? 'Transport Supervisors'
+              : kind === 'vehicle'
+                ? 'Vehicle Request Approvers'
+                : 'Finance Users';
     const hint =
       kind === 'material'
         ? 'People who can approve or reject material requests assigned to them.'
-        : 'People who can approve or reject cash requests assigned to them.';
+        : kind === 'cash'
+          ? 'People who can approve or reject cash requests assigned to them.'
+          : kind === 'transport'
+            ? 'People who can approve transport requests before the supervisor step.'
+            : kind === 'transport_supervisor'
+              ? 'People who can final approve transport requests and close the workflow.'
+              : kind === 'vehicle'
+                ? 'Manager/HR approvers for vehicle request forms before finance.'
+                : 'Users who can approve vehicle cash issuance and release payment.';
 
     return (
       <section className="flex flex-col overflow-hidden rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow-md)]">
@@ -207,6 +341,10 @@ const RealmPage = () => {
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         {column('material')}
         {column('cash')}
+        {column('transport')}
+        {column('transport_supervisor')}
+        {column('vehicle')}
+        {column('finance')}
       </div>
     </div>
   );

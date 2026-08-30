@@ -21,6 +21,11 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useAuth } from '../../context/AuthContext';
 import { RecordChatButton } from '@/components/chat/RecordChatButton';
+import { ShareButton } from '@/components/ShareButton';
+import { useSharedView } from '@/context/SharedViewContext';
+import { WorkflowTimeline } from '@/components/timeline/WorkflowTimeline';
+import { buildPreviewTable } from '@/lib/shareRecord';
+import { PersonName } from '@/components/PersonName';
 import { pdf } from '@react-pdf/renderer';
 import { Document, Page, Text, View, StyleSheet, Image } from '@react-pdf/renderer';
 
@@ -436,14 +441,16 @@ const getStatusBadge = (status: string) => {
 };
 
 const CashDetails: React.FC = () => {
-  const { id } = useParams<{ id: string }>();
+  const { isSharedView, routeParams } = useSharedView();
+  const { id: routeId } = useParams<{ id: string }>();
+  const id = isSharedView ? routeParams?.id : routeId;
   const navigate = useNavigate();
   const location = useLocation();
   const { user } = useAuth();
 
   const navState = location.state as { returnTo?: string; returnLabel?: string } | null;
   const returnFromQuery = new URLSearchParams(location.search).get('from');
-  const backPath = navState?.returnTo || returnFromQuery || null;
+  const backPath = navState?.returnTo || returnFromQuery || '/cash-request';
   const backLabel = navState?.returnLabel || 'Back';
   const { toast } = useToast();
 
@@ -461,15 +468,19 @@ const CashDetails: React.FC = () => {
       setLoading(true);
       const data = await getRequestDetails(id!);
       if (data.type !== 'cash_request') {
-        toast({ title: "Error", description: "Not a cash request", variant: "destructive" });
-        navigate('/requests');
+        if (!isSharedView) {
+          toast({ title: "Error", description: "Not a cash request", variant: "destructive" });
+          navigate('/cash-request');
+        }
         return;
       }
       setRequest(data);
     } catch (error) {
       console.error('Error loading cash request:', error);
-      toast({ title: "Error", description: "Failed to load request", variant: "destructive" });
-      navigate('/requests');
+      if (!isSharedView) {
+        toast({ title: "Error", description: "Failed to load request", variant: "destructive" });
+        navigate('/cash-request');
+      }
     } finally {
       setLoading(false);
     }
@@ -557,7 +568,7 @@ const CashDetails: React.FC = () => {
         <div className="mb-8 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-6">
           <Button 
             variant="outline" 
-            onClick={() => (backPath ? navigate(backPath) : navigate(-1))}
+            onClick={() => navigate(backPath)}
             className="border-gray-300 hover:bg-gray-100"
           >
             <ArrowLeft className="h-5 w-5 mr-2" />
@@ -565,14 +576,57 @@ const CashDetails: React.FC = () => {
           </Button>
 
           <div className="flex flex-wrap items-center gap-4">
-            {request && (
+            {request && !isSharedView && (
+              <ShareButton
+                recordType="cash_request"
+                recordId={request.id}
+                pagePath={window.location.pathname}
+                pageTitle={`Cash Request #${request.id}`}
+                recordPreview={{
+                  title: `Cash Request #${request.id}`,
+                  reference: `#${request.id}`,
+                  status: request.status,
+                  requester: request.created_by,
+                  department: request.department,
+                  purpose: request.purpose,
+                  amount: request.total_amount != null ? `GHS ${Number(request.total_amount).toLocaleString()}` : undefined,
+                  deliver_to: request.deliver_to,
+                  date_needed: request.date_needed,
+                  received_by: request.received_by,
+                  received_at: request.received_at,
+                  submitted: request.created_at,
+                  tables: [
+                    buildPreviewTable(
+                      'Expenses',
+                      request.expenses?.map((e) => ({ description: e.description, qty: e.qty, unit_price: e.unit_price, total: e.total })),
+                      [
+                        { key: 'description', label: 'Description' },
+                        { key: 'qty', label: 'Qty' },
+                        { key: 'unit_price', label: 'Unit Price' },
+                        { key: 'total', label: 'Total' },
+                      ]
+                    ),
+                    buildPreviewTable(
+                      'Approvals',
+                      request.approvals?.map((a) => ({ stage: a.approval_stage, approver: a.approver_name, approved_at: new Date(a.created_at).toLocaleString() })),
+                      [
+                        { key: 'stage', label: 'Stage' },
+                        { key: 'approver', label: 'Approver' },
+                        { key: 'approved_at', label: 'Approved At' },
+                      ]
+                    ),
+                  ].filter(Boolean),
+                }}
+              />
+            )}
+            {request && !isSharedView && (
               <RecordChatButton
                 recordType="cash_request"
                 recordId={request.id}
                 chatChannelId={request.chat_channel_id}
               />
             )}
-            {canConfirm && (
+            {canConfirm && !isSharedView && (
               <div className="bg-green-50 border-2 border-green-300 rounded-xl p-5 shadow-lg">
                 <div className="flex flex-col sm:flex-row items-center gap-4">
                   <div className="text-center sm:text-left">
@@ -744,7 +798,7 @@ const CashDetails: React.FC = () => {
                     <>
                       <h3 className="text-xl font-bold text-indigo-900">Cash Released</h3>
                       <p className="text-indigo-800">
-                        Awaiting confirmation from <strong>{request.created_by}</strong>
+                        Awaiting confirmation from <strong><PersonName value={request.created_by} /></strong>
                       </p>
                     </>
                   )}
@@ -778,7 +832,7 @@ const CashDetails: React.FC = () => {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <p className="text-sm text-gray-500">Requestor</p>
-                  <p className="font-medium">{request.created_by}</p>
+                  <p className="font-medium"><PersonName value={request.created_by} /></p>
                 </div>
                 <div>
                   <p className="text-sm text-gray-500">Department</p>
@@ -890,6 +944,8 @@ const CashDetails: React.FC = () => {
           </CardContent>
         </Card>
 
+        {!isSharedView && <WorkflowTimeline workflowType="cash_request" recordId={request.id} />}
+
         {/* Approval & Rejection History */}
         {(request.approvals.length > 0 || request.rejections.length > 0) && (
           <Card>
@@ -924,7 +980,7 @@ const CashDetails: React.FC = () => {
                             : `${approval.approval_stage === 'director' ? 'Director' : 'Supervisor'} Approval`}
                         </p>
                         <p className="text-sm text-gray-600">
-                          {isFinanceIssue ? 'Issued by' : 'By'} <strong>{approval.approver_name}</strong> • {formatDateTime(approval.created_at)}
+                          {isFinanceIssue ? 'Issued by' : 'By'} <strong><PersonName value={approval.approver_name} /></strong> • {formatDateTime(approval.created_at)}
                         </p>
                         {approval.signature && (
                           <p className={`text-xs italic mt-1 ${isFinanceIssue ? 'text-emerald-700' : 'text-gray-500'}`}>"{approval.signature}"</p>
