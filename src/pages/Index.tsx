@@ -99,6 +99,7 @@ import IncidentNotes from './staff/noc/IncidentNotes';
 import ShiftSchedule from './staff/noc/ShiftSchedule';
 import WorkflowPerformance from './admin/WorkflowPerformance';
 import WorkflowTimeConfig from './admin/WorkflowTimeConfig';
+import MyAssessment from './MyAssessment';
 import IPDashboard from './staff/ip/Dashboard';
 import IPAllTickets from './staff/ip/IPAllTickets';
 import FieldTicketDashboard from './staff/field/TicketDashboard';
@@ -917,6 +918,11 @@ const Index = () => {
               <Route
                 path="/workflow-performance"
                 element={<ProtectedRoute allowedRoles={WORKFLOW_TIME_ENGINE_ROLES}><WorkflowPerformance /></ProtectedRoute>}
+              />
+              <Route path="/my-assessment" element={<ProtectedRoute><MyAssessment /></ProtectedRoute>} />
+              <Route
+                path="/staff-assessment/:userId"
+                element={<ProtectedRoute allowedRoles={WORKFLOW_TIME_ENGINE_ROLES}><MyAssessment /></ProtectedRoute>}
               />
               <Route
                 path="/settings/workflow-time-config"

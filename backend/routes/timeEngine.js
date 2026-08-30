@@ -16,6 +16,8 @@ import {
   getWorkflowTimeConfig,
   upsertWorkflowTimeConfig,
 } from '../services/workflowTimeEngine.js';
+import { getStaffAssessment, getAllStaffAssessments } from '../services/staffAssessment.js';
+import { buildStaffAssessmentWorkbook, buildTeamAssessmentWorkbook, sendWorkbook } from '../services/assessmentExport.js';
 
 const router = express.Router();
 
@@ -171,6 +173,110 @@ router.get('/sla-breaches', requireManager, async (req, res) => {
 router.get('/config', requireManager, async (_req, res) => {
   try {
     res.json(await getWorkflowTimeConfig());
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ---------------------------------------------------------------------------
+// Staff Assessment — "My Assessment" for every user, unit-scoped for managers,
+// system-wide for admins/CTO/director. Enforced server-side; the frontend route
+// gate is UX-only.
+// ---------------------------------------------------------------------------
+
+async function unitOfUser(userId) {
+  const result = await pool.query(`SELECT unit FROM users WHERE id = $1 AND deleted_at IS NULL`, [userId]);
+  return result.rows[0]?.unit || null;
+}
+
+/** True if the requester may view userId's assessment: themselves, an admin/CTO/director, or a manager whose unit covers that user. */
+async function canViewAssessmentFor(requester, userId) {
+  if (requester.id === userId) return true;
+  if (!isTimeEngineManager(requester)) return false;
+  const scope = managerScope(requester);
+  if (scope.isAdmin) return true;
+  const targetUnit = await unitOfUser(userId);
+  return !!targetUnit && scope.allowedUnitSlugs.includes(targetUnit);
+}
+
+// GET /api/time-engine/assessment/me?dateFrom=&dateTo=
+router.get('/assessment/me', async (req, res) => {
+  try {
+    const data = await getStaffAssessment(req.user.id, { dateFrom: req.query.dateFrom, dateTo: req.query.dateTo });
+    if (!data) return res.status(404).json({ error: 'User not found' });
+    res.json(data);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /api/time-engine/assessment/staff/:userId?dateFrom=&dateTo=
+router.get('/assessment/staff/:userId', async (req, res) => {
+  try {
+    const userId = Number(req.params.userId);
+    if (!Number.isInteger(userId)) return res.status(400).json({ error: 'A valid userId is required' });
+    if (!(await canViewAssessmentFor(req.user, userId))) {
+      return res.status(403).json({ error: 'You can only view assessments for yourself or staff in your own unit' });
+    }
+    const data = await getStaffAssessment(userId, { dateFrom: req.query.dateFrom, dateTo: req.query.dateTo });
+    if (!data) return res.status(404).json({ error: 'User not found' });
+    res.json(data);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /api/time-engine/assessment/staff?dateFrom=&dateTo=&unitSlug= — ranked list for CTO/managers.
+router.get('/assessment/staff', requireManager, async (req, res) => {
+  try {
+    const scope = managerScope(req.user);
+    const unitSlug = req.query.unitSlug || null;
+    if (unitSlug && !scope.isAdmin && !scope.allowedUnitSlugs.includes(unitSlug)) {
+      return res.status(403).json({ error: 'You can only view assessments for your own unit' });
+    }
+    const data = await getAllStaffAssessments({
+      dateFrom: req.query.dateFrom, dateTo: req.query.dateTo,
+      unitSlug: unitSlug || undefined,
+      unitSlugs: scope.isAdmin || unitSlug ? undefined : scope.allowedUnitSlugs,
+    });
+    res.json(data);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /api/time-engine/assessment/me/export?format=xlsx
+router.get('/assessment/me/export', async (req, res) => {
+  try {
+    const data = await getStaffAssessment(req.user.id, { dateFrom: req.query.dateFrom, dateTo: req.query.dateTo });
+    if (!data) return res.status(404).json({ error: 'User not found' });
+    const wb = buildStaffAssessmentWorkbook(data);
+    await sendWorkbook(res, wb, `my-assessment-${data.user.name.replace(/\s+/g, '-').toLowerCase()}.xlsx`);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /api/time-engine/assessment/staff/:userId/export?format=xlsx
+router.get('/assessment/staff/:userId/export', async (req, res) => {
+  try {
+    const userId = Number(req.params.userId);
+    if (!Number.isInteger(userId)) return res.status(400).json({ error: 'A valid userId is required' });
+    if (!(await canViewAssessmentFor(req.user, userId))) {
+      return res.status(403).json({ error: 'You can only export assessments for yourself or staff in your own unit' });
+    }
+    const data = await getStaffAssessment(userId, { dateFrom: req.query.dateFrom, dateTo: req.query.dateTo });
+    if (!data) return res.status(404).json({ error: 'User not found' });
+    const wb = buildStaffAssessmentWorkbook(data);
+    await sendWorkbook(res, wb, `assessment-${data.user.name.replace(/\s+/g, '-').toLowerCase()}.xlsx`);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /api/time-engine/assessment/export?dateFrom=&dateTo=&unitSlug=&format=xlsx — bulk team export.
+router.get('/assessment/export', requireManager, async (req, res) => {
+  try {
+    const scope = managerScope(req.user);
+    const unitSlug = req.query.unitSlug || null;
+    if (unitSlug && !scope.isAdmin && !scope.allowedUnitSlugs.includes(unitSlug)) {
+      return res.status(403).json({ error: 'You can only export assessments for your own unit' });
+    }
+    const rows = await getAllStaffAssessments({
+      dateFrom: req.query.dateFrom, dateTo: req.query.dateTo,
+      unitSlug: unitSlug || undefined,
+      unitSlugs: scope.isAdmin || unitSlug ? undefined : scope.allowedUnitSlugs,
+    });
+    const wb = buildTeamAssessmentWorkbook(rows, { periodFrom: req.query.dateFrom, periodTo: req.query.dateTo });
+    await sendWorkbook(res, wb, `team-assessments-${new Date().toISOString().slice(0, 10)}.xlsx`);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

@@ -18,6 +18,7 @@ const RECORD_CATALOG = {
   noc_shift_schedule: { label: 'NOC Shift Schedule', prefix: 'SHF', path: '/noc/shift-schedule' },
   workflow_time_config: { label: 'Workflow Time Config', prefix: 'WTC', path: '/settings/workflow-time-config' },
   ticket: { label: 'Ticket', prefix: 'TKT', path: '/staff/cx/tickets/:id' },
+  wip_entry: { label: 'WIP Entry', prefix: 'WIP', path: '/project-unit/wip' },
 };
 
 const ACTION_CATEGORY = {

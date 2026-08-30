@@ -29,6 +29,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ShareButton } from "@/components/ShareButton";
 import { useSharedView } from "@/context/SharedViewContext";
+import { useToast } from "@/hooks/use-toast";
+import { useDraftValue } from "@/hooks/useDraftValue";
 const cols = [
   ["customer_name", "Customer Name"],
   ["site_name", "Site Name"],
@@ -56,6 +58,7 @@ const lab = (f: string) =>
   cols.find(([k]) => k === f)?.[1] || f.replace(/_/g, " ");
 export default function WipPage() {
   const { isSharedView, recordId: sharedRecordId } = useSharedView();
+  const { toast } = useToast();
   const [rows, setRows] = useState<WipEntry[]>([]),
     [search, setSearch] = useState(""),
     [options, setOptions] = useState({
@@ -70,13 +73,31 @@ export default function WipPage() {
     [pop, setPop] = useState<any>(null),
     [state, setState] = useState<Record<number, string>>({});
   const timers = useRef<Record<string, number>>({});
+  // Rows the current user is actively editing (dirty-field count per row id). A refetch/load()
+  // must never clobber a dirty row's local draft — this is what stops concurrent editors and
+  // any future poll/refresh from wiping each other's in-progress typing.
+  const dirtyRowsRef = useRef<Map<number, number>>(new Map());
+  const markRowDirty = useCallback((id: number, isDirty: boolean) => {
+    const m = dirtyRowsRef.current;
+    const n = m.get(id) || 0;
+    m.set(id, Math.max(0, n + (isDirty ? 1 : -1)));
+  }, []);
   const load = useCallback(async () => {
     if (isSharedView) {
       setRows(await listWipEntries());
       return;
     }
     const [a, b] = await Promise.all([listWipEntries(), getWipOptions()]);
-    setRows(a);
+    // Never overwrite a row the user is actively editing — keep their current (possibly
+    // locally-ahead) copy instead of the just-fetched one for any row with a dirty field.
+    setRows((prev) => {
+      const prevById = new Map(prev.map((r) => [r.id, r]));
+      return a.map((fresh) =>
+        (dirtyRowsRef.current.get(fresh.id) || 0) > 0
+          ? prevById.get(fresh.id) || fresh
+          : fresh,
+      );
+    });
     setOptions(b);
   }, [isSharedView]);
   useEffect(() => {
@@ -89,26 +110,37 @@ export default function WipPage() {
       if (match) setSel(match);
     }
   }, [isSharedView, sharedRecordId, rows, sel]);
-  const detail = async (id: number) => {
-    if (isSharedView) return;
-    const [a, b] = await Promise.all([getWipHistory(id), getWipRemarks(id)]);
-    setHist(a);
-    setNotes(b);
-  };
-  const open = (r: WipEntry) => {
-    setSel(r);
-    void detail(r.id);
-  };
+  const detail = useCallback(
+    async (id: number) => {
+      if (isSharedView) return;
+      const [a, b] = await Promise.all([getWipHistory(id), getWipRemarks(id)]);
+      setHist(a);
+      setNotes(b);
+    },
+    [isSharedView],
+  );
+  const open = useCallback(
+    (r: WipEntry) => {
+      setSel(r);
+      void detail(r.id);
+    },
+    [detail],
+  );
+  /**
+   * Commits one field's value: applies it optimistically (this field only, on both the row
+   * and, if open, the detail panel), then saves to the server. On success, only the saved
+   * field is merged back from the response — never the whole row — so a slow response can't
+   * stomp on a different field the user started editing in the meantime. On failure, the
+   * local value is kept (not rolled back — the retry will get it there) and a toast fires.
+   */
   const save = (id: number, f: string, v: any) => {
     setRows((p) => p.map((r) => (r.id === id ? { ...r, [f]: v } : r)));
     setSel((p) => (p?.id === id ? { ...p, [f]: v } : p));
-    clearTimeout(timers.current[`${id}-${f}`]);
     setState((p) => ({ ...p, [id]: "saving" }));
-    timers.current[`${id}-${f}`] = window.setTimeout(async () => {
-      try {
-        const x = await updateWipEntry(id, { [f]: v });
-        setRows((p) => p.map((r) => (r.id === id ? { ...r, ...x } : r)));
-        setSel((p) => (p?.id === id ? { ...p, ...x } : p));
+    updateWipEntry(id, { [f]: v })
+      .then((x) => {
+        setRows((p) => p.map((r) => (r.id === id ? { ...r, [f]: x[f] ?? v } : r)));
+        setSel((p) => (p?.id === id ? { ...p, [f]: x[f] ?? v } : p));
         setState((p) => ({ ...p, [id]: "saved" }));
         void detail(id);
         setTimeout(
@@ -120,11 +152,20 @@ export default function WipPage() {
             }),
           1600,
         );
-      } catch {
+      })
+      .catch(() => {
         setState((p) => ({ ...p, [id]: "failed" }));
-        setTimeout(() => save(id, f, v), 2500);
-      }
-    }, 2000);
+        toast({
+          title: "Couldn't save your change",
+          description: `${lab(f)} didn't save — retrying…`,
+          variant: "destructive",
+        });
+        clearTimeout(timers.current[`${id}-${f}-retry`]);
+        timers.current[`${id}-${f}-retry`] = window.setTimeout(
+          () => save(id, f, v),
+          2500,
+        );
+      });
   };
   const shown = useMemo(
     () =>
@@ -178,11 +219,11 @@ export default function WipPage() {
             pageTitle="Work In Progress"
             recordPreview={{ title: "Work In Progress", type: "WIP Register", records: rows.length.toLocaleString() }}
           />
-          <Button onClick={() => void add()}>
+          <Button type="button" onClick={() => void add()}>
             <Plus className="mr-2 h-4 w-4" />
             Add Row
           </Button>
-          <Button variant="outline" onClick={() => void exportX()}>
+          <Button type="button" variant="outline" onClick={() => void exportX()}>
             <Download className="mr-2 h-4 w-4" />
             Export
           </Button>
@@ -215,69 +256,20 @@ export default function WipPage() {
           </thead>
           <tbody>
             {shown.map((r, i) => (
-              <tr
-                onClick={() => open(r)}
-                className={`cursor-pointer border-t hover:bg-sky-50 ${sel?.id === r.id ? "border-l-4 border-sky-500 bg-sky-50" : ""}`}
+              <Row
                 key={r.id}
-              >
-                <td className="p-2">
-                  {i + 1}
-                  <Small state={state[r.id]} />
-                </td>
-                {cols.map(([f]) => (
-                  <td
-                    className="group relative p-1"
-                    onClick={(e) => e.stopPropagation()}
-                    key={f}
-                  >
-                    {edit?.id === r.id && edit.f === f ? (
-                      <div className="absolute z-30 w-72 rounded border bg-white p-2 shadow-xl">
-                        <textarea
-                          autoFocus
-                          className="min-h-24 w-full resize"
-                          value={r[f] || ""}
-                          onChange={(e) => save(r.id, f, e.target.value)}
-                          onBlur={() => setEdit(null)}
-                          onKeyDown={(e) => e.key === "Escape" && setEdit(null)}
-                        />
-                      </div>
-                    ) : (
-                      <button
-                        title={r[f] || ""}
-                        className="block min-h-9 max-w-44 min-w-32 truncate rounded px-2 text-left hover:bg-sky-100"
-                        onClick={() => setEdit({ id: r.id, f })}
-                      >
-                        {r[f] || "—"}
-                        {String(r[f] || "").length > 22 && (
-                          <Expand className="ml-1 inline h-3 w-3" />
-                        )}
-                      </button>
-                    )}
-                    <button
-                      className="absolute right-0 top-0 hidden group-hover:block"
-                      onClick={() => {
-                        setPop({ id: r.id, f });
-                        void detail(r.id);
-                      }}
-                    >
-                      <Clock3 className="h-3 w-3" />
-                    </button>
-                  </td>
-                ))}
-                <td>
-                  <Button
-                    size="icon"
-                    variant="ghost"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setPop({ id: r.id });
-                      void detail(r.id);
-                    }}
-                  >
-                    <History className="h-4 w-4" />
-                  </Button>
-                </td>
-              </tr>
+                r={r}
+                i={i}
+                isSelected={sel?.id === r.id}
+                editField={edit?.id === r.id ? edit.f : null}
+                savingState={state[r.id]}
+                open={open}
+                setEdit={setEdit}
+                setPop={setPop}
+                detail={detail}
+                save={save}
+                markRowDirty={markRowDirty}
+              />
             ))}
           </tbody>
         </table>
@@ -292,6 +284,7 @@ export default function WipPage() {
           r={sel}
           close={() => setSel(null)}
           save={save}
+          markRowDirty={markRowDirty}
           state={state[sel.id]}
           hist={hist}
           notes={notes}
@@ -321,10 +314,125 @@ function Small({ state }: any) {
     <i className="ml-1 text-[10px] text-rose-600">Save failed — retrying</i>
   ) : null;
 }
+/**
+ * One WIP row in the main grid. Memoized so that typing in one row's cell — which only
+ * changes that row's own props (editField/savingState) — never forces every other row to
+ * re-render. All callback props passed in are stable (useCallback) so this memo is effective.
+ */
+const Row = React.memo(function Row({
+  r,
+  i,
+  isSelected,
+  editField,
+  savingState,
+  open,
+  setEdit,
+  setPop,
+  detail,
+  save,
+  markRowDirty,
+}: any) {
+  return (
+    <tr
+      onClick={() => open(r)}
+      className={`cursor-pointer border-t hover:bg-sky-50 ${isSelected ? "border-l-4 border-sky-500 bg-sky-50" : ""}`}
+    >
+      <td className="p-2">
+        {i + 1}
+        <Small state={savingState} />
+      </td>
+      {cols.map(([f]) => (
+        <td
+          className="group relative p-1"
+          onClick={(e) => e.stopPropagation()}
+          key={f}
+        >
+          {editField === f ? (
+            <CellEditor
+              id={r.id}
+              f={f}
+              value={r[f]}
+              save={save}
+              markRowDirty={markRowDirty}
+              onDone={() => setEdit(null)}
+            />
+          ) : (
+            <button
+              type="button"
+              title={r[f] || ""}
+              className="block min-h-9 max-w-44 min-w-32 truncate rounded px-2 text-left hover:bg-sky-100"
+              onClick={() => setEdit({ id: r.id, f })}
+            >
+              {r[f] || "—"}
+              {String(r[f] || "").length > 22 && (
+                <Expand className="ml-1 inline h-3 w-3" />
+              )}
+            </button>
+          )}
+          <button
+            type="button"
+            className="absolute right-0 top-0 hidden group-hover:block"
+            onClick={() => {
+              setPop({ id: r.id, f });
+              void detail(r.id);
+            }}
+          >
+            <Clock3 className="h-3 w-3" />
+          </button>
+        </td>
+      ))}
+      <td>
+        <Button
+          type="button"
+          size="icon"
+          variant="ghost"
+          onClick={(e) => {
+            e.stopPropagation();
+            setPop({ id: r.id });
+            void detail(r.id);
+          }}
+        >
+          <History className="h-4 w-4" />
+        </Button>
+      </td>
+    </tr>
+  );
+});
+/** Inline popover editor for one table cell — local draft via useDraftValue, same as FieldInput. */
+function CellEditor({ id, f, value, save, markRowDirty, onDone }: any) {
+  const commit = useCallback((v: any) => save(id, f, v), [save, id, f]);
+  const { draft, dirty, onChange, flush } = useDraftValue(value ?? "", commit);
+  useEffect(() => {
+    markRowDirty?.(id, dirty);
+    return () => markRowDirty?.(id, false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dirty, id]);
+  return (
+    <div
+      className="absolute z-30 w-72 rounded border bg-white p-2 shadow-xl"
+      onClick={(e) => e.stopPropagation()}
+    >
+      <textarea
+        autoFocus
+        className="min-h-24 w-full resize"
+        value={draft}
+        onChange={(e) => onChange(e.target.value)}
+        onBlur={() => {
+          flush();
+          onDone();
+        }}
+        onKeyDown={(e) => {
+          if (e.key === "Escape") onDone();
+        }}
+      />
+    </div>
+  );
+}
 function Panel({
   r,
   close,
   save,
+  markRowDirty,
   state,
   hist,
   notes,
@@ -369,7 +477,7 @@ function Panel({
               }}
             />
             )}
-            <Button size="icon" variant="ghost" onClick={close}>
+            <Button type="button" size="icon" variant="ghost" onClick={close}>
               <X />
             </Button>
           </div>
@@ -380,6 +488,7 @@ function Panel({
             fs={["customer_name", "site_name", "location", "region"]}
             r={r}
             save={save}
+            markRowDirty={markRowDirty}
             readOnly={isSharedView}
           />
           <Card
@@ -394,6 +503,7 @@ function Panel({
             ]}
             r={r}
             save={save}
+            markRowDirty={markRowDirty}
             readOnly={isSharedView}
           />
           <Card
@@ -401,6 +511,7 @@ function Panel({
             fs={["start_date", "completion_date", "confirmation_date"]}
             r={r}
             save={save}
+            markRowDirty={markRowDirty}
             extra={`Total Days: ${day ?? "—"}`}
             readOnly={isSharedView}
           />
@@ -409,6 +520,7 @@ function Panel({
             fs={["mrc", "sale_price", "through_value", "existing_poles"]}
             r={r}
             save={save}
+            markRowDirty={markRowDirty}
             readOnly={isSharedView}
           />
           <Card
@@ -416,6 +528,7 @@ function Panel({
             fs={["status", "remarks"]}
             r={r}
             save={save}
+            markRowDirty={markRowDirty}
             readOnly={isSharedView}
           />
           {!isSharedView && (
@@ -437,7 +550,7 @@ function Panel({
               onChange={(e) => setNote(e.target.value)}
               placeholder="Add a remark…"
             />
-            <Button size="sm" className="mt-2" onClick={() => void addNote()}>
+            <Button type="button" size="sm" className="mt-2" onClick={() => void addNote()}>
               Add remark
             </Button>
           </section>
@@ -453,43 +566,21 @@ function Panel({
     </div>
   );
 }
-function Card({ t, fs, r, save, extra, readOnly }: any) {
+function Card({ t, fs, r, save, extra, readOnly, markRowDirty }: any) {
   return (
     <section className="rounded-xl border bg-white p-4">
       <h3 className="mb-3 font-bold">{t}</h3>
       <div className="grid gap-2 sm:grid-cols-2">
         {fs.map((f: string) => (
-          <label className="text-xs font-semibold text-slate-500" key={f}>
-            {lab(f)}
-            {f === "status" ? (
-              <select
-                disabled={readOnly}
-                className="mt-1 w-full rounded border p-2 text-slate-900"
-                value={r[f] || "In Progress"}
-                onChange={(e) => save(r.id, f, e.target.value)}
-              >
-                <option>In Progress</option>
-                <option>Completed</option>
-                <option>On Hold</option>
-                <option>Cancelled</option>
-              </select>
-            ) : long.has(f) ? (
-              <textarea
-                disabled={readOnly}
-                className="mt-1 min-h-20 w-full resize rounded border p-2 text-slate-900"
-                value={r[f] || ""}
-                onChange={(e) => save(r.id, f, e.target.value)}
-              />
-            ) : (
-              <Input
-                disabled={readOnly}
-                className="mt-1 text-slate-900"
-                type={dates.has(f) ? "date" : "text"}
-                value={r[f] || ""}
-                onChange={(e) => save(r.id, f, e.target.value)}
-              />
-            )}
-          </label>
+          <FieldInput
+            key={f}
+            id={r.id}
+            f={f}
+            value={r[f]}
+            save={save}
+            markRowDirty={markRowDirty}
+            readOnly={readOnly}
+          />
         ))}
       </div>
       {extra && (
@@ -498,6 +589,71 @@ function Card({ t, fs, r, save, extra, readOnly }: any) {
     </section>
   );
 }
+/**
+ * One editable field, typed locally via useDraftValue: keystrokes never touch the row/panel
+ * state or the network directly — only the debounced commit (~500ms after the last keystroke,
+ * or immediately on blur/Enter) calls `save`. While dirty, this field ignores prop updates
+ * from the parent (a refetch or another user's change), so nothing typed here can be wiped.
+ */
+const FieldInput = React.memo(function FieldInput({
+  id,
+  f,
+  value,
+  save,
+  readOnly,
+  markRowDirty,
+}: any) {
+  const commit = useCallback((v: any) => save(id, f, v), [save, id, f]);
+  const { draft, dirty, onChange, flush } = useDraftValue(value ?? "", commit);
+  useEffect(() => {
+    markRowDirty?.(id, dirty);
+    return () => markRowDirty?.(id, false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dirty, id]);
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter" && !(e as any).shiftKey && e.currentTarget.tagName !== "TEXTAREA") {
+      e.preventDefault();
+      flush();
+    }
+  };
+  return (
+    <label className="text-xs font-semibold text-slate-500">
+      {lab(f)}
+      {f === "status" ? (
+        <select
+          disabled={readOnly}
+          className="mt-1 w-full rounded border p-2 text-slate-900"
+          value={draft || "In Progress"}
+          onChange={(e) => flush(e.target.value)}
+        >
+          <option>In Progress</option>
+          <option>Completed</option>
+          <option>On Hold</option>
+          <option>Cancelled</option>
+        </select>
+      ) : long.has(f) ? (
+        <textarea
+          disabled={readOnly}
+          className="mt-1 min-h-20 w-full resize rounded border p-2 text-slate-900"
+          value={draft}
+          onChange={(e) => onChange(e.target.value)}
+          onBlur={() => flush()}
+          onKeyDown={onKeyDown}
+        />
+      ) : (
+        <Input
+          disabled={readOnly}
+          className="mt-1 text-slate-900"
+          type={dates.has(f) ? "date" : "text"}
+          value={draft}
+          onChange={(e) => onChange(e.target.value)}
+          onBlur={() => flush()}
+          onKeyDown={onKeyDown}
+        />
+      )}
+    </label>
+  );
+});
 function HistoryRows({ rows }: any) {
   return (
     <div className="max-h-72 overflow-auto">
@@ -523,7 +679,7 @@ function Popup({ title, rows, close }: any) {
       <div className="w-full max-w-2xl rounded-xl bg-white p-4 shadow-2xl">
         <div className="flex justify-between">
           <h3 className="font-bold">{title}</h3>
-          <Button size="icon" variant="ghost" onClick={close}>
+          <Button type="button" size="icon" variant="ghost" onClick={close}>
             <X />
           </Button>
         </div>

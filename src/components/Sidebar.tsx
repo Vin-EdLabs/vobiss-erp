@@ -9,7 +9,7 @@ import {
   Headphones, Ticket, MessagesSquare, Users2, User, FilePlus, Headset,
   Globe, CircleAlert, AlertCircle, Search, Network, LayoutDashboard,
   Briefcase, CalendarDays, CalendarCheck, CalendarOff, Wallet, ClipboardCheck, FolderOpen, PanelLeftClose, PanelLeft, Landmark, ShieldCheck,
-  Truck, Fuel, FileSignature
+  Truck, Fuel, FileSignature, Award
 } from 'lucide-react';
 import { getRequests, getLowStockItems, getNotifications, getWorkspace, cxApi } from '../api';
 import { formatPersonName } from '@/lib/displayName';
@@ -912,6 +912,8 @@ const Sidebar = ({
       notificationCount: chatUnreadCount,
     };
     const profileItem = { icon: Settings, label: 'Profile & Security', path: '/profile' };
+    const myAssessmentItem = { icon: Award, label: 'My Assessment', path: '/my-assessment' };
+    const showMyAssessment = role !== 'customer';
 
     const hrPendingLeave = Number(hrStatsQ.data?.pendingLeaveRequests || 0);
     const hrPendingForms = Number(hrStatsQ.data?.pendingFormRequests || 0);
@@ -1193,7 +1195,7 @@ const Sidebar = ({
       baseItems = [requestApprovalsSection, ...baseItems];
     }
 
-    return [myWorkspace, chatItem, ...baseItems, profileItem];
+    return [myWorkspace, ...(showMyAssessment ? [myAssessmentItem] : []), chatItem, ...baseItems, profileItem];
   };
 
   const menuItems = getMenuItems();

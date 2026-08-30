@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { Activity, Clock, AlertTriangle, TimerReset, RefreshCw } from 'lucide-react';
+import { Activity, Clock, AlertTriangle, TimerReset, RefreshCw, Award } from 'lucide-react';
 import { StatCard } from '@/components/ui/stat-card';
 import { StatusPill } from '@/components/ui/status-pill';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -48,6 +49,7 @@ const SLA_LABEL: Record<SlaStatus, string> = {
 };
 
 export default function WorkflowPerformance() {
+  const navigate = useNavigate();
   const [selectedRecord, setSelectedRecord] = useState<LiveSegment | null>(null);
   const [unitSlug, setUnitSlug] = useState(KNOWN_UNITS[0]);
 
@@ -176,7 +178,10 @@ export default function WorkflowPerformance() {
       </div>
 
       <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4 shadow-[var(--shadow-sm)]">
-        <h2 className="mb-3 text-sm font-bold text-[var(--text-primary)]">Staff Performance</h2>
+        <div className="mb-3 flex items-center justify-between">
+          <h2 className="text-sm font-bold text-[var(--text-primary)]">Staff Performance</h2>
+          <span className="flex items-center gap-1 text-xs text-[var(--text-muted)]"><Award className="h-3.5 w-3.5" /> Click a name for their full assessment</span>
+        </div>
         {staffQuery.isLoading ? (
           <Skeleton className="h-32 w-full rounded-xl" />
         ) : !staffQuery.data?.length ? (
@@ -196,7 +201,7 @@ export default function WorkflowPerformance() {
               </TableHeader>
               <TableBody>
                 {staffQuery.data.map((row) => (
-                  <TableRow key={row.userId}>
+                  <TableRow key={row.userId} className="cursor-pointer hover:bg-[var(--surface-secondary)]" onClick={() => navigate(`/staff-assessment/${row.userId}`)}>
                     <TableCell className="font-medium">{row.fullName}</TableCell>
                     <TableCell>{row.unitSlug || '—'}</TableCell>
                     <TableCell>{row.count}</TableCell>

@@ -5,6 +5,7 @@ import { useAuth } from '../context/AuthContext';
 import { loginUser } from '../api';
 import { POST_LOGIN_PATH } from '../config/roles';
 import { applyTheme, readStoredTheme } from '@/lib/theme';
+import LoginFiberBackground from '@/components/LoginFiberBackground';
 
 const REMEMBERED_LOGIN_KEY = 'vobiss_remembered_login';
 
@@ -75,8 +76,9 @@ const Login = () => {
   };
 
   return (
-    <div className="flex min-h-dvh items-center justify-center bg-gray-50 px-4 py-12" style={{ colorScheme: 'light' }}>
-      <div className="login-shell flex w-full max-w-5xl overflow-hidden rounded-3xl bg-white shadow-2xl md:[zoom:0.8]">
+    <div className="relative flex min-h-dvh items-center justify-center overflow-hidden px-4 py-12" style={{ colorScheme: 'light' }}>
+      <LoginFiberBackground />
+      <div className="login-shell relative z-10 flex w-full max-w-5xl overflow-hidden rounded-3xl bg-white shadow-2xl md:[zoom:0.8]">
         <div className="relative hidden flex-col justify-between overflow-hidden bg-gradient-to-br from-blue-600 via-blue-700 to-red-600 p-12 lg:flex lg:w-1/2">
           {/* Decorative lines */}
           <div className="absolute inset-0 overflow-hidden pointer-events-none">
