@@ -17,12 +17,23 @@ const canDeleteNotes = (user) => isSystemAdminAccount(user) || userHasAnyRole(us
 const requireNoc = (req, res, next) => canUseNotes(req.user) ? next() : res.status(403).json({ error: 'NOC access is required' });
 const requireNocAuth = (req, res, next) => authenticateToken(req, res, () => requireNoc(req, res, next));
 
+// Caches the in-flight promise (not a boolean) so concurrent early requests await the same
+// init() call instead of each racing their own CREATE TABLE/INDEX statements.
+let initPromise = null;
+function ensureInit() {
+  if (!initPromise) initPromise = init().catch((e) => { initPromise = null; throw e; });
+  return initPromise;
+}
+
 // Registered before the router-wide auth gate below so a valid share token can serve
 // this one read-only detail route without a user session; every other route in this
 // file (including mutations) still requires full staff authentication.
-router.get('/:id', authenticateOrShareToken('incident_note', requireNocAuth), async (req, res) => {
+router.get('/:id', authenticateOrShareToken('incident_note', requireNocAuth), async (req, res, next) => {
+  // /options (registered below) also matches this pattern in Express's route order —
+  // fall through to it instead of treating "options" as a numeric id.
+  if (!req.isSharedView && !/^\d+$/.test(req.params.id)) return next();
   try {
-    await init();
+    await ensureInit();
     const id = req.isSharedView ? req.shareLink.record_id : req.params.id;
     const note = await getNote(id);
     if (!note) return res.status(404).json({ error: 'Incident note not found' });
@@ -63,7 +74,7 @@ async function recordHistory(noteId, field, before, after, user) {
   await pool.query(`INSERT INTO noc_incident_note_history(note_id,field_name,old_value,new_value,changed_by,changed_by_name) VALUES($1,$2,$3,$4,$5,$6)`, [noteId, field, String(before ?? ''), String(after ?? ''), user.id, formatPersonName(user, user.username)]);
 }
 
-router.use(async (_req, _res, next) => { try { await init(); next(); } catch (e) { next(e); } });
+router.use(async (_req, _res, next) => { try { await ensureInit(); next(); } catch (e) { next(e); } });
 
 router.get('/options', requireNoc, async (_req, res) => {
   try {

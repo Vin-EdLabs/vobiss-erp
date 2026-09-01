@@ -88,7 +88,7 @@ export default function ReportsHub() {
           return isManagerOrSupervisor && hasAnyUnit('finance');
         }
         if (card.path === '/staff/reports/service-requests') {
-          return isManagerOrSupervisor && hasAnyUnit('project', 'tx', 'ts', 'ip', 'noc');
+          return isManagerOrSupervisor && hasAnyUnit('project', 'tx', 'ts', 'ip', 'noc', 'sales', 'design');
         }
         if (card.path === '/reports') {
           return hasAnyUnit('procurement');

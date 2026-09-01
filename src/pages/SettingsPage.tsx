@@ -13,7 +13,9 @@ import {
   Database,
   Send,
   CheckCircle,
-  XCircle
+  XCircle,
+  CalendarDays,
+  ArrowRight
 } from 'lucide-react';
 import { getSettings, updateSetting } from '../api';
 import { API_URL } from '@/lib/api';
@@ -304,6 +306,23 @@ const SettingsPage: React.FC = () => {
           <CheckCircle className="mr-2 h-5 w-5" /> {success}
         </div>
       )}
+
+      <div className="mb-6 rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-6 shadow-[var(--shadow-md)]">
+        <div className="mb-3 flex items-center">
+          <CalendarDays className="mr-3 h-6 w-6 text-[var(--primary)]" />
+          <h2 className="text-lg font-semibold text-[var(--text-primary)]">Performance Assessment Periods</h2>
+        </div>
+        <p className="mb-4 text-sm text-[var(--text-secondary)]">
+          Create and manage the weekly, monthly, or quarterly windows that Performance Reports and system scores are measured against.
+        </p>
+        <button
+          type="button"
+          onClick={() => navigate('/performance-reports/periods')}
+          className="flex items-center rounded-[var(--radius-sm)] bg-[var(--primary)] px-5 py-2.5 text-sm font-medium text-white hover:bg-[var(--primary-hover)]"
+        >
+          Open Assessment Periods <ArrowRight className="ml-2 h-4 w-4" />
+        </button>
+      </div>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         {/* Email Configuration */}

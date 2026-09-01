@@ -26,6 +26,7 @@ import {
 import { cxApi } from '../../../api';
 import { API_URL } from '@/lib/api';
 import { TicketTagBadgesRow } from '@/components/tickets/TicketTagBadge';
+import { TicketUnitBadge } from '@/components/tickets/TicketUnitBadge';
 import {
   TicketListTagFilter,
   type TagFilterMode,
@@ -65,6 +66,7 @@ interface Ticket {
   creator_name?: string;
   creator_type?: 'customer' | 'staff';
   assignee_name?: string;
+  escalation_stage?: string;
   created_at: string;
   updated_at?: string;
   attachments?: any;
@@ -846,6 +848,7 @@ const AllTickets: React.FC = () => {
                     <th className="px-4 py-3 text-left font-medium">Created</th>
                     <th className="px-4 py-3 text-left font-medium">Status</th>
                     <th className="px-4 py-3 text-left font-medium">Priority</th>
+                    <th className="px-4 py-3 text-left font-medium">Unit</th>
                     <th className="px-4 py-3 text-left font-medium">Assigned</th>
                     <th className="px-4 py-3 text-left font-medium">Actions</th>
                   </tr>
@@ -901,6 +904,9 @@ const AllTickets: React.FC = () => {
                             <div className={`w-3 h-3 rounded-full ${priorityColors.dot}`} />
                             <span className={`${priorityColors.text} font-medium`}>{ticket.priority.toLowerCase()}</span>
                           </div>
+                        </td>
+                        <td className="px-4 py-3">
+                          <TicketUnitBadge escalationStage={ticket.escalation_stage} />
                         </td>
                         <td className="px-4 py-3 text-slate-700">
                           {ticket.assignee_name || <span className="text-slate-400 italic">Unassigned</span>}

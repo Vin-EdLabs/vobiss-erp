@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { ensureChatThread } from '@/api/chat';
 import { useToast } from '@/hooks/use-toast';
 
-type RecordType = 'ticket' | 'material_request' | 'cash_request' | 'item_return' | 'project_request';
+type RecordType = 'ticket' | 'material_request' | 'cash_request' | 'item_return' | 'project_request' | 'wip_entry';
 
 interface RecordChatButtonProps {
   recordType: RecordType;

@@ -23,6 +23,8 @@ export function useDraftValue<T>(
   const timerRef = useRef<number | undefined>(undefined);
   const draftRef = useRef(draft);
   draftRef.current = draft;
+  const dirtyRef = useRef(dirty);
+  dirtyRef.current = dirty;
 
   useEffect(() => {
     if (!dirty) setDraft(serverValue);
@@ -30,10 +32,15 @@ export function useDraftValue<T>(
 
   useEffect(() => () => window.clearTimeout(timerRef.current), []);
 
+  // Only commit if something was actually typed (dirty). Every consumer wires flush to onBlur,
+  // which fires just from clicking into a field and clicking back out — without this guard that
+  // resent the unchanged value on every such click, logging a bogus "changed from X to X" history
+  // entry each time.
   const flush = useCallback((value: T = draftRef.current) => {
     window.clearTimeout(timerRef.current);
+    const wasDirty = dirtyRef.current;
     setDirty(false);
-    void commit(value);
+    if (wasDirty) void commit(value);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [commit]);
 

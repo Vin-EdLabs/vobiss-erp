@@ -34,16 +34,42 @@ import {
   listDesignRequests,
   createSalesRequest,
   submitDesignRequest,
+  confirmDesignRequest,
+  rejectSalesReview,
   forwardWorkflowRequest,
 } from '../db/project.js';
 import pool from '../db.js';
 import { createNotification, insertAuditLog } from '../db.js';
 import { getRealtimeIo } from '../realtime/channels.js';
 import { postProjectRequestSystemMessage } from '../services/chatSystemMessage.js';
-import { logUserAction } from '../services/activityLog.js';
+import { logUserAction, recordViewPath } from '../services/activityLog.js';
 import { recordTimingEvent } from '../services/workflowTimeEngine.js';
 import { ensureProjectRequestThread } from '../services/chatRecordThreads.js';
 import { effectiveUnitsForUser, hasProjectUnitAccess, hasDesignUnitAccess, isSystemAdminAccount, canonicalizeUnitSlug } from '../roles.js';
+import { notifyUnit, notifyMany } from '../services/unitNotify.js';
+
+// Who gets notified when a Service Request lands on each stage — mirrors the role/unit
+// conventions already used across NOC Shift Schedule, IP Unit, and Field Work this session.
+const STAGE_NOTIFY = {
+  design: { roles: ['design_manager', 'design_supervisor'], unitSlugs: ['design'], label: 'Design' },
+  sales: { roles: [], unitSlugs: ['sales'], label: 'Sales' },
+  project: { roles: ['project_manager', 'project_supervisor'], unitSlugs: ['project'], label: 'Project Unit' },
+  ts: { roles: ['ts_manager', 'ts_supervisor', 'field_engineer_admin'], unitSlugs: ['ts', 'tx'], label: 'TX' },
+  ip: { roles: ['ip_manager', 'ip_supervisor'], unitSlugs: ['ip'], label: 'IP' },
+  noc: { roles: ['noc_manager', 'noc_supervisor'], unitSlugs: ['noc'], label: 'NOC' },
+};
+
+async function notifySrStage(stage, { requestId, actingUserId, refLabel }) {
+  const target = STAGE_NOTIFY[stage];
+  if (!target) return;
+  await notifyUnit({
+    roles: target.roles, unitSlugs: target.unitSlugs,
+    title: `Service Request needs ${target.label}`,
+    message: `${refLabel} has moved to ${target.label} and is awaiting action.`,
+    actingUserId, linkUrl: recordViewPath('service_request', requestId),
+    notificationType: 'service_request_stage',
+  }).catch(() => {});
+}
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -141,7 +167,7 @@ router.put('/wip/:id', authenticateToken, async (req, res) => {
       workflowType: 'wip_entry', recordId: Number(req.params.id),
       eventType: terminal ? (newStatus.toLowerCase() === 'cancelled' ? 'cancelled' : 'completed') : 'started',
       stageName: newStatus.toLowerCase().replace(/\s+/g, '_'),
-      triggeredByUserId: req.user.id,
+      triggeredByUserId: req.user.id, attributeToUserId: req.user.id,
     }).catch(() => {});
   }
   res.json(updated.rows[0]);
@@ -334,7 +360,7 @@ router.post('/signoff/:id/approve', requireProjectSignoffAccess, async (req, res
     if (!found.rowCount) return res.status(400).json({ error: 'Only pending forms can be approved' }); const form = found.rows[0];
     await createNotification('Sign-off form approved', `Your sign-off form for ${form.site_name} has been approved`, user.id, { targetUserId: form.created_by, linkUrl: `/project-unit/signoff/${form.id}`, notificationType: 'project_signoff' });
     await logUserAction(user, { actionType: 'approve', recordType: 'signoff_form', recordId: form.id, recordRef: form.reference_no, description: `${signoffDisplayName(user)} approved the sign-off form for ${form.site_name}` });
-    recordTimingEvent({ workflowType: 'signoff_form', recordId: form.id, eventType: 'completed', stageName: 'pending_approval', triggeredByUserId: user.id }).catch(() => {});
+    recordTimingEvent({ workflowType: 'signoff_form', recordId: form.id, eventType: 'completed', stageName: 'pending_approval', triggeredByUserId: user.id, attributeToUserId: user.id }).catch(() => {});
     res.json(form);
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
@@ -346,7 +372,7 @@ router.post('/signoff/:id/reject', requireProjectSignoffAccess, async (req, res)
     if (!found.rowCount) return res.status(400).json({ error: 'Only pending forms can be rejected' }); const form = found.rows[0];
     await createNotification('Sign-off form rejected', `Your sign-off form for ${form.site_name} was rejected — ${reason}`, user.id, { targetUserId: form.created_by, linkUrl: `/project-unit/signoff/${form.id}`, notificationType: 'project_signoff' });
     await logUserAction(user, { actionType: 'reject', recordType: 'signoff_form', recordId: form.id, recordRef: form.reference_no, description: `${signoffDisplayName(user)} rejected the sign-off form for ${form.site_name}` });
-    recordTimingEvent({ workflowType: 'signoff_form', recordId: form.id, eventType: 'rejected', stageName: 'pending_approval', triggeredByUserId: user.id }).catch(() => {});
+    recordTimingEvent({ workflowType: 'signoff_form', recordId: form.id, eventType: 'rejected', stageName: 'pending_approval', triggeredByUserId: user.id, attributeToUserId: user.id }).catch(() => {});
     res.json(form);
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
@@ -404,6 +430,7 @@ router.post('/design/requests', requireDesignAccess, async (req, res) => {
       recordId: created.id,
     });
     recordTimingEvent({ workflowType: 'design_request', recordId: created.id, eventType: 'created', stageName: 'design', toUnitSlug: 'design', triggeredByUserId: req.user.id }).catch(() => {});
+    notifySrStage('project', { requestId: created.id, actingUserId: req.user.id, refLabel: `SR-${String(created.id).padStart(3, '0')}` });
     res.status(201).json(created);
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
@@ -411,16 +438,18 @@ router.post('/design/requests', requireDesignAccess, async (req, res) => {
 router.post('/design/requests/:id/submit', requireDesignAccess, async (req, res) => {
   try {
     const user = await loadFullUser(req);
-    const submitted = await submitDesignRequest(parseInt(req.params.id, 10), req.body, user);
+    const id = parseInt(req.params.id, 10);
+    const submitted = await submitDesignRequest(id, req.body, user);
     await logUserAction(req.user, {
       actionType: 'submit',
       recordType: 'design_request',
-      recordId: submitted?.id || parseInt(req.params.id, 10),
+      recordId: submitted?.id || id,
     });
     recordTimingEvent({
-      workflowType: 'design_request', recordId: submitted?.id || parseInt(req.params.id, 10),
+      workflowType: 'design_request', recordId: submitted?.id || id,
       eventType: 'submitted', stageName: 'sales', toUnitSlug: 'sales', triggeredByUserId: req.user.id,
     }).catch(() => {});
+    notifySrStage('sales', { requestId: id, actingUserId: req.user.id, refLabel: `SR-${String(id).padStart(3, '0')}` });
     res.json(submitted);
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
@@ -443,6 +472,7 @@ router.post('/sales/requests', requireSalesAccess, async (req, res) => {
       recordId: created.id,
     });
     recordTimingEvent({ workflowType: 'sales_request', recordId: created.id, eventType: 'created', stageName: 'design', toUnitSlug: 'design', triggeredByUserId: req.user.id }).catch(() => {});
+    notifySrStage('design', { requestId: created.id, actingUserId: req.user.id, refLabel: `SR-${String(created.id).padStart(3, '0')}` });
     res.status(201).json(created);
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
@@ -452,9 +482,53 @@ router.post('/sales/requests/:id/forward', requireSalesAccess, async (req, res) 
     const id = parseInt(req.params.id, 10);
     const forwarded = await forwardWorkflowRequest(id, 'sales', 'project');
     recordTimingEvent({ workflowType: 'sales_request', recordId: id, eventType: 'started', stageName: 'project', toUnitSlug: 'project', triggeredByUserId: req.user.id }).catch(() => {});
+    notifySrStage('project', { requestId: id, actingUserId: req.user.id, refLabel: `SR-${String(id).padStart(3, '0')}` });
     res.json(forwarded);
   }
   catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+// "Confirm & Forward to Project" — Sales's review of Design's completed survey
+// (current_stage='sales'). See confirmDesignRequest() in backend/db/project.js.
+router.post('/sales/requests/:id/confirm', requireSalesAccess, async (req, res) => {
+  try {
+    const user = await loadFullUser(req);
+    const id = parseInt(req.params.id, 10);
+    const confirmed = await confirmDesignRequest(id, user);
+    await logUserAction(req.user, {
+      actionType: 'submit',
+      recordType: 'sales_request',
+      recordId: id,
+      description: `You confirmed the design for SR-${String(id).padStart(3, '0')} — ready for Project Unit`,
+    });
+    recordTimingEvent({
+      workflowType: 'sales_request', recordId: id,
+      eventType: 'completed', triggeredByUserId: req.user.id,
+    }).catch(() => {});
+    recordTimingEvent({
+      workflowType: 'service_request', recordId: id,
+      eventType: 'design_confirmed', stageName: 'project', toUnitSlug: 'project', triggeredByUserId: req.user.id,
+    }).catch(() => {});
+    notifySrStage('project', { requestId: id, actingUserId: req.user.id, refLabel: `SR-${String(id).padStart(3, '0')}` });
+    res.json(confirmed);
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+// Sales rejects Design's survey and bounces it back — comment required.
+router.post('/sales/requests/:id/reject', requireSalesAccess, async (req, res) => {
+  try {
+    const user = await loadFullUser(req);
+    const id = parseInt(req.params.id, 10);
+    const rejected = await rejectSalesReview(id, req.body?.comment, user);
+    await logUserAction(req.user, {
+      actionType: 'note',
+      recordType: 'sales_request',
+      recordId: id,
+      description: `You sent SR-${String(id).padStart(3, '0')} back to Design`,
+    });
+    notifySrStage('design', { requestId: id, actingUserId: req.user.id, refLabel: `SR-${String(id).padStart(3, '0')}` });
+    res.json(rejected);
+  } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
 // â”€â”€ Units (admin) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -721,7 +795,7 @@ router.post('/requests/:id/ts/accept', async (req, res) => {
     if (!isSuperAdmin(user) && !user.units.includes('ts')) {
       return res.status(403).json({ error: 'TX access required' });
     }
-    const updated = await tsAcceptRequest(parseInt(req.params.id, 10), user, req.body?.route_to_stage);
+    const updated = await tsAcceptRequest(parseInt(req.params.id, 10), user, req.body?.route_to_stage, req.body?.notes);
     await logUserAction(req.user, {
       actionType: 'approve',
       recordType: 'service_request',
@@ -733,6 +807,7 @@ router.post('/requests/:id/ts/accept', async (req, res) => {
       eventType: 'approved', stageName: tsTarget === 'project' ? 'noc_review' : 'ip_review', toUnitSlug: tsTarget,
       triggeredByUserId: req.user.id,
     }).catch(() => {});
+    notifySrStage(tsTarget, { requestId: updated?.id || parseInt(req.params.id, 10), actingUserId: req.user.id, refLabel: `SR-${String(updated?.id || req.params.id).padStart(3, '0')}` });
     res.json(updated);
   } catch (e) {
     res.status(400).json({ error: e.message });
@@ -795,6 +870,7 @@ router.post('/requests/:id/ip/forward', async (req, res) => {
       eventType: 'started', stageName: ipTarget === 'ts' ? 'ts_review' : 'noc_review', toUnitSlug: ipTarget,
       triggeredByUserId: req.user.id,
     }).catch(() => {});
+    notifySrStage(ipTarget === 'ts' ? 'ts' : 'noc', { requestId: updated?.id || parseInt(req.params.id, 10), actingUserId: req.user.id, refLabel: `SR-${String(updated?.id || req.params.id).padStart(3, '0')}` });
     res.json(updated);
   } catch (e) {
     res.status(400).json({ error: e.message });
@@ -810,7 +886,7 @@ router.post('/noc-approve/:id', async (req, res) => {
     if (!isSuperAdmin(user) && !user.units.includes('noc')) {
       return res.status(403).json({ error: 'NOC access required' });
     }
-    const updated = await nocApproveRequest(parseInt(req.params.id, 10));
+    const updated = await nocApproveRequest(parseInt(req.params.id, 10), req.body?.notes);
     await logUserAction(req.user, {
       actionType: 'approve',
       recordType: 'service_request',
@@ -820,6 +896,7 @@ router.post('/noc-approve/:id', async (req, res) => {
       workflowType: 'service_request', recordId: updated?.id || parseInt(req.params.id, 10),
       eventType: 'approved', stageName: 'noc_review', toUnitSlug: 'project', triggeredByUserId: req.user.id,
     }).catch(() => {});
+    notifySrStage('project', { requestId: updated?.id || parseInt(req.params.id, 10), actingUserId: req.user.id, refLabel: `SR-${String(updated?.id || req.params.id).padStart(3, '0')}` });
     res.json(updated);
   } catch (e) {
     res.status(400).json({ error: e.message });
@@ -832,7 +909,7 @@ router.post('/requests/:id/noc/approve', async (req, res) => {
     if (!isSuperAdmin(user) && !user.units.includes('noc')) {
       return res.status(403).json({ error: 'NOC access required' });
     }
-    const updated = await nocApproveRequest(parseInt(req.params.id, 10));
+    const updated = await nocApproveRequest(parseInt(req.params.id, 10), req.body?.notes);
     await logUserAction(req.user, {
       actionType: 'approve',
       recordType: 'service_request',
@@ -842,6 +919,7 @@ router.post('/requests/:id/noc/approve', async (req, res) => {
       workflowType: 'service_request', recordId: updated?.id || parseInt(req.params.id, 10),
       eventType: 'approved', stageName: 'noc_review', toUnitSlug: 'project', triggeredByUserId: req.user.id,
     }).catch(() => {});
+    notifySrStage('project', { requestId: updated?.id || parseInt(req.params.id, 10), actingUserId: req.user.id, refLabel: `SR-${String(updated?.id || req.params.id).padStart(3, '0')}` });
     res.json(updated);
   } catch (e) {
     res.status(400).json({ error: e.message });
@@ -855,7 +933,7 @@ router.post('/requests/:id/noc/complete', async (req, res) => {
     if (!isSuperAdmin(user) && !user.units.includes('noc')) {
       return res.status(403).json({ error: 'NOC access required' });
     }
-    const updated = await nocApproveRequest(parseInt(req.params.id, 10));
+    const updated = await nocApproveRequest(parseInt(req.params.id, 10), req.body?.notes);
     await logUserAction(req.user, {
       actionType: 'approve',
       recordType: 'service_request',
@@ -865,6 +943,7 @@ router.post('/requests/:id/noc/complete', async (req, res) => {
       workflowType: 'service_request', recordId: updated?.id || parseInt(req.params.id, 10),
       eventType: 'approved', stageName: 'noc_review', toUnitSlug: 'project', triggeredByUserId: req.user.id,
     }).catch(() => {});
+    notifySrStage('project', { requestId: updated?.id || parseInt(req.params.id, 10), actingUserId: req.user.id, refLabel: `SR-${String(updated?.id || req.params.id).padStart(3, '0')}` });
     res.json(updated);
   } catch (e) {
     res.status(400).json({ error: e.message });
@@ -893,6 +972,11 @@ router.post('/requests/:id/project/complete', async (req, res) => {
       workflowType: 'service_request', recordId: updated?.id || parseInt(req.params.id, 10),
       eventType: 'completed', stageName: 'project', triggeredByUserId: req.user.id,
     }).catch(() => {});
+    if (updated?.created_by_user_id) {
+      notifyMany([updated.created_by_user_id], 'Service Request Active', `SR-${String(updated.id).padStart(3, '0')} is now active.`, req.user.id, {
+        linkUrl: recordViewPath('service_request', updated.id), notificationType: 'service_request_active',
+      }).catch(() => {});
+    }
     res.json(updated);
   } catch (e) {
     res.status(400).json({ error: e.message });
@@ -906,13 +990,14 @@ router.post('/requests/:id/project/forward', async (req, res) => {
     if (!isSuperAdmin(user) && !hasProject) return res.status(403).json({ error: 'Project Unit access required' });
     const target = ['ts', 'ip', 'noc'].includes(req.body?.route_to_stage) ? req.body.route_to_stage : '';
     const id = parseInt(req.params.id, 10);
-    const forwarded = await forwardWorkflowRequest(id, 'project', target);
+    const forwarded = await forwardWorkflowRequest(id, 'project', target, req.body?.fields);
     if (target) {
       recordTimingEvent({
         workflowType: 'service_request', recordId: id, eventType: 'started',
         stageName: target === 'ts' ? 'ts_review' : target === 'ip' ? 'ip_review' : 'noc_review',
         toUnitSlug: target, triggeredByUserId: req.user.id,
       }).catch(() => {});
+      notifySrStage(target, { requestId: id, actingUserId: req.user.id, refLabel: `SR-${String(id).padStart(3, '0')}` });
     }
     res.json(forwarded);
   } catch (e) { res.status(400).json({ error: e.message }); }

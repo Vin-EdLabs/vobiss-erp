@@ -11,6 +11,7 @@ import {
   Download,
   Expand,
   History,
+  Link2,
   Plus,
   Search,
   X,
@@ -19,7 +20,6 @@ import {
   addWipRemark,
   createWipEntry,
   getWipHistory,
-  getWipOptions,
   getWipRemarks,
   listWipEntries,
   updateWipEntry,
@@ -28,9 +28,11 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ShareButton } from "@/components/ShareButton";
+import { RecordChatButton } from "@/components/chat/RecordChatButton";
 import { useSharedView } from "@/context/SharedViewContext";
 import { useToast } from "@/hooks/use-toast";
 import { useDraftValue } from "@/hooks/useDraftValue";
+import { GHANA_REGIONS, SERVICE_TYPES } from "@/lib/lookups";
 const cols = [
   ["customer_name", "Customer Name"],
   ["site_name", "Site Name"],
@@ -61,10 +63,6 @@ export default function WipPage() {
   const { toast } = useToast();
   const [rows, setRows] = useState<WipEntry[]>([]),
     [search, setSearch] = useState(""),
-    [options, setOptions] = useState({
-      regions: [] as string[],
-      serviceTypes: [] as string[],
-    }),
     [sel, setSel] = useState<WipEntry | null>(null),
     [hist, setHist] = useState<any[]>([]),
     [notes, setNotes] = useState<any[]>([]),
@@ -87,7 +85,7 @@ export default function WipPage() {
       setRows(await listWipEntries());
       return;
     }
-    const [a, b] = await Promise.all([listWipEntries(), getWipOptions()]);
+    const a = await listWipEntries();
     // Never overwrite a row the user is actively editing — keep their current (possibly
     // locally-ahead) copy instead of the just-fetched one for any row with a dirty field.
     setRows((prev) => {
@@ -98,7 +96,6 @@ export default function WipPage() {
           : fresh,
       );
     });
-    setOptions(b);
   }, [isSharedView]);
   useEffect(() => {
     void load();
@@ -273,11 +270,6 @@ export default function WipPage() {
             ))}
           </tbody>
         </table>
-        <datalist id="region-options">
-          {options.regions.map((x) => (
-            <option key={x} value={x} />
-          ))}
-        </datalist>
       </div>
       {sel && (
         <Panel
@@ -340,6 +332,7 @@ const Row = React.memo(function Row({
       <td className="p-2">
         {i + 1}
         <Small state={savingState} />
+        {r.project_request_id && <Link2 className="ml-1 inline h-3 w-3 text-indigo-500" />}
       </td>
       {cols.map(([f]) => (
         <td
@@ -412,19 +405,51 @@ function CellEditor({ id, f, value, save, markRowDirty, onDone }: any) {
       className="absolute z-30 w-72 rounded border bg-white p-2 shadow-xl"
       onClick={(e) => e.stopPropagation()}
     >
-      <textarea
-        autoFocus
-        className="min-h-24 w-full resize"
-        value={draft}
-        onChange={(e) => onChange(e.target.value)}
-        onBlur={() => {
-          flush();
-          onDone();
-        }}
-        onKeyDown={(e) => {
-          if (e.key === "Escape") onDone();
-        }}
-      />
+      {f === "region" ? (
+        <select
+          autoFocus
+          className="w-full rounded border p-2"
+          value={draft || ""}
+          onChange={(e) => {
+            commit(e.target.value);
+            onDone();
+          }}
+        >
+          <option value="">Select region…</option>
+          {GHANA_REGIONS.map((r) => (
+            <option key={r} value={r}>{r}</option>
+          ))}
+        </select>
+      ) : f === "service_type" ? (
+        <select
+          autoFocus
+          className="w-full rounded border p-2"
+          value={draft || ""}
+          onChange={(e) => {
+            commit(e.target.value);
+            onDone();
+          }}
+        >
+          <option value="">Select service type…</option>
+          {SERVICE_TYPES.map((s) => (
+            <option key={s} value={s}>{s}</option>
+          ))}
+        </select>
+      ) : (
+        <textarea
+          autoFocus
+          className="min-h-24 w-full resize"
+          value={draft}
+          onChange={(e) => onChange(e.target.value)}
+          onBlur={() => {
+            flush();
+            onDone();
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") onDone();
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -459,9 +484,20 @@ function Panel({
               {r.customer_name || "Unnamed Customer"}
             </h2>
             <p>{r.site_name}</p>
+            {r.project_request_id && (
+              <a
+                href={`/project-request/project/${r.project_request_id}`}
+                className="mt-1 inline-flex items-center gap-1 text-xs font-medium text-indigo-600 hover:underline"
+              >
+                <Link2 className="h-3 w-3" /> Linked to SR-{String(r.project_request_id).padStart(3, "0")}
+              </a>
+            )}
           </div>
           <div className="flex items-center gap-2">
             <Small state={state} />
+            {!isSharedView && (
+              <RecordChatButton recordType="wip_entry" recordId={r.id} chatChannelId={r.chat_channel_id} />
+            )}
             {!isSharedView && (
             <ShareButton
               recordType="wip_entry"
@@ -624,12 +660,36 @@ const FieldInput = React.memo(function FieldInput({
           disabled={readOnly}
           className="mt-1 w-full rounded border p-2 text-slate-900"
           value={draft || "In Progress"}
-          onChange={(e) => flush(e.target.value)}
+          onChange={(e) => commit(e.target.value)}
         >
           <option>In Progress</option>
           <option>Completed</option>
           <option>On Hold</option>
           <option>Cancelled</option>
+        </select>
+      ) : f === "region" ? (
+        <select
+          disabled={readOnly}
+          className="mt-1 w-full rounded border p-2 text-slate-900"
+          value={draft || ""}
+          onChange={(e) => commit(e.target.value)}
+        >
+          <option value="">Select region…</option>
+          {GHANA_REGIONS.map((r) => (
+            <option key={r} value={r}>{r}</option>
+          ))}
+        </select>
+      ) : f === "service_type" ? (
+        <select
+          disabled={readOnly}
+          className="mt-1 w-full rounded border p-2 text-slate-900"
+          value={draft || ""}
+          onChange={(e) => commit(e.target.value)}
+        >
+          <option value="">Select service type…</option>
+          {SERVICE_TYPES.map((s) => (
+            <option key={s} value={s}>{s}</option>
+          ))}
         </select>
       ) : long.has(f) ? (
         <textarea

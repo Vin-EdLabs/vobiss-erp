@@ -190,15 +190,14 @@ const PAGES = [
     ],
   },
   {
-    patterns: ['/users', '/settings', '/configuration', '/audit-logs', '/system-messages', '/realm', '/admin/clients', '/admin/vobi-vault', '/profile', '/system-guide'],
+    patterns: ['/users', '/settings', '/configuration', '/audit-logs', '/system-messages', '/realm', '/admin/clients', '/profile', '/system-guide'],
     name: 'Admin & Settings',
     module: 'admin',
     howItWorks:
-      'User roles/units, system configuration, audit trail, system messages, and System Admin–only tools like Vobi Vault. Profile is personal account settings.',
+      'User roles/units, system configuration, audit trail, and system messages. Profile is personal account settings.',
     howToUse: [
       'Assign roles and units carefully — they control sidebar and data access.',
       'Audit Logs answer who changed inventory/records.',
-      'Vobi Vault is System Admin only and access-key gated.',
     ],
   },
   {
@@ -210,6 +209,112 @@ const PAGES = [
     howToUse: [
       'Set date range before interpreting totals.',
       'Export CSV/PDF for leadership packs.',
+    ],
+  },
+  {
+    patterns: [
+      '/performance-reports/dashboard', '/performance-reports/my-reports', '/performance-reports/report/:id',
+      '/performance-reports/team', '/performance-reports/unit-reviews', '/performance-reports/executive',
+      '/performance-reports/hr', '/performance-reports/periods', '/performance-reports/analytics',
+    ],
+    name: 'Performance & Reports',
+    module: 'performance_reports',
+    howItWorks:
+      'Employee submits a periodic performance report → routes to their unit\'s Supervisor → Manager → CTO, each scoring and commenting before forwarding (a tier with nobody in it is skipped automatically). HR gets automatic read access the moment a report reaches CTO. A System Score (workflow performance + attendance) is computed automatically at submission.',
+    howToUse: [
+      'Submit from My Reports → Create New Report, pick the Assessment Period.',
+      'Reviewers act from Team Reports (Supervisor) / Unit Reviews (Manager) / Executive Review (CTO) — score, add a comment, then Send Back or Score & Forward.',
+      'If a unit has more than one Supervisor/Manager, the sender picks who it goes to.',
+      'HR Access shows every report once it reaches CTO or is finalized; Analytics is HR/CTO/Director/admin only.',
+    ],
+  },
+  {
+    patterns: [
+      '/transport-request', '/transport-supervisor-dashboard', '/transport-approvals',
+      '/transport/rental-vehicle-requests', '/transport/rental-approvals',
+      '/transport/fuel-requests', '/transport/fuel-approvals',
+    ],
+    name: 'Transport & Fleet',
+    module: 'transport',
+    howItWorks:
+      'Any staff member can submit a Transport, Fuel, or Rental Vehicle request. Each goes to the approver(s)/supervisor configured for that request type before it\'s actioned.',
+    howToUse: [
+      'Pick an engineer and the approver(s) shown when submitting — most units only have one, so it\'s often pre-filled.',
+      'Approvers act from the matching Approvals page for that request type.',
+      'Fuel requests need a vehicle plate and estimated litres/amount.',
+    ],
+  },
+  {
+    patterns: [
+      '/network-assets', '/network-assets/pops', '/network-assets/equipment', '/network-assets/passive',
+      '/network-assets/metro', '/network-assets/nedcoMetro', '/network-assets/backhaul', '/network-assets/nedcoBackhaul',
+      '/network-assets/backhaulAccessories', '/network-assets/metroAccessories', '/network-assets/poles', '/network-assets/catalogue',
+    ],
+    name: 'Network Assets',
+    module: 'network_assets',
+    howItWorks:
+      'Register of physical network infrastructure: PoPs (points of presence), Equipment Inventory, Passive Infrastructure, ECG/NEDCO Metro and Backhaul, Poles, and an Equipment Catalogue.',
+    howToUse: [
+      'PoP Register is the master list of sites — most other tabs link back to a PoP.',
+      'Equipment Inventory tracks what hardware is installed at each PoP.',
+      'Use Reports for a rolled-up view across regions.',
+    ],
+  },
+  {
+    patterns: ['/noc/shift-schedule', '/noc/incident-notes', '/noc/incident-notes/:id'],
+    name: 'NOC Shift Schedule & Incident Notes',
+    module: 'noc_shifts',
+    howItWorks:
+      'Shift Schedule assigns staff to published shifts by date. Incident Notes log site-level NOC incidents (Open/Monitoring/Escalated/Resolved) independent of the ticketing system.',
+    howToUse: [
+      'Shifts must be published before they show as the live schedule.',
+      'Log an incident note as soon as an issue is noticed, even before a ticket exists.',
+      'Escalate an incident note\'s status as it develops.',
+    ],
+  },
+  {
+    patterns: ['/ip-unit/dashboard', '/ip-unit/circuits', '/ip-unit/circuits/:id', '/ip-unit/circuits/new', '/ip-unit/requests', '/ip-unit/requests/:id', '/ip-unit/reports'],
+    name: 'IP Unit',
+    module: 'ip_unit',
+    howItWorks:
+      'Circuit inventory for IP unit — each circuit has a code, status (active/available/inactive/decommissioned), capacity, and links to a client/site. Circuit Requests is the intake/approval workflow before a circuit is added to inventory.',
+    howToUse: [
+      'Search circuits by code, client, or PoP.',
+      'New circuits usually start as a Request, then get generated and added to inventory once approved.',
+    ],
+  },
+  {
+    patterns: ['/project-unit/wip', '/project-unit/signoff', '/project-unit/signoff/:id'],
+    name: 'Production — WIP & Sign-Off Forms',
+    module: 'production',
+    howItWorks:
+      'WIP tracks in-progress site builds (customer, site, region, service type, status) — many WIP entries are auto-linked to their originating Service Request. Sign-Off Forms are the completion/test-result document (circuit test, bandwidth, latency/jitter/packet-loss, client + Vobiss + manager signatures) that closes out a build.',
+    howToUse: [
+      'Update WIP status as work progresses so it reflects reality.',
+      'Sign-Off Forms move draft → pending → approved/rejected — approval usually needs a manager signature.',
+    ],
+  },
+  {
+    patterns: ['/archive'],
+    name: 'Archive',
+    module: 'archive',
+    howItWorks:
+      'Folder-based document storage, separate from the /uploads used elsewhere. Folders are global (everyone), unit-scoped (only that unit), or private (only the uploader).',
+    howToUse: [
+      'Check folder scope before uploading something sensitive — private stays with you, unit stays in-department.',
+      'Search by folder or file name.',
+    ],
+  },
+  {
+    patterns: ['/my-assessment', '/staff-assessment/:userId', '/workflow-performance'],
+    name: 'My Assessment / Workflow Performance',
+    module: 'my_assessment',
+    howItWorks:
+      'An automatically-computed scorecard from actual ticket/workflow timing data (not a human review) — compliance %, speed, volume, and attendance %, for This Week/Month/Last Month. Distinct from the Performance & Reports module, which is human-submitted and reviewed. Managers/HR/Directors can also open someone else\'s via /staff-assessment/:userId.',
+    howToUse: [
+      'Switch the period selector to change the window.',
+      'Needs at least 5 completed items in the period to show a real score.',
+      'This is evidence for performance conversations, not an automatic HR grade.',
     ],
   },
 ];

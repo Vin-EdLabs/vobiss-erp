@@ -127,7 +127,7 @@ export async function hydrateMessages(messageRows, currentUserId) {
   const forwardedIds = messageRows.map((m) => m.forwarded_from).filter(Boolean);
   const originMap = await fetchForwardedOrigins(forwardedIds);
 
-  const [attachmentsRes, reactionsRes, replyRes] = await Promise.all([
+  const [attachmentsRes, reactionsRes, replyRes, threadRes] = await Promise.all([
     pool.query(
       `SELECT id, message_id, file_name, file_url, file_size, mime_type
        FROM chat_attachments WHERE message_id = ANY($1::uuid[])`,
@@ -147,6 +147,16 @@ export async function hydrateMessages(messageRows, currentUserId) {
           [replyIds]
         )
       : Promise.resolve({ rows: [] }),
+    // Thread summary — how many replies each message (as a thread root) has, and when the
+    // most recent one landed, so the feed can show a "N replies" affordance without a
+    // separate round trip per message.
+    pool.query(
+      `SELECT reply_to AS message_id, COUNT(*)::int AS count, MAX(created_at) AS last_reply_at
+       FROM chat_messages
+       WHERE reply_to = ANY($1::uuid[]) AND message_type = 'user'
+       GROUP BY reply_to`,
+      [ids]
+    ),
   ]);
 
   const userMap = await fetchUserMap([
@@ -173,6 +183,7 @@ export async function hydrateMessages(messageRows, currentUserId) {
   }
 
   const replyMap = new Map(replyRes.rows.map((r) => [r.id, r]));
+  const threadByMsg = new Map(threadRes.rows.map((r) => [r.message_id, r]));
 
   return messageRows.map((m) => formatMessageRow(m, {
     currentUserId,
@@ -182,6 +193,7 @@ export async function hydrateMessages(messageRows, currentUserId) {
     reply: m.reply_to ? replyMap.get(m.reply_to) : null,
     meta: m.meta && typeof m.meta === 'object' ? m.meta : null,
     forwardedOrigin: m.forwarded_from ? originMap.get(m.forwarded_from) || null : null,
+    thread: threadByMsg.get(m.id) || null,
   }));
 }
 
@@ -258,7 +270,7 @@ export async function assertMessageAccess(messageId, userId) {
   return msg;
 }
 
-export function formatMessageRow(m, { currentUserId, userMap, attachments, reactions, reply, meta, forwardedOrigin }) {
+export function formatMessageRow(m, { currentUserId, userMap, attachments, reactions, reply, meta, forwardedOrigin, thread }) {
   const sender = m.sender_id ? userMap.get(m.sender_id) : null;
   const role = sender?.main_role || sender?.role || null;
 
@@ -301,6 +313,8 @@ export function formatMessageRow(m, { currentUserId, userMap, attachments, react
     meta: meta || null,
     forwarded_from: m.forwarded_from || null,
     forwardedOrigin: forwardedOrigin || null,
+    thread_count: thread?.count || 0,
+    thread_last_reply_at: thread?.last_reply_at || null,
   };
 }
 

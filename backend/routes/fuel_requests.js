@@ -66,7 +66,11 @@ const upload = multer({
 // Registered before the router-wide auth gate below so a valid share token can serve
 // this one read-only detail route without a user session; every other route in this
 // file (including mutations) still requires full authentication.
-router.get('/:id', authenticateOrShareToken('fuel_request', authenticateToken), async (req, res) => {
+router.get('/:id', authenticateOrShareToken('fuel_request', authenticateToken), async (req, res, next) => {
+  // Literal-path routes below (e.g. /references, /validate-reference) also match this
+  // pattern in Express's route order — fall through to them instead of treating their
+  // path segment as a numeric id.
+  if (!req.isSharedView && !/^\d+$/.test(req.params.id)) return next();
   try {
     const id = req.isSharedView ? req.shareLink.record_id : req.params.id;
     const reqRes = await pool.query(
@@ -133,7 +137,7 @@ router.get('/validate-reference', async (req, res) => {
 
     if (type === 'Ticket') {
       const ticketResult = await pool.query(
-        `SELECT id, ticket_number, title FROM tickets WHERE deleted_at IS NULL AND (ticket_number = $1 OR id::text = $1) LIMIT 1`,
+        `SELECT id, ticket_id, title FROM tickets WHERE ticket_id = $1 OR id::text = $1 LIMIT 1`,
         [rawNumber]
       );
       if (ticketResult.rowCount === 0) {
@@ -144,9 +148,9 @@ router.get('/validate-reference', async (req, res) => {
         valid: true,
         type: 'Ticket',
         id: ticket.id,
-        number: ticket.ticket_number || String(ticket.id),
+        number: ticket.ticket_id || String(ticket.id),
         title: ticket.title || 'Ticket',
-        message: `Ticket #${ticket.ticket_number || ticket.id} found — ${ticket.title || 'Ticket'}`,
+        message: `Ticket #${ticket.ticket_id || ticket.id} found — ${ticket.title || 'Ticket'}`,
         link: `/staff/cx/tickets/${ticket.id}`,
       });
     }
@@ -185,12 +189,12 @@ router.get('/references', async (req, res) => {
     let tickets = [];
     try {
       const projRes = await pool.query(
-        `SELECT id, title, project_code FROM projects WHERE deleted_at IS NULL ORDER BY created_at DESC LIMIT 50`
+        `SELECT id, project_name, project_code FROM projects WHERE deleted_at IS NULL ORDER BY created_at DESC LIMIT 50`
       );
       projects = projRes.rows.map((p) => ({
         id: p.id,
-        ref: p.project_code ? `${p.project_code}: ${p.title}` : `PRJ-${p.id}: ${p.title}`,
-        title: p.title,
+        ref: p.project_code ? `${p.project_code}: ${p.project_name}` : `PRJ-${p.id}: ${p.project_name}`,
+        title: p.project_name,
         type: 'project',
       }));
     } catch (e) {
@@ -199,11 +203,11 @@ router.get('/references', async (req, res) => {
 
     try {
       const ticketRes = await pool.query(
-        `SELECT id, ticket_number, title FROM tickets WHERE deleted_at IS NULL ORDER BY created_at DESC LIMIT 50`
+        `SELECT id, ticket_id, title FROM tickets ORDER BY created_at DESC LIMIT 50`
       );
       tickets = ticketRes.rows.map((t) => ({
         id: t.id,
-        ref: t.ticket_number ? `${t.ticket_number}: ${t.title}` : `TICK-${t.id}: ${t.title}`,
+        ref: t.ticket_id ? `${t.ticket_id}: ${t.title}` : `TICK-${t.id}: ${t.title}`,
         title: t.title,
         type: 'ticket',
       }));
@@ -534,7 +538,7 @@ router.post('/:id/approve', async (req, res) => {
       });
       recordTimingEvent({
         workflowType: 'fuel_request', recordId: request.id,
-        eventType: 'approved', stageName: 'pending_approval', triggeredByUserId: req.user.id,
+        eventType: 'approved', stageName: 'pending_approval', triggeredByUserId: req.user.id, attributeToUserId: req.user.id,
       }).catch(() => {});
 
       return res.json({ message: 'Request approved by first-level approver.', new_stage: 'supervisor' });
@@ -588,7 +592,7 @@ router.post('/:id/approve', async (req, res) => {
       });
       recordTimingEvent({
         workflowType: 'fuel_request', recordId: request.id,
-        eventType: 'approved', stageName: 'finance_processing', toUnitSlug: 'finance', triggeredByUserId: req.user.id,
+        eventType: 'approved', stageName: 'finance_processing', toUnitSlug: 'finance', triggeredByUserId: req.user.id, attributeToUserId: req.user.id,
       }).catch(() => {});
 
       return res.json({ message: 'Request fully approved by Transport Supervisor and forwarded to Finance.', new_stage: 'finance_cash' });
@@ -656,7 +660,7 @@ router.post('/:id/reject', async (req, res) => {
     });
     recordTimingEvent({
       workflowType: 'fuel_request', recordId: request.id,
-      eventType: 'rejected', stageName: 'pending_approval', triggeredByUserId: req.user.id,
+      eventType: 'rejected', stageName: 'pending_approval', triggeredByUserId: req.user.id, attributeToUserId: req.user.id,
     }).catch(() => {});
 
     res.json({ message: 'Fuel request rejected.' });
@@ -716,7 +720,7 @@ router.post('/:id/issue-cash', async (req, res) => {
     });
     recordTimingEvent({
       workflowType: 'fuel_request', recordId: request.id,
-      eventType: 'started', stageName: 'awaiting_receipt', triggeredByUserId: req.user.id,
+      eventType: 'started', stageName: 'awaiting_receipt', triggeredByUserId: req.user.id, attributeToUserId: req.user.id,
     }).catch(() => {});
 
     res.json({ message: 'Cash marked as issued. Status changed to Awaiting Receipt.' });
@@ -851,7 +855,7 @@ router.post('/:id/complete', async (req, res) => {
     });
     recordTimingEvent({
       workflowType: 'fuel_request', recordId: request.id,
-      eventType: 'completed', stageName: 'finance_processing', triggeredByUserId: req.user.id,
+      eventType: 'completed', stageName: 'finance_processing', triggeredByUserId: req.user.id, attributeToUserId: req.user.id,
     }).catch(() => {});
 
     res.json({ message: 'Fuel request verified and marked as Completed. Request is now closed.' });

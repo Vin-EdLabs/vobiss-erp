@@ -9,16 +9,22 @@ const RECORD_CATALOG = {
   material_request: { label: 'Material Request', prefix: 'MR', path: '/request-forms/:id' },
   cash_request: { label: 'Cash Request', prefix: 'CR', path: '/cash-details/:id' },
   item_return: { label: 'Item Return', prefix: 'IR', path: '/item-returns/:id' },
-  service_request: { label: 'Service Request', prefix: 'SR', path: '/project-request/project/:id' },
-  project_request: { label: 'Service Request', prefix: 'SR', path: '/project-request/project/:id' },
-  design_request: { label: 'Design Request', prefix: 'DR', path: '/project-request/design/:id' },
-  sales_request: { label: 'Sales Request', prefix: 'SA', path: '/project-request/sales/:id' },
+  // One unified profile page for every unit (360° Service Request Flow) — no more
+  // hardcoding to the :unitSlug='project' view regardless of the SR's real stage.
+  service_request: { label: 'Service Request', prefix: 'SR', path: '/project-request/:id' },
+  design_request: { label: 'Design Request', prefix: 'DR', path: '/project-request/:id' },
+  sales_request: { label: 'Sales Request', prefix: 'SA', path: '/project-request/:id' },
   signoff_form: { label: 'Sign-Off Form', prefix: 'SOF', path: '/project-unit/signoff/:id' },
   incident_note: { label: 'Incident Note', prefix: 'INC', path: '/noc/incident-notes/:id' },
   noc_shift_schedule: { label: 'NOC Shift Schedule', prefix: 'SHF', path: '/noc/shift-schedule' },
   workflow_time_config: { label: 'Workflow Time Config', prefix: 'WTC', path: '/settings/workflow-time-config' },
   ticket: { label: 'Ticket', prefix: 'TKT', path: '/staff/cx/tickets/:id' },
   wip_entry: { label: 'WIP Entry', prefix: 'WIP', path: '/project-unit/wip' },
+  field_work: { label: 'Field Work', prefix: 'FW', path: '/staff/field/field-work/:id' },
+  archive_folder: { label: 'Archive Folder', prefix: 'ARC', path: '/archive?folder=:id' },
+  archive_file: { label: 'Archive File', prefix: 'ARF', path: '/archive' },
+  ip_circuit: { label: 'IP Circuit', prefix: 'CKT', path: '/ip-unit/circuits/:id' },
+  ip_circuit_request: { label: 'Circuit Request', prefix: 'CKR', path: '/ip-unit/requests/:id' },
 };
 
 const ACTION_CATEGORY = {

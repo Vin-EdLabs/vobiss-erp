@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { Fuel, ArrowLeft, Send, Users } from 'lucide-react';
-import { createFuelRequest, getRealmApprovers, getTransportSettings, getWorkflowConfig, getUsers } from '../../api';
+import { createFuelRequest, getRequestApproverIds, getTransportSettings, getWorkflowConfig, getUserDirectory } from '../../api';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '@/hooks/use-toast';
 import ReferencePicker from '@/components/transport/ReferencePicker';
@@ -13,6 +13,8 @@ export default function FuelRequestFormPage() {
   const { user } = useAuth();
   const { toast } = useToast();
   const navigate = useNavigate();
+  const location = useLocation();
+  const fieldWorkLinks = (location.state as { fieldWorkLinks?: ReferenceSummary[] } | null)?.fieldWorkLinks;
 
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -23,7 +25,7 @@ export default function FuelRequestFormPage() {
   const [linkedReference, setLinkedReference] = useState<LinkedReference | null>(null);
   const [referenceError, setReferenceError] = useState('');
   const [requireReference, setRequireReference] = useState(false);
-  const [linkedReferences, setLinkedReferences] = useState<ReferenceSummary[]>([]);
+  const [linkedReferences, setLinkedReferences] = useState<ReferenceSummary[]>(fieldWorkLinks || []);
 
   const [vehiclePlate, setVehiclePlate] = useState('');
   const [fuelType, setFuelType] = useState<'Petrol' | 'Diesel'>('Petrol');
@@ -47,9 +49,9 @@ export default function FuelRequestFormPage() {
         setLoading(true);
         const [settings, realm, workflow, users] = await Promise.all([
           getTransportSettings().catch(() => ({}) as any),
-          getRealmApprovers().catch(() => ({ transport_approver_ids: [], fuel_request_approver_ids: [] } as any)),
+          getRequestApproverIds().catch(() => ({ transport_approver_ids: [], fuel_request_approver_ids: [] } as any)),
           getWorkflowConfig().catch(() => ({ transport: { approver_ids: [], fuel_request_approver_ids: [] } } as any)),
-          getUsers().catch(() => []),
+          getUserDirectory().catch(() => []),
         ]);
 
         setRequireReference(Boolean(workflow?.transport?.require_reference_link_fuel || settings.require_reference_link_fuel));

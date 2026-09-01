@@ -20,6 +20,7 @@ dist-ssr
 dev-dist
 uploads
 backend/uploads
+backend/archive-storage
 *.local
 
 # Editor directories and files

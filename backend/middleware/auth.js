@@ -2,6 +2,7 @@
 import jwt from 'jsonwebtoken';
 import { isSystemAdminAccount } from '../roles.js';
 import { formatPersonName } from '../utils/displayName.js';
+import { getUserById } from '../db.js';
 const JWT_SECRET = process.env.JWT_SECRET || 'your-super-secret-jwt-key-change-this';
 
 export const authenticateToken = (req, res, next) => {
@@ -18,7 +19,6 @@ export const authenticateToken = (req, res, next) => {
       });
     }
     try {
-      const { getUserById } = await import('../db.js');
       const dbUser = await getUserById(user.id || user.userId);
       if (dbUser) {
         req.user = {

@@ -1,6 +1,7 @@
 import {
   AlertTriangle,
   Briefcase,
+  Cable,
   Car,
   FileCheck,
   FileText,
@@ -35,6 +36,7 @@ const RECORD_ICONS: Record<string, LucideIcon> = {
   hr_employee: UsersIcon,
   maintenance: Wrench,
   wip_entry: ListTodo,
+  ip_circuit: Cable,
 };
 
 export function iconForRecordType(recordType: string): LucideIcon {

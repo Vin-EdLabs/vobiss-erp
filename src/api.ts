@@ -494,6 +494,21 @@ export const getUsers = async (): Promise<User[]> => {
   }
 };
 
+export type UserDirectoryEntry = Pick<User, 'id' | 'first_name' | 'last_name' | 'username' | 'role' | 'position' | 'unit'>;
+
+/** Basic id/name directory any authenticated user can read — for "assign to"/engineer pickers
+ *  on self-service request forms (Transport, Fuel, Rental Vehicle). Unlike getUsers(), this
+ *  does not require user-management admin access. */
+export const getUserDirectory = async (): Promise<UserDirectoryEntry[]> => {
+  try {
+    const response = await apiFetch(`${API_URL}/users/directory`);
+    return await response.json();
+  } catch (error) {
+    console.error('Error fetching user directory:', error);
+    throw error;
+  }
+};
+
 export const createUser = async (
   firstName: string,
   lastName: string,
@@ -888,6 +903,7 @@ export const createRequest = async (
     items: { name: string; requested: number }[];
     ticket_id?: number | null;
     linked_cash_request_id?: number | null;
+    linked_references?: { type: string; id: number }[];
   },
   selectedApproverIds?: number[] | null,
   type: 'material_request' | 'item_return' = 'material_request'
@@ -1641,6 +1657,14 @@ export const getRealmApprovers = async (): Promise<RealmApprovers> => {
   return await response.json();
 };
 
+/** Just the approver-id lists (no enriched `people`, no material/cash/finance approvers) — any
+ *  authenticated user can read this to pick default approvers on self-service request forms.
+ *  Unlike getRealmApprovers(), this does not require superadmin access. */
+export const getRequestApproverIds = async (): Promise<RealmApprovers> => {
+  const response = await apiFetch(`${API_URL}/realm/approver-ids`);
+  return await response.json();
+};
+
 export const updateRealmApprovers = async (payload: {
   material_user_ids: number[];
   cash_user_ids: number[];
@@ -2355,6 +2379,19 @@ export const cxApi = {
     return await response.json();
   },
 
+  // Move a ticket to a different unit's queue, unassigned — the receiving unit assigns an owner.
+  escalateTicket: async (
+    ticketId: string,
+    data: { target_unit: 'noc' | 'ip' | 'ts' | 'cx'; reason: string; notes?: string }
+  ): Promise<any> => {
+    const response = await apiFetch(`${API_URL}/cx/tickets/${ticketId}/escalate-unit`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    return await response.json();
+  },
+
   // Dedicated ticket assignment (recommended for assign-only actions)
   assignTicket: async (ticketId: string, assigned_to: number): Promise<any> => {
     const response = await apiFetch(`${API_URL}/cx/tickets/${ticketId}/assign`, {
@@ -2499,18 +2536,29 @@ export const cxApi = {
   getAllSites: async (params?: {
     client_id?: number;
     unassigned?: boolean;
+    assignment?: 'assigned' | 'unassigned';
     connection_status?: string;
     region?: string;
     search?: string;
+    page?: number;
+    pageSize?: number;
   }): Promise<any> => {
     const q = new URLSearchParams();
     if (params?.client_id) q.set('client_id', String(params.client_id));
     if (params?.unassigned) q.set('unassigned', 'true');
+    if (params?.assignment) q.set('assignment', params.assignment);
     if (params?.connection_status) q.set('connection_status', params.connection_status);
     if (params?.region) q.set('region', params.region);
     if (params?.search) q.set('search', params.search);
+    if (params?.page) q.set('page', String(params.page));
+    if (params?.pageSize) q.set('pageSize', String(params.pageSize));
     const suffix = q.toString() ? `?${q.toString()}` : '';
     const response = await apiFetch(`${API_URL}/cx/sites${suffix}`);
+    return await response.json();
+  },
+
+  getSitesStats: async (): Promise<any> => {
+    const response = await apiFetch(`${API_URL}/cx/sites/stats`);
     return await response.json();
   },
 

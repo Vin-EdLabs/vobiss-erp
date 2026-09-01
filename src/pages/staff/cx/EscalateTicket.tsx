@@ -9,14 +9,6 @@ import {
   AlertCircle, CheckCircle, Info, ChevronDown
 } from 'lucide-react';
 import { cxApi } from '../../../api';
-import { API_URL } from '@/lib/api';
-
-interface User {
-  id: number;
-  fullName: string;
-  roles: string[];
-  unit: string | null;
-}
 
 interface TicketSummary {
   ticket_id: string;
@@ -27,6 +19,7 @@ interface TicketSummary {
   project_name: string;
   assignee_name: string;
   assignee_id?: number;
+  escalation_stage?: string;
   current_unit: string;
 }
 
@@ -39,12 +32,12 @@ type TargetUnit = 'CX Support' | 'NOC' | 'IP Ticketing' | 'TX Ticketing';
 const unitConfig: Record<TargetUnit, {
   label: string;
   icon: React.ReactNode;
-  roleKey: string;
+  slug: 'noc' | 'ip' | 'ts' | 'cx';
 }> = {
-  'CX Support': { label: 'CX Support', icon: <Headphones className="w-8 h-8" />, roleKey: 'cx' },
-  'NOC': { label: 'NOC', icon: <Network className="w-8 h-8" />, roleKey: 'noc' },
-  'IP Ticketing': { label: 'IP Ticketing', icon: <Globe className="w-8 h-8" />, roleKey: 'ip' },
-  'TX Ticketing': { label: 'TS Ticketing', icon: <Wrench className="w-8 h-8" />, roleKey: 'field_engineer' },
+  'CX Support': { label: 'CX Support', icon: <Headphones className="w-8 h-8" />, slug: 'cx' },
+  'NOC': { label: 'NOC', icon: <Network className="w-8 h-8" />, slug: 'noc' },
+  'IP Ticketing': { label: 'IP Ticketing', icon: <Globe className="w-8 h-8" />, slug: 'ip' },
+  'TX Ticketing': { label: 'TX Ticketing', icon: <Wrench className="w-8 h-8" />, slug: 'ts' },
 };
 
 const statusColors: Record<string, string> = {
@@ -60,25 +53,19 @@ const priorityColors: Record<string, string> = {
   'CRITICAL': 'bg-red-200 text-red-800',
 };
 
-// FIXED UNIT DETECTION - same logic that worked before
-const getCurrentUnit = (role: string = '', assigneeName: string = ''): string => {
-  const r = (role || '').toLowerCase();
+// Current unit is read directly off the ticket's own escalation_stage — the field the
+// backend actually updates on every escalation — rather than guessed from the (often-null,
+// right after an escalation) assignee's name/role.
+const SLUG_TO_UNIT: Record<string, string> = {
+  cx: 'CX Support',
+  noc: 'NOC',
+  ip: 'IP Ticketing',
+  ts: 'TX Ticketing',
+};
 
-  // Priority 1: Use role (this is what made your old version work)
-  if (r.includes('cx')) return 'CX Support';
-  if (r.includes('noc')) return 'NOC';
-  if (r.includes('ip')) return 'IP Ticketing';
-  if (r.includes('field') || r.includes('tx') || r.includes('ts')) return 'TX Ticketing';
-
-  // Priority 2: Improved name-based fallback (when no role is available)
-  const name = assigneeName.toLowerCase();
-  if (!name || name === 'unassigned') return 'Unassigned';
-  if (name.includes('noc') || name.includes('network') || name.includes('ops') || name.includes('monitor')) return 'NOC';
-  if (name.includes('field') || name.includes('tx') || name.includes('ts') || name.includes('technician') || name.includes('on-site') || name.includes('deployment')) return 'TX Ticketing';
-  if (name.includes('ip') || name.includes('core') || name.includes('routing') || name.includes('engineer ip')) return 'IP Ticketing';
-
-  // Ultimate fallback (only if absolutely nothing matches)
-  return 'CX Support';
+const getCurrentUnit = (escalationStage?: string | null): string => {
+  if (!escalationStage) return 'Unassigned';
+  return SLUG_TO_UNIT[escalationStage] || 'Escalated';
 };
 
 const EscalateTicket: React.FC = () => {
@@ -86,9 +73,6 @@ const EscalateTicket: React.FC = () => {
   const [allTickets, setAllTickets] = useState<TicketSummary[]>([]);
   const [selectedTicket, setSelectedTicket] = useState<FullTicket | null>(null);
   const [targetUnit, setTargetUnit] = useState<TargetUnit>('IP Ticketing');
-  const [teamMembers, setTeamMembers] = useState<User[]>([]);
-  const [allUsers, setAllUsers] = useState<User[]>([]);
-  const [selectedAssignee, setSelectedAssignee] = useState<number | ''>('');
   const [reason, setReason] = useState('');
   const [description, setDescription] = useState('');
   const [loading, setLoading] = useState(true);
@@ -101,18 +85,6 @@ const EscalateTicket: React.FC = () => {
   const navigate = useNavigate();
 
   const currentUnit = unitConfig[targetUnit];
-
-  const loadAllUsers = async () => {
-    try {
-      const token = localStorage.getItem('token');
-      const res = await fetch(`${API_URL}/cx/users`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      if (!res.ok) return;
-      const users: User[] = await res.json();
-      setAllUsers(users);
-    } catch {}
-  };
 
   const fetchAllTickets = async () => {
     try {
@@ -134,7 +106,8 @@ const EscalateTicket: React.FC = () => {
             project_name: t.project_name || 'General',
             assignee_name: t.assignee_name || 'Unassigned',
             assignee_id: assigneeId,
-            current_unit: getCurrentUnit(t.assignee_role || t.role || '', t.assignee_name || ''),
+            escalation_stage: t.escalation_stage,
+            current_unit: getCurrentUnit(t.escalation_stage),
           };
         })
         .sort((a, b) => b.ticket_id.localeCompare(a.ticket_id));
@@ -166,7 +139,8 @@ const EscalateTicket: React.FC = () => {
         assignee_name: assigneeName,
         assignee_id: ticket.assigned_to?.id || ticket.assignee_id,
         description: ticket.description || '',
-        current_unit: getCurrentUnit(ticket.assignee_role || ticket.role || '', assigneeName),
+        escalation_stage: ticket.escalation_stage,
+        current_unit: getCurrentUnit(ticket.escalation_stage),
       });
     } catch {
       setError('Failed to load ticket details');
@@ -174,25 +148,6 @@ const EscalateTicket: React.FC = () => {
       setLoading(false);
     }
   };
-
-  const fetchTeamMembers = async () => {
-    try {
-      const token = localStorage.getItem('token');
-      const res = await fetch(`${API_URL}/cx/users`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      if (!res.ok) throw new Error();
-      const users: User[] = await res.json();
-      const roleKey = currentUnit.roleKey;
-      setTeamMembers(users.filter(u => u.roles.includes(roleKey)));
-    } catch {
-      setTeamMembers([]);
-    }
-  };
-
-  useEffect(() => {
-    loadAllUsers();
-  }, []);
 
   useEffect(() => {
     if (paramTicketId) {
@@ -202,15 +157,9 @@ const EscalateTicket: React.FC = () => {
     }
   }, [paramTicketId]);
 
-  useEffect(() => {
-    if (selectedTicket) {
-      fetchTeamMembers();
-    }
-  }, [targetUnit, selectedTicket]);
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedTicket || !selectedAssignee || !reason.trim()) return;
+    if (!selectedTicket || !reason.trim()) return;
 
     setSubmitting(true);
     setSuccess(null);
@@ -219,17 +168,10 @@ const EscalateTicket: React.FC = () => {
     try {
       const unitName = currentUnit.label;
 
-      await cxApi.updateTicket(selectedTicket.ticket_id, {
-        assigned_to: selectedAssignee,
-        comment: `Escalated to ${unitName}`,
-        visibility: 'public',
-        status: 'IN_PROGRESS',
-        isEscalation: true,
-      });
-
-      await cxApi.updateTicket(selectedTicket.ticket_id, {
-        comment: `**Escalation Details (Internal)**\n\nReason: ${reason.trim()}\nNotes: ${description.trim() || 'None'}`,
-        visibility: 'internal',
+      await cxApi.escalateTicket(selectedTicket.ticket_id, {
+        target_unit: currentUnit.slug,
+        reason: reason.trim(),
+        notes: description.trim(),
       });
 
       setSuccess(`Ticket escalated to ${unitName}`);
@@ -241,21 +183,13 @@ const EscalateTicket: React.FC = () => {
           setSelectedTicket(null);
           setReason('');
           setDescription('');
-          setSelectedAssignee('');
           setSuccess(null);
           await fetchAllTickets();
         }
       }, 1600);
     } catch (err: any) {
       console.error('Escalation failed:', err);
-      const errorMessage = err?.response?.data?.error || err?.message || 'Failed to escalate ticket';
-      const errorCode = err?.response?.data?.code;
-      
-      if (errorCode === 'PERMISSION_DENIED' || errorMessage.includes('Only the assigned person') || errorMessage.includes('can escalate') || errorMessage.includes('can assign')) {
-        setError('You do not have permission to escalate this ticket. Only the currently assigned person or CX members can escalate tickets. The ticket must be assigned to you first, or you must be a CX member.');
-      } else {
-        setError(errorMessage);
-      }
+      setError(err?.message || 'Failed to escalate ticket');
     } finally {
       setSubmitting(false);
     }
@@ -309,15 +243,56 @@ const EscalateTicket: React.FC = () => {
                 <h3 className="font-bold text-[var(--primary-hover)] mb-3">Escalation Rules</h3>
                 <ol className="list-decimal pl-5 space-y-1.5">
                   <li>Choose target team</li>
-                  <li>Select responsible person</li>
                   <li>Write clear internal reason</li>
                   <li>Optional: add technical notes</li>
-                  <li>Submit → ticket moves to new unit</li>
+                  <li>Submit → ticket moves to the new unit, unassigned, for that team to pick up</li>
                 </ol>
               </div>
             )}
           </div>
         </div>
+
+        {/* Currently escalated — unassigned tickets sitting in a unit's queue awaiting pickup */}
+        {!paramTicketId && !selectedTicket && (() => {
+          const awaitingPickup = allTickets.filter(
+            (t) => (!t.assignee_name || t.assignee_name === 'Unassigned') && t.current_unit !== 'Unassigned'
+          );
+          if (!awaitingPickup.length) return null;
+          return (
+            <div className="mb-6 bg-white rounded-xl border shadow-[var(--shadow-md)] overflow-hidden">
+              <div className="p-4 border-b bg-amber-50">
+                <h2 className="font-bold text-gray-900 flex items-center gap-2">
+                  <AlertCircle className="w-5 h-5 text-amber-600" />
+                  Currently Escalated — Awaiting Pickup ({awaitingPickup.length})
+                </h2>
+                <p className="text-xs text-gray-600 mt-0.5">Escalated to a unit but nobody there has claimed it yet.</p>
+              </div>
+              <div className="divide-y">
+                {awaitingPickup.map((t) => (
+                  <button
+                    key={t.ticket_id}
+                    onClick={() => loadTicket(t.ticket_id)}
+                    className="w-full flex items-center justify-between gap-4 p-4 text-left hover:bg-gray-50 transition-colors"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono font-bold text-[var(--primary)] text-sm">#{t.ticket_id}</span>
+                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${priorityColors[t.priority] || 'bg-gray-200 text-gray-800'}`}>
+                          {t.priority}
+                        </span>
+                      </div>
+                      <p className="text-sm text-gray-900 truncate">{t.title}</p>
+                      <p className="text-xs text-gray-500">{t.customer_name}</p>
+                    </div>
+                    <span className="shrink-0 px-3 py-1 rounded-full text-xs font-bold bg-[var(--accent-green-light)] text-[var(--primary)]">
+                      With {t.current_unit}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          );
+        })()}
 
         {/* Ticket list view */}
         {!paramTicketId && !selectedTicket && (
@@ -459,26 +434,6 @@ const EscalateTicket: React.FC = () => {
                     </div>
                   </div>
 
-                  {/* Assignee */}
-                  <div>
-                    <label className="block font-medium text-gray-700 mb-2">
-                      Assign to {currentUnit.label} Member
-                    </label>
-                    <select
-                      value={selectedAssignee}
-                      onChange={e => setSelectedAssignee(e.target.value ? Number(e.target.value) : '')}
-                      className="w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-[var(--primary)]/40 focus:border-[var(--primary)]"
-                      required
-                    >
-                      <option value="">{teamMembers.length === 0 ? 'No members' : 'Select member...'}</option>
-                      {teamMembers.map(m => (
-                        <option key={m.id} value={m.id}>
-                          {m.fullName}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
                   {/* Reason */}
                   <div>
                     <label className="block font-medium text-gray-700 mb-2">
@@ -525,7 +480,7 @@ const EscalateTicket: React.FC = () => {
 
                   <button
                     type="submit"
-                    disabled={submitting || !selectedAssignee || !reason.trim() || teamMembers.length === 0}
+                    disabled={submitting || !reason.trim()}
                     className="w-full py-4 bg-[var(--primary)] text-white rounded-lg font-bold hover:bg-[var(--primary-hover)] disabled:opacity-50 transition text-base"
                   >
                     {submitting ? 'Escalating...' : `Escalate to ${currentUnit.label}`}

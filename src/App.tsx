@@ -14,7 +14,14 @@ import SharedRecordPage from "./pages/SharedRecordPage"; // Public/private share
 // CUSTOMER PORTAL IMPORTS
 import CustomerApp from "./pages/customer/CustomerApp";
 
-const queryClient = new QueryClient();
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      retry: 1,
+      refetchOnWindowFocus: false,
+    },
+  },
+});
 
 const RequireAuth = ({ children }: { children: React.ReactNode }) => {
   const { user } = useAuth();

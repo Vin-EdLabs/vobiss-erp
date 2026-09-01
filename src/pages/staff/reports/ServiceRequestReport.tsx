@@ -15,7 +15,7 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
-import { listProjectRequests, type ProjectRequest } from '@/api/project';
+import { listProjectRequests, listSalesRequests, listDesignRequests, type ProjectRequest } from '@/api/project';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -25,19 +25,28 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { ServiceRequestReportButton } from '@/components/production/ServiceRequestReportPanel';
 
-const REPORT_UNITS = [
-  { slug: 'project', label: 'Project' },
-  { slug: 'ts', label: 'TS' },
-  { slug: 'ip', label: 'IP' },
-  { slug: 'noc', label: 'NOC' },
-] as const;
+/** The 360° Service Request Flow's real stages, keyed off current_stage (not "which endpoint
+ *  returned the row") — accurate regardless of overlap between the sales/design/unit list APIs. */
+const STAGE_UNITS: Record<string, { slug: string; label: string }> = {
+  sales: { slug: 'sales', label: 'Sales' },
+  design: { slug: 'design', label: 'Design' },
+  project: { slug: 'project', label: 'Project' },
+  ts: { slug: 'ts', label: 'TX' },
+  ip: { slug: 'ip', label: 'IP' },
+  noc: { slug: 'noc', label: 'NOC' },
+  done: { slug: 'done', label: 'Active' },
+  rejected: { slug: 'rejected', label: 'Rejected' },
+};
+const REPORT_UNITS = Object.values(STAGE_UNITS);
 
 const STATUS_LABELS: Record<string, string> = {
   pending: 'Pending',
   ongoing: 'Ongoing',
   integrated: 'Integrated',
   noc_approved: 'NOC Approved',
+  submitted_to_sales: 'Submitted to Sales',
   completed: 'Completed',
   rejected: 'Rejected',
 };
@@ -47,6 +56,7 @@ const STATUS_COLORS: Record<string, string> = {
   ongoing: '#2563eb',
   integrated: '#06b6d4',
   noc_approved: '#10b981',
+  submitted_to_sales: '#8b5cf6',
   completed: '#059669',
   rejected: '#e11d48',
 };
@@ -87,18 +97,29 @@ export default function ServiceRequestReport() {
     setLoading(true);
     setError(null);
     try {
-      const results = await Promise.allSettled(
-        REPORT_UNITS.map(async (u) => {
-          const data = await listProjectRequests(u.slug);
-          return data.map((request) => ({
-            ...request,
-            report_unit: u.slug,
-            report_unit_label: u.label,
-          }));
-        })
-      );
+      // Every SR-touching source, merged and de-duplicated by id — Project Unit's list already
+      // sees system-wide, but ts/ip/noc/sales/design are queried too so nothing is missed for an
+      // account scoped to just one unit. report_unit/report_unit_label come from the row's own
+      // current_stage (not "which endpoint returned it"), so overlap never produces a wrong label.
+      const results = await Promise.allSettled([
+        listProjectRequests('project'),
+        listProjectRequests('ts'),
+        listProjectRequests('ip'),
+        listProjectRequests('noc'),
+        listSalesRequests(),
+        listDesignRequests(),
+      ]);
 
-      const next = results.flatMap((result) => (result.status === 'fulfilled' ? result.value : []));
+      const merged = new Map<number, ProjectRequest>();
+      for (const result of results) {
+        if (result.status !== 'fulfilled') continue;
+        for (const request of result.value) merged.set(request.id, request);
+      }
+
+      const next: ReportRow[] = Array.from(merged.values()).map((request) => {
+        const stage = STAGE_UNITS[request.current_stage] || { slug: request.current_stage, label: request.current_stage };
+        return { ...request, report_unit: stage.slug, report_unit_label: stage.label };
+      });
       next.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
       setRows(next);
     } catch (err) {
@@ -188,8 +209,8 @@ export default function ServiceRequestReport() {
               <div>
                 <h1 className="text-3xl font-bold">Service Request Report</h1>
                 <p className="mt-2 max-w-3xl text-sm text-cyan-50">
-                  Track service requests across Project, TS, IP, and NOC with status, customer,
-                  stage, value, and completion visibility.
+                  The 360° Service Request Flow, mapped end to end — search any SR across Sales, Design,
+                  Project, TX, IP, and NOC, then open its full lifecycle report.
                 </p>
               </div>
               <Button onClick={() => void load()} variant="secondary" className="bg-white text-slate-900 hover:bg-cyan-50">
@@ -248,7 +269,7 @@ export default function ServiceRequestReport() {
               </div>
             </ChartCard>
 
-            <ChartCard title="Requests By Unit" subtitle="Project, TS, IP, and NOC volume">
+            <ChartCard title="Requests By Stage" subtitle="Volume across every stage of the flow">
               <ResponsiveContainer width="100%" height={260}>
                 <BarChart data={chartData.byUnit}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
@@ -286,10 +307,10 @@ export default function ServiceRequestReport() {
             </div>
             <Select value={unit} onValueChange={setUnit}>
               <SelectTrigger>
-                <SelectValue placeholder="Unit" />
+                <SelectValue placeholder="Stage" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">All units</SelectItem>
+                <SelectItem value="all">All stages</SelectItem>
                 {REPORT_UNITS.map((u) => (
                   <SelectItem key={u.slug} value={u.slug}>{u.label}</SelectItem>
                 ))}
@@ -320,7 +341,7 @@ export default function ServiceRequestReport() {
                   <tr>
                     <th className="px-4 py-3">Request</th>
                     <th className="px-4 py-3">Customer / Site</th>
-                    <th className="px-4 py-3">Unit</th>
+                    <th className="px-4 py-3">Stage</th>
                     <th className="px-4 py-3">Status</th>
                     <th className="px-4 py-3">Service</th>
                     <th className="px-4 py-3 text-right">Value</th>
@@ -362,12 +383,15 @@ export default function ServiceRequestReport() {
                         </td>
                         <td className="px-4 py-3 text-slate-600">{formatDate(row.created_at)}</td>
                         <td className="px-4 py-3">
-                          <Link
-                            to={`/project-request/${row.current_stage || row.report_unit}/${row.id}`}
-                            className="text-sm font-semibold text-indigo-600 hover:text-indigo-800"
-                          >
-                            Open
-                          </Link>
+                          <div className="flex items-center gap-3">
+                            <Link
+                              to={`/project-request/${row.id}`}
+                              className="text-sm font-semibold text-indigo-600 hover:text-indigo-800"
+                            >
+                              Open
+                            </Link>
+                            <ServiceRequestReportButton requestId={row.id} variant="ghost" size="sm" />
+                          </div>
                         </td>
                       </tr>
                     ))

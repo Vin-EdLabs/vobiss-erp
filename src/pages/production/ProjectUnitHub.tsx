@@ -1,6 +1,6 @@
 ﻿import React, { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Search, Check, Plus, FileText } from 'lucide-react';
+import { Search, Check, FileText } from 'lucide-react';
 import { ProductionPageShell } from '@/components/production/ProductionPageShell';
 import { ProductionRequestsTable } from '@/components/production/ProductionRequestsTable';
 import { UnitPageHero, PremiumStatGrid, PremiumPanel } from '@/components/production/UnitPageHero';
@@ -99,17 +99,6 @@ export default function ProjectUnitHub() {
           badge={
             !isExecutive && awaitingCount > 0 ? `${awaitingCount} ready to sign off` : undefined
           }
-          actions={
-            isExecutive ? undefined : (
-              <Button
-                className={`${getUnitTheme('project').buttonClass} gap-2`}
-                onClick={() => navigate('/project-request/create')}
-              >
-                <Plus className="h-4 w-4" />
-                New service request
-              </Button>
-            )
-          }
         />
 
         <PremiumStatGrid
@@ -175,18 +164,7 @@ export default function ProjectUnitHub() {
             emptyMessage={
               isExecutive
                 ? 'No service requests match your filters.'
-                : (
-                  <>
-                    No service requests yet.{' '}
-                    <button
-                      type="button"
-                      className="font-medium text-[var(--primary)] hover:underline"
-                      onClick={() => navigate('/project-request/create')}
-                    >
-                      Create one
-                    </button>
-                  </>
-                )
+                : 'No service requests yet. New requests start with Sales.'
             }
             highlightRow={isExecutive ? undefined : canProjectMarkComplete}
             renderExtraActions={

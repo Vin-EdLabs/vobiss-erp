@@ -125,7 +125,7 @@ export async function getRecordChannelId(recordType, recordId) {
 }
 
 export async function linkRecordChatChannel(table, recordPk, channelId) {
-  const allowed = { tickets: 'id', requests: 'id', project_requests: 'id' };
+  const allowed = { tickets: 'id', requests: 'id', project_requests: 'id', project_wip_entries: 'id' };
   if (!allowed[table]) return;
   await pool.query(
     `UPDATE ${table} SET chat_channel_id = $1 WHERE ${allowed[table] === 'id' ? 'id' : 'id'} = $2`,
@@ -323,6 +323,43 @@ export async function ensureProjectRequestThread(projectRequest, io) {
     io,
     tableName: 'project_requests',
     tablePk: projectRequest.id,
+  });
+}
+
+/** A WIP row linked to a Service Request shares that SR's real chat channel rather than getting
+ *  its own — one conversation per project, not two. Standalone (unlinked) WIP rows get a fresh
+ *  channel of their own. */
+export async function ensureWipEntryThread(wipEntry, io) {
+  if (!wipEntry?.id) return null;
+
+  if (wipEntry.project_request_id) {
+    const { rows } = await pool.query('SELECT * FROM project_requests WHERE id = $1', [wipEntry.project_request_id]);
+    const linkedSr = rows[0];
+    if (linkedSr) {
+      const channelId = await ensureProjectRequestThread(linkedSr, io);
+      if (channelId && wipEntry.chat_channel_id !== channelId) {
+        await pool.query('UPDATE project_wip_entries SET chat_channel_id = $1 WHERE id = $2', [channelId, wipEntry.id]);
+      }
+      return channelId;
+    }
+  }
+
+  const existing = wipEntry.chat_channel_id || (await getRecordChannelId('wip_entry', wipEntry.id));
+  if (existing) return existing;
+
+  const displayTitle = `WIP-${String(wipEntry.id).padStart(3, '0')} – ${truncate(wipEntry.site_name || wipEntry.customer_name || 'WIP Entry', 30)}`;
+  const memberIds = await usersByProjectPipelineUnits();
+
+  return createRecordThreadChannel({
+    recordType: 'wip_entry',
+    recordId: wipEntry.id,
+    displayTitle,
+    description: displayTitle,
+    memberIds,
+    createdByUserId: wipEntry.created_by,
+    io,
+    tableName: 'project_wip_entries',
+    tablePk: wipEntry.id,
   });
 }
 

@@ -9,15 +9,15 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-
-const REGIONS = ['Greater Accra', 'Ashanti', 'Western', 'Eastern', 'Central', 'Volta', 'Northern', 'Upper East', 'Upper West', 'Bono', 'Other'];
+import { GHANA_REGIONS, SERVICE_TYPES } from '@/lib/lookups';
 
 const EMPTY_SITE_EDIT = {
   site_name: '',
   site_address: '',
+  location: '',
   region: 'Greater Accra',
   bandwidth: '',
-  service_type: 'Fibre',
+  service_type: SERVICE_TYPES[0],
   ip_address: '',
   connection_status: 'Pending',
 };
@@ -153,9 +153,10 @@ const ClientDetailPage: React.FC = () => {
     setSiteForm({
       site_name: site.site_name || '',
       site_address: site.site_address || '',
-      region: site.region || 'Other',
+      location: site.location || '',
+      region: site.region || GHANA_REGIONS[0],
       bandwidth: site.bandwidth || '',
-      service_type: site.service_type || 'Fibre',
+      service_type: site.service_type || SERVICE_TYPES[0],
       ip_address: site.ip_address || '',
       connection_status: site.connection_status || 'Pending',
     });
@@ -480,12 +481,16 @@ const ClientDetailPage: React.FC = () => {
                               <Label>Region</Label>
                               <Select value={siteForm.region} onValueChange={(v) => setSiteForm((f) => ({ ...f, region: v }))}>
                                 <SelectTrigger><SelectValue /></SelectTrigger>
-                                <SelectContent>{REGIONS.map((r) => <SelectItem key={r} value={r}>{r}</SelectItem>)}</SelectContent>
+                                <SelectContent>{GHANA_REGIONS.map((r) => <SelectItem key={r} value={r}>{r}</SelectItem>)}</SelectContent>
                               </Select>
                             </div>
                             <div className="md:col-span-2">
                               <Label>Address</Label>
                               <Input value={siteForm.site_address} onChange={(e) => setSiteForm((f) => ({ ...f, site_address: e.target.value }))} />
+                            </div>
+                            <div>
+                              <Label>Location / Town</Label>
+                              <Input value={siteForm.location} onChange={(e) => setSiteForm((f) => ({ ...f, location: e.target.value }))} placeholder="e.g. Bogoso" />
                             </div>
                             <div>
                               <Label>Bandwidth</Label>
@@ -496,9 +501,7 @@ const ClientDetailPage: React.FC = () => {
                               <Select value={siteForm.service_type} onValueChange={(v) => setSiteForm((f) => ({ ...f, service_type: v }))}>
                                 <SelectTrigger><SelectValue /></SelectTrigger>
                                 <SelectContent>
-                                  <SelectItem value="Fibre">Fibre</SelectItem>
-                                  <SelectItem value="Wireless">Wireless</SelectItem>
-                                  <SelectItem value="Hybrid">Hybrid</SelectItem>
+                                  {SERVICE_TYPES.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
                                 </SelectContent>
                               </Select>
                             </div>
@@ -534,7 +537,7 @@ const ClientDetailPage: React.FC = () => {
                               <Badge variant="outline" className={connectionClass(site.connection_status)}>{site.connection_status || 'Pending'}</Badge>
                             </div>
                             <p className="mt-1 text-sm text-[var(--text-secondary)]">
-                              {[site.region, site.site_address, site.bandwidth, site.service_type].filter(Boolean).join(' · ') || 'No details'}
+                              {[site.location, site.region, site.site_address, site.bandwidth, site.service_type].filter(Boolean).join(' · ') || 'No details'}
                             </p>
                           </div>
                           <div className="flex shrink-0 gap-2">
@@ -619,7 +622,7 @@ const ClientDetailPage: React.FC = () => {
                       <Badge variant="outline" className={connectionClass(site.connection_status)}>{site.connection_status || 'Pending'}</Badge>
                     </div>
                     <div className="space-y-1 text-sm text-[var(--text-secondary)]">
-                      <p className="flex items-center gap-1"><MapPin className="h-3.5 w-3.5" />{[site.region, site.site_address].filter(Boolean).join(' · ') || 'No address'}</p>
+                      <p className="flex items-center gap-1"><MapPin className="h-3.5 w-3.5" />{[site.location, site.region, site.site_address].filter(Boolean).join(' · ') || 'No address'}</p>
                       <p>{[site.bandwidth, site.service_type].filter(Boolean).join(' · ') || '—'}</p>
                       <p className="font-medium text-[var(--text-primary)]">Tickets: {site.ticket_count ?? 0}</p>
                     </div>

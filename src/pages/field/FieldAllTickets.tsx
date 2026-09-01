@@ -155,7 +155,8 @@ const FieldAllTickets: React.FC = () => {
             assigneePosition.includes('tx') ||
             assigneePosition.includes('ts') ||
             assigneePosition.includes('transmission') ||
-            assigneePosition === 'engineer'
+            assigneePosition === 'engineer' ||
+            t.escalation_stage === 'ts'
           );
         })
         .map((t: any) => ({
@@ -524,7 +525,7 @@ const FieldAllTickets: React.FC = () => {
               <div>
                 <h1 className="text-lg md:text-xl font-black text-slate-900 flex items-center gap-3">
                   <Wrench className="w-7 h-7 text-[var(--primary)]" />
-                  TS Ticketing Queue
+                  TX Ticketing Queue
                 </h1>
                 <p className="text-xs text-slate-600">
                   {tickets.length} total • {filteredTickets.length} shown
@@ -682,7 +683,7 @@ const FieldAllTickets: React.FC = () => {
             {filteredTickets.length === 0 && (
               <div className="py-12 text-center text-gray-500">
                 <Wrench className="w-12 h-12 mx-auto mb-3 opacity-40" />
-                <p className="font-medium">No tickets assigned to TS Ticketing</p>
+                <p className="font-medium">No tickets assigned to TX Ticketing</p>
               </div>
             )}
           </div>

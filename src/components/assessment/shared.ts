@@ -9,6 +9,7 @@ export function formatMinutes(minutes: number | null | undefined): string {
 
 export function formatWorkflowType(t: string | null | undefined): string {
   if (!t) return '—';
+  if (t.toLowerCase() === 'ts' || t.toLowerCase() === 'tx') return 'TX';
   return t.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
 }
 

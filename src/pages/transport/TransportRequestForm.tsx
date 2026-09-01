@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { CheckCircle2, Clock3, FileText, Plus, Search, ShieldCheck, Truck, XCircle } from 'lucide-react';
-import { createTransportRequest, getTransportRequests, getUsers, getRealmApprovers, getWorkflowConfig, type TransportRequest } from '../../api';
+import { createTransportRequest, getTransportRequests, getUserDirectory, getRequestApproverIds, getWorkflowConfig, type TransportRequest } from '../../api';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
@@ -13,7 +13,7 @@ import { referencePayload, type LinkedReference } from '@/lib/referenceLink';
 import { ReferenceLinkPicker } from '@/components/references/ReferenceLinkPicker';
 import { formatOwnReference, type ReferenceSummary } from '@/lib/referenceRegistry';
 import { CopyRefButton } from '@/components/CopyRefButton';
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 
 const statusBadge: Record<string, string> = {
   pending: 'bg-amber-100 text-amber-800 border border-amber-200',
@@ -43,7 +43,14 @@ export default function TransportRequestForm() {
   const [linkedReference, setLinkedReference] = useState<LinkedReference | null>(null);
   const [referenceError, setReferenceError] = useState('');
   const [requireReference, setRequireReference] = useState(false);
-  const [linkedReferences, setLinkedReferences] = useState<ReferenceSummary[]>([]);
+  const location = useLocation();
+  const fieldWorkLinks = (location.state as { fieldWorkLinks?: ReferenceSummary[] } | null)?.fieldWorkLinks;
+  const [linkedReferences, setLinkedReferences] = useState<ReferenceSummary[]>(fieldWorkLinks || []);
+
+  useEffect(() => {
+    if (fieldWorkLinks?.length) setIsFormOpen(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const filteredRequests = useMemo(() => {
     const term = searchTerm.trim().toLowerCase();
@@ -59,8 +66,8 @@ export default function TransportRequestForm() {
       setLoading(true);
       const [requestList, userList, realm, workflow] = await Promise.all([
         getTransportRequests(),
-        getUsers(),
-        getRealmApprovers(),
+        getUserDirectory(),
+        getRequestApproverIds(),
         getWorkflowConfig(),
       ]);
       const visibleEngineers = userList.filter((person) => Number(person.id) !== Number(user?.id));

@@ -31,6 +31,7 @@ function formatMinutes(minutes: number | null): string {
 }
 
 function formatWorkflowType(t: string): string {
+  if (t.toLowerCase() === 'ts' || t.toLowerCase() === 'tx') return 'TX';
   return t.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
 }
 

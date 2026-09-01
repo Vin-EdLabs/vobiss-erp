@@ -93,6 +93,13 @@ const DEFAULT_CONFIG = [
   { workflow_type: 'transport_request', stage_name: 'pending_approval', expected: 30, warning: 25, critical: 30 },
   { workflow_type: 'fuel_request', stage_name: 'pending_approval', expected: 30, warning: 25, critical: 30 },
   { workflow_type: 'vehicle_request', stage_name: 'pending_approval', expected: 30, warning: 25, critical: 30 },
+  { workflow_type: 'field_work', stage_name: 'assigned', expected: 60, warning: 45, critical: 90 },
+  { workflow_type: 'field_work', stage_name: 'travelling', expected: 60, warning: 90, critical: 120 },
+  { workflow_type: 'field_work', stage_name: 'on_site', expected: 240, warning: 300, critical: 480 },
+  { workflow_type: 'field_work', stage_name: 'awaiting_noc', expected: 60, warning: 120, critical: 240 },
+  { workflow_type: 'field_work', stage_name: 'awaiting_client', expected: 1440, warning: 2880, critical: 4320 },
+  { workflow_type: 'ip_circuit_request', stage_name: 'ip_manager', expected: 60, warning: 90, critical: 180 },
+  { workflow_type: 'ip_circuit_request', stage_name: 'awaiting_return', expected: 30, warning: 60, critical: 120 },
 ];
 
 export async function seedDefaultConfig(systemUserId = null) {
@@ -113,6 +120,13 @@ export async function seedDefaultConfig(systemUserId = null) {
  * Records a timing event and maintains the open/closed segment chain for a record.
  * Never throws — fire-and-safe, exactly like logUserAction(). Callers should still
  * .catch(() => {}) defensively since this may be called without awaiting.
+ *
+ * `opts.attributeToUserId` — for pool-style stages (e.g. "pending_approval", with no single
+ * assignee) the segment that closes here almost always has user_id = null, so whoever actually
+ * acted (approved/rejected/issued) would never show up in their own Staff Assessment. Pass the
+ * acting user's id here and a SEPARATE, already-closed segment is recorded for them with the
+ * exact same duration as the segment that just closed — crediting their turnaround time without
+ * disturbing the pool-level segment chain itself.
  */
 export async function recordTimingEvent(opts = {}) {
   try {
@@ -153,6 +167,15 @@ export async function recordTimingEvent(opts = {}) {
          WHERE id = $1`,
         [openSegment.rows[0].id]
       );
+
+      if (opts.attributeToUserId) {
+        const closed = openSegment.rows[0];
+        await pool.query(
+          `INSERT INTO workflow_time_segments (workflow_type, record_id, unit_slug, user_id, stage_name, started_at, ended_at, duration_minutes, is_waiting)
+           VALUES ($1,$2,$3,$4,$5,$6,CURRENT_TIMESTAMP,GREATEST(0, ROUND(EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - $6::timestamp)) / 60)),FALSE)`,
+          [workflowType, recordId, closed.unit_slug, opts.attributeToUserId, closed.stage_name, closed.started_at]
+        );
+      }
     }
 
     if (!TERMINAL_EVENT_TYPES.has(eventType)) {

@@ -45,6 +45,10 @@ import networkAssetsRoutes from './routes/networkAssets.js';
 import incidentNotesRoutes from './routes/incidentNotes.js';
 import nocShiftsRoutes from './routes/nocShifts.js';
 import timeEngineRoutes from './routes/timeEngine.js';
+import fieldWorkRoutes from './routes/fieldWork.js';
+import performanceReportsRoutes from './routes/performanceReports.routes.js';
+import ipUnitRoutes from './routes/ipUnit.js';
+import archiveRoutes from './routes/archive.js';
 import {
   migrateUserRoleConstraint,
   isValidSystemRole,
@@ -70,6 +74,7 @@ import {
   isRealmCashApprover,
 } from './permissions.js';
 import { processAutoEscalations } from './ticketEscalation.js';
+import { runTicketAutoAssignSweep } from './services/ticketAutoAssign.js';
 import { startInboundEmailService } from './inboundEmailService.js';
 import { attachSocketIO } from './realtime/socket.js';
 import { setupChatSocket } from './realtime/chatSocket.js';
@@ -298,6 +303,10 @@ app.use('/api/network-assets', networkAssetsRoutes);
 app.use('/api/noc/incident-notes', incidentNotesRoutes);
 app.use('/api/noc/shifts', nocShiftsRoutes);
 app.use('/api/time-engine', timeEngineRoutes);
+app.use('/api/field-work', fieldWorkRoutes);
+app.use('/api/performance-reports', performanceReportsRoutes);
+app.use('/api/ip-unit', ipUnitRoutes);
+app.use('/api/archive', archiveRoutes);
 /** @deprecated use /api/project-request */
 app.use('/api/production', projectRequestRoutes);
 app.use('/api/chat', chatRoutes);
@@ -1463,7 +1472,7 @@ app.post('/api/transport/requests/:id/approve', authenticateToken, async (req, r
       workflowType: 'transport_request', recordId: request.id,
       eventType: stageToRecord === 'supervisor' ? 'completed' : 'approved',
       stageName: stageToRecord === 'supervisor' ? 'supervisor_approval' : 'pending_approval',
-      triggeredByUserId: req.user.id,
+      triggeredByUserId: req.user.id, attributeToUserId: req.user.id,
     }).catch(() => {});
 
     res.json({ message: stageToRecord === 'supervisor' ? 'Transport request approved by supervisor.' : 'Transport request approved by approver.', request: { id: request.id, status: nextStatus, current_stage: nextCurrentStage } });
@@ -1516,7 +1525,7 @@ app.post('/api/transport/requests/:id/reject', authenticateToken, async (req, re
 
     recordTimingEvent({
       workflowType: 'transport_request', recordId: request.rows[0].id,
-      eventType: 'rejected', stageName: 'pending_approval', triggeredByUserId: req.user.id,
+      eventType: 'rejected', stageName: 'pending_approval', triggeredByUserId: req.user.id, attributeToUserId: req.user.id,
     }).catch(() => {});
 
     res.json({ message: 'Transport request rejected.', request: { id: request.rows[0].id, status: 'rejected', current_stage: isSupervisor ? 'supervisor' : 'approver' } });
@@ -1756,6 +1765,34 @@ app.delete('/api/supervisors/:id', authenticateToken, requireSuperAdmin, async (
   } catch (error) {
     console.error('Error deleting supervisor:', error.stack);
     res.status(error.message === 'Supervisor not found' ? 404 : 500).json({ error: error.message });
+  }
+});
+
+// Narrow, non-admin directory — id/name only, no role/email/other PII — so any authenticated
+// user can populate an "assign to" or "engineer" picker on their own request forms (Transport,
+// Fuel, Rental Vehicle) without needing GET /api/users, which is user-management-admin only.
+app.get('/api/users/directory', authenticateToken, async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT id, first_name, last_name, username, role, position, unit FROM users WHERE deleted_at IS NULL ORDER BY first_name ASC, last_name ASC`
+    );
+    res.json(rows);
+  } catch (error) {
+    console.error('Error fetching user directory:', error.stack);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Just the approver-id lists these self-service request forms need to pick default approvers —
+// not the full Realm config (which also holds material/cash/finance approvers and is
+// superadmin-only via GET /api/realm).
+app.get('/api/realm/approver-ids', authenticateToken, async (req, res) => {
+  try {
+    const realm = await getRealmApprovers();
+    res.json(realm);
+  } catch (error) {
+    console.error('Error fetching realm approver ids:', error.stack);
+    res.status(500).json({ error: error.message });
   }
 });
 
@@ -2290,6 +2327,7 @@ const validateRequestPayload = (requestData = {}, selectedApproverIds = [], requ
 app.post('/api/requests', authenticateToken, async (req, res) => {
   try {
     let requestData, selectedApproverIds, requestType = 'material_request', lineItems = [], ticket_id = null;
+    const linkedReferences = Array.isArray(req.body.linked_references) ? req.body.linked_references : [];
 
     if (req.body.requestData && req.body.selectedApproverIds !== undefined) {
       requestData = req.body.requestData;
@@ -2375,6 +2413,8 @@ app.post('/api/requests', authenticateToken, async (req, res) => {
       workflowType: requestType || 'material_request', recordId: newRequest.id,
       eventType: 'created', stageName: 'pending_approval', triggeredByUserId: req.user.id,
     }).catch(() => {});
+
+    await persistLinkedReferences(requestType || 'material_request', newRequest.id, linkedReferences, req.user.id);
 
     const requestKind =
       requestType === 'cash_request'
@@ -2517,7 +2557,7 @@ app.post('/api/requests/:id/reject', authenticateToken, async (req, res) => {
     });
     recordTimingEvent({
       workflowType: request.type || 'material_request', recordId: Number(req.params.id),
-      eventType: 'rejected', stageName: 'pending_approval', triggeredByUserId: req.user.id,
+      eventType: 'rejected', stageName: 'pending_approval', triggeredByUserId: req.user.id, attributeToUserId: req.user.id,
     }).catch(() => {});
     res.json(result);
   } catch (error) {
@@ -2626,7 +2666,7 @@ app.post('/api/requests/:id/approve', authenticateToken, async (req, res) => {
       workflowType: approvedType, recordId: Number(requestId), eventType: 'approved',
       stageName: stage === 'finance' ? 'finance_processing' : stage === 'director' ? 'director_review' : 'pending_approval',
       toUnitSlug: stage === 'finance' ? 'finance' : null,
-      triggeredByUserId: req.user.id,
+      triggeredByUserId: req.user.id, attributeToUserId: req.user.id,
     }).catch(() => {});
     res.json(result);
   } catch (error) {
@@ -2708,7 +2748,7 @@ app.post('/api/requests/:id/finalize', authenticateToken, async (req, res) => {
     });
     recordTimingEvent({
       workflowType: finalizedType, recordId: Number(req.params.id),
-      eventType: 'completed', stageName: 'execution', triggeredByUserId: req.user.id,
+      eventType: 'completed', stageName: 'execution', triggeredByUserId: req.user.id, attributeToUserId: req.user.id,
     }).catch(() => {});
     res.json(result);
   } catch (error) {
@@ -2752,7 +2792,7 @@ app.post('/api/requests/:id/cash-received', authenticateToken, async (req, res) 
     }
     recordTimingEvent({
       workflowType: 'cash_request', recordId: Number(req.params.id),
-      eventType: 'completed', stageName: 'finance_processing', triggeredByUserId: req.user.id,
+      eventType: 'completed', stageName: 'finance_processing', triggeredByUserId: req.user.id, attributeToUserId: req.user.id,
     }).catch(() => {});
     res.json(result);
   } catch (error) {
@@ -2764,13 +2804,22 @@ app.post('/api/requests/:id/cash-received', authenticateToken, async (req, res) 
 app.get('/api/field/users', authenticateToken, async (req, res) => {
   try {
     const role = String(req.user?.main_role || req.user?.role || '').toLowerCase();
-    const allowed = [
+    // Most real accounts carry the actual job title in `position` ("TX Manager", "IP Supervisor")
+    // with role/main_role left as a generic account type ("admin"/"superadmin"/"user") — a
+    // role-slug-only allowlist silently locks out real TX/NOC/IP staff and managers.
+    const position = String(req.user?.position || '').toLowerCase();
+    const unit = String(req.user?.unit || '').toLowerCase();
+    const units = (Array.isArray(req.user?.units) ? req.user.units : []).map((u) => String(u || '').toLowerCase());
+    const roleAllowed = [
       'superadmin', 'admin', 'hr', 'director', 'cto',
       'field_engineer', 'field_engineer_admin',
       'ts_manager', 'ts_supervisor', 'noc', 'noc_manager', 'noc_supervisor',
       'ip', 'ip_manager', 'ip_supervisor', 'project',
-    ];
-    if (!allowed.includes(role)) {
+    ].includes(role);
+    const positionAllowed = ['director', 'cto'].includes(position)
+      || position.includes('manager') || position.includes('supervisor') || position.includes('engineer');
+    const unitAllowed = ['ts', 'tx', 'noc', 'ip'].includes(unit) || units.some((u) => ['ts', 'tx', 'noc', 'ip'].includes(u));
+    if (!roleAllowed && !positionAllowed && !unitAllowed) {
       return res.status(403).json({ error: 'Access denied' });
     }
     const result = await pool.query(`
@@ -2853,4 +2902,17 @@ server.listen(port, '0.0.0.0', async () => {
   };
   void runSlaSweep();
   setInterval(runSlaSweep, 60 * 1000);
+
+  const runTicketAutoAssign = async () => {
+    try {
+      const { assigned } = await runTicketAutoAssignSweep();
+      if (assigned > 0) {
+        console.log(`[ticket-auto-assign] Assigned ${assigned} idle NOC ticket(s)`);
+      }
+    } catch (e) {
+      console.error('[ticket-auto-assign]', e.message);
+    }
+  };
+  void runTicketAutoAssign();
+  setInterval(runTicketAutoAssign, 60 * 1000);
 });

@@ -95,6 +95,15 @@ async function ensureClientSitesSchema() {
     ALTER TABLE customer_sites ALTER COLUMN customer_id DROP NOT NULL
   `).catch(() => {});
 
+  await pool.query(`
+    DO $$
+    BEGIN
+      IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='customer_sites' AND column_name='location') THEN
+        ALTER TABLE customer_sites ADD COLUMN location VARCHAR(255);
+      END IF;
+    END $$;
+  `);
+
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_customer_sites_customer ON customer_sites(customer_id)`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_customer_sites_status ON customer_sites(connection_status)`);
 
@@ -407,6 +416,7 @@ function siteInsertValues(data = {}) {
   return {
     site_name: data.site_name.trim(),
     site_address: data.site_address?.trim() || null,
+    location: data.location?.trim() || null,
     region: data.region?.trim() || null,
     bandwidth: data.bandwidth?.trim() || null,
     service_type: data.service_type?.trim() || null,
@@ -421,13 +431,14 @@ async function createStandaloneSite(data = {}) {
   const site_code = await nextSiteCode();
   const res = await pool.query(
     `INSERT INTO customer_sites
-      (site_code, customer_id, site_name, site_address, region, bandwidth, service_type, ip_address, connection_status)
-     VALUES ($1,NULL,$2,$3,$4,$5,$6,$7,$8)
+      (site_code, customer_id, site_name, site_address, location, region, bandwidth, service_type, ip_address, connection_status)
+     VALUES ($1,NULL,$2,$3,$4,$5,$6,$7,$8,$9)
      RETURNING *`,
     [
       site_code,
       fields.site_name,
       fields.site_address,
+      fields.location,
       fields.region,
       fields.bandwidth,
       fields.service_type,
@@ -450,14 +461,15 @@ async function createSite(customerId, data = {}) {
   const site_code = await nextSiteCode();
   const res = await pool.query(
     `INSERT INTO customer_sites
-      (site_code, customer_id, site_name, site_address, region, bandwidth, service_type, ip_address, connection_status)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+      (site_code, customer_id, site_name, site_address, location, region, bandwidth, service_type, ip_address, connection_status)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
      RETURNING *`,
     [
       site_code,
       customerId,
       fields.site_name,
       fields.site_address,
+      fields.location,
       fields.region,
       fields.bandwidth,
       fields.service_type,
@@ -473,6 +485,7 @@ async function updateSiteById(siteId, fields = {}) {
   const allowed = [
     'site_name',
     'site_address',
+    'location',
     'region',
     'bandwidth',
     'service_type',
@@ -524,6 +537,7 @@ async function updateSite(customerId, siteId, fields = {}) {
   const allowed = [
     'site_name',
     'site_address',
+    'location',
     'region',
     'bandwidth',
     'service_type',
@@ -556,12 +570,15 @@ async function updateSite(customerId, siteId, fields = {}) {
   return res.rows[0] || null;
 }
 
-async function listAllSites({ client_id, unassigned, connection_status, region, search } = {}) {
+async function listAllSites({ client_id, unassigned, assignment, connection_status, region, search, page, pageSize } = {}) {
   await load();
   const params = [];
   let where = '1=1';
-  if (unassigned === true || unassigned === 'true' || unassigned === '1') {
+  const isUnassigned = unassigned === true || unassigned === 'true' || unassigned === '1' || assignment === 'unassigned';
+  if (isUnassigned) {
     where += ' AND s.customer_id IS NULL';
+  } else if (assignment === 'assigned') {
+    where += ' AND s.customer_id IS NOT NULL';
   } else if (client_id) {
     params.push(Number(client_id));
     where += ` AND s.customer_id = $${params.length}`;
@@ -578,16 +595,49 @@ async function listAllSites({ client_id, unassigned, connection_status, region, 
     params.push(`%${search.trim()}%`);
     where += ` AND (s.site_name ILIKE $${params.length} OR s.site_code ILIKE $${params.length} OR c.customer_name ILIKE $${params.length})`;
   }
+
+  const countRes = await pool.query(
+    `SELECT COUNT(*)::int AS total
+     FROM customer_sites s
+     LEFT JOIN customers c ON c.id = s.customer_id AND c.deleted_at IS NULL
+     WHERE ${where}`,
+    params
+  );
+  const total = countRes.rows[0]?.total || 0;
+
+  const pageParams = [...params];
+  let limitClause = '';
+  const sizeN = Number(pageSize);
+  const pageN = Number(page);
+  if (Number.isFinite(sizeN) && sizeN > 0) {
+    pageParams.push(sizeN);
+    limitClause += ` LIMIT $${pageParams.length}`;
+    const offset = (Number.isFinite(pageN) && pageN > 1 ? pageN - 1 : 0) * sizeN;
+    pageParams.push(offset);
+    limitClause += ` OFFSET $${pageParams.length}`;
+  }
+
   const res = await pool.query(
     `SELECT s.*, c.customer_name AS client_name, c.customer_code AS client_code,
             (SELECT COUNT(*)::int FROM tickets t WHERE t.site_id = s.id) AS ticket_count
      FROM customer_sites s
      LEFT JOIN customers c ON c.id = s.customer_id AND c.deleted_at IS NULL
      WHERE ${where}
-     ORDER BY s.created_at DESC`,
-    params
+     ORDER BY s.created_at DESC${limitClause}`,
+    pageParams
   );
-  return res.rows;
+  return { rows: res.rows, total };
+}
+
+async function getSitesStats() {
+  await load();
+  const res = await pool.query(`
+    SELECT COUNT(*)::int AS total,
+           COUNT(*) FILTER (WHERE customer_id IS NULL)::int AS unassigned
+    FROM customer_sites
+  `);
+  const row = res.rows[0] || { total: 0, unassigned: 0 };
+  return { total: row.total, unassigned: row.unassigned, assigned: row.total - row.unassigned };
 }
 
 async function authenticateClientByEmail(email, password) {
@@ -704,6 +754,7 @@ module.exports = {
   updateSiteById,
   linkSitesToClient,
   listAllSites,
+  getSitesStats,
   authenticateClientByEmail,
   changeClientPassword,
   resetClientPassword,

@@ -207,6 +207,12 @@ router.post('/threads/:recordType/:recordId', async (req, res) => {
       if (!pr) return res.status(404).json({ error: 'Project request not found' });
       const { ensureProjectRequestThread } = await import('../services/chatRecordThreads.js');
       channelId = await ensureProjectRequestThread(pr, io);
+    } else if (recordType === 'wip_entry') {
+      const { rows } = await pool.query('SELECT * FROM project_wip_entries WHERE id = $1 AND deleted_at IS NULL', [parseInt(recordId, 10)]);
+      const wip = rows[0];
+      if (!wip) return res.status(404).json({ error: 'WIP entry not found' });
+      const { ensureWipEntryThread } = await import('../services/chatRecordThreads.js');
+      channelId = await ensureWipEntryThread(wip, io);
     } else {
       return res.status(400).json({ error: 'Unsupported record type' });
     }

@@ -152,7 +152,7 @@ const FieldDashboard: React.FC = () => {
                   onChange={(e) => handleEngineerChange(e.target.value)}
                   className="w-full appearance-none rounded-[var(--radius)] border border-[var(--border-strong)] bg-[var(--surface)] py-2.5 pl-4 pr-12 font-medium text-[var(--text-primary)] focus:border-[var(--primary)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-green-light)] sm:w-80"
                 >
-                  <option value="All Engineers">All TS Engineers</option>
+                  <option value="All Engineers">All TX Engineers</option>
                   {fieldEngineers.map((eng) => (
                     <option key={eng.id} value={eng.fullName}>
                       {eng.fullName} ({eng.username})

@@ -39,6 +39,7 @@ import {
   updateSiteById,
   linkSitesToClient,
   listAllSites,
+  getSitesStats,
   resetClientPassword,
 } from '../db.clients.cjs';
 import { getUserById } from '../db.js';
@@ -152,6 +153,27 @@ function canViewTicket(user, ticket) {
   return getUserRoleSlugs(user).some((role) => roleToStage[role] === ticketStage);
 }
 
+const ESCALATION_UNIT_LABELS = { noc: 'NOC', ip: 'IP Ticketing', ts: 'TX Ticketing', cx: 'CX Support' };
+
+// Who may move a ticket to a different unit: the currently assigned person (their call while
+// they're working it), CX/admin (blanket rights, matches the existing reassignment gate), or a
+// supervisor/manager who belongs to the ticket's CURRENT unit (they can reroute work in their
+// own queue even if they're not personally assigned).
+function canEscalateTicket(user, ticket) {
+  if (isSystemAdminAccount(user)) return true;
+  const roles = getUserRoleSlugs(user);
+  if (roles.some((r) => r.includes('cx'))) return true;
+  if (Number(ticket.assigned_to) === Number(user?.id)) return true;
+  const ticketUnit = canonicalizeTicketUnit(ticket.escalation_stage);
+  const userUnits = getUserUnitSlugs(user);
+  if (ticketUnit && userUnits.includes(ticketUnit)) {
+    const position = normalize(user?.position);
+    if (position.includes('manager') || position.includes('supervisor')) return true;
+    if (roles.some((r) => r.includes('manager') || r.includes('supervisor'))) return true;
+  }
+  return false;
+}
+
 // Registered before the router-wide auth gate below so a valid share token can serve
 // this one read-only detail route without a user session; every other route in this
 // file (including mutations) still requires full authentication.
@@ -255,42 +277,43 @@ async function removeOldRoleConstraint() {
 removeOldRoleConstraint();
 
 // --- TEAM MEMBERS (for ticket assignment dropdown) ---
+// Membership is resolved via effectiveUnitsForUser (handles the units JSONB array, the legacy
+// single `unit` column, and role-based defaults all at once) rather than substring-matching the
+// legacy `role` column alone — that missed real unit staff whose membership only lives in
+// `units`/`main_role`, which is why the NOC dropdown could come back empty despite real NOC users
+// existing.
 router.get('/team-members', async (req, res) => {
   try {
     const result = await pool.query(`
-      SELECT id, first_name, last_name, username, email, role, unit, position
-      FROM users 
-      WHERE (
-        role ILIKE '%cx%' OR 
-        role ILIKE '%noc%' OR 
-        role ILIKE '%ip%' OR 
-        role ILIKE '%field_engineer%' OR 
-        role ILIKE '%approver%' OR 
-        role ILIKE '%director%' OR
-        role ILIKE '%relationship_officer%' OR
-        role ILIKE '%noc_manager%' OR
-        role ILIKE '%noc_supervisor%' OR
-        role ILIKE '%ts_manager%' OR
-        role ILIKE '%ip_manager%' OR
-        role ILIKE '%cto%' OR
-        unit IN ('cx', 'noc', 'ip', 'tx', 'ts') OR
-        LOWER(COALESCE(position, '')) IN ('customer support', 'relationship officer', 'engineer') OR
-        LOWER(COALESCE(position, '')) LIKE '%manager%' OR
-        LOWER(COALESCE(position, '')) LIKE '%supervisor%'
-      )
-      AND deleted_at IS NULL
+      SELECT id, first_name, last_name, username, email, role, main_role, unit, units, position
+      FROM users
+      WHERE deleted_at IS NULL
       ORDER BY first_name, last_name
     `);
 
-    const teamMembers = result.rows.map(user => ({
-      id: user.id,
-      fullName: `${user.first_name || ''} ${user.last_name || ''}`.trim() || user.username,
-      username: user.username,
-      email: user.email,
-      unit: user.unit,
-      position: user.position,
-      role: user.role.includes(',') ? user.role.split(',')[0].trim() : user.role.trim()
-    }));
+    const ESCALATION_CHAIN_ROLES = ['approver', 'director', 'cto', 'relationship_officer'];
+
+    const teamMembers = result.rows
+      .map((user) => {
+        const roleSlug = getUserRoleSlugs(user)[0] || '';
+        return {
+          id: user.id,
+          fullName: `${user.first_name || ''} ${user.last_name || ''}`.trim() || user.username,
+          username: user.username,
+          email: user.email,
+          unit: user.unit,
+          units: getUserUnitSlugs(user),
+          position: user.position,
+          role: roleSlug,
+        };
+      })
+      .filter((m) =>
+        m.units.some((u) => ['cx', 'noc', 'ip', 'ts'].includes(u)) ||
+        ESCALATION_CHAIN_ROLES.includes(m.role) ||
+        ['customer support', 'relationship officer', 'engineer'].includes(String(m.position || '').toLowerCase()) ||
+        String(m.position || '').toLowerCase().includes('manager') ||
+        String(m.position || '').toLowerCase().includes('supervisor')
+      );
 
     res.json(teamMembers);
   } catch (error) {
@@ -647,18 +670,12 @@ router.patch('/tickets/:id', async (req, res) => {
       if (ticketCheck.rowCount > 0 && !ticketCheck.rows[0].assigned_to) {
         // Claim allowed — no extra gate
       } else if (ticketCheck.rowCount > 0 && ticketCheck.rows[0].assigned_to) {
-        const currentAssignee = ticketCheck.rows[0].assigned_to;
-        const userRole = req.authUser.role?.toLowerCase() || '';
-        const userRoles = Array.isArray(req.authUser.roles) ? req.authUser.roles : (req.authUser.roles ? JSON.parse(req.authUser.roles) : []);
-        const isCX = userRole.includes('cx') || userRole === 'cx' || userRoles.some((r) => r.toLowerCase() === 'cx');
-        const isSuperAdmin = userRole.includes('superadmin') || userRoles.some((r) => r.toLowerCase() === 'superadmin');
-        const isAssignedUser = currentAssignee === req.authUser.id;
-        
-        // Only allow if user is CX, SuperAdmin or is the currently assigned user
-        if (!isCX && !isAssignedUser && !isSuperAdmin) {
+        // Same rule as escalation: the current assignee, CX/admin, or a supervisor/manager of
+        // the ticket's current unit may reassign it.
+        if (!canEscalateTicket(req.authUser, ticketCheck.rows[0])) {
           const action = isEscalation ? 'escalate' : 'assign';
-          return res.status(403).json({ 
-            error: `Only the assigned person, CX members, or an administrator can ${action} this ticket.`,
+          return res.status(403).json({
+            error: `Only the assigned person, this unit's supervisor/manager, CX members, or an administrator can ${action} this ticket.`,
             code: 'PERMISSION_DENIED',
             action: action
           });
@@ -851,6 +868,98 @@ router.post('/tickets/:id/send-email', async (req, res) => {
   } catch (err) {
     console.error('Send email error:', err);
     res.status(500).json({ error: err.message || 'Failed to send email' });
+  }
+});
+
+// PATCH /tickets/:id/escalate-unit — move a ticket to a different unit's queue, unassigned.
+// Unlike the old flow, the escalator does NOT pick a person here: the ticket lands unassigned
+// in the target unit and any member of that unit (typically its supervisor/manager) claims it
+// or assigns a specific engineer afterward via the existing assign/claim paths.
+router.patch('/tickets/:id/escalate-unit', async (req, res) => {
+  const { id } = req.params;
+  const targetUnit = canonicalizeTicketUnit(req.body?.target_unit);
+  const reason = String(req.body?.reason || '').trim();
+  const notes = String(req.body?.notes || '').trim();
+
+  if (!Object.prototype.hasOwnProperty.call(ESCALATION_UNIT_LABELS, targetUnit)) {
+    return res.status(400).json({ error: 'A valid target unit is required' });
+  }
+  if (!reason) {
+    return res.status(400).json({ error: 'A reason for escalation is required' });
+  }
+
+  try {
+    const ticketRes = await pool.query(
+      `SELECT id, ticket_id, title, assigned_to, escalation_stage, status FROM tickets WHERE ticket_id = $1`,
+      [id]
+    );
+    const ticket = ticketRes.rows[0];
+    if (!ticket) return res.status(404).json({ error: 'Ticket not found' });
+    if (TICKET_TERMINAL_STATUSES.has(String(ticket.status).toUpperCase())) {
+      return res.status(400).json({ error: 'Cannot escalate a closed or resolved ticket' });
+    }
+    if (!canEscalateTicket(req.authUser, ticket)) {
+      return res.status(403).json({
+        error: "Only the assigned person, this unit's supervisor/manager, CX, or an administrator can escalate this ticket.",
+        code: 'PERMISSION_DENIED',
+        action: 'escalate',
+      });
+    }
+
+    const fromLabel = ESCALATION_UNIT_LABELS[canonicalizeTicketUnit(ticket.escalation_stage)] || (ticket.escalation_stage || 'Unassigned');
+    const toLabel = ESCALATION_UNIT_LABELS[targetUnit];
+    const actorName = `${req.authUser.first_name || ''} ${req.authUser.last_name || ''}`.trim() || req.authUser.username;
+    const actorRole = req.authUser.role?.split(',')[0]?.trim()?.toUpperCase() || 'STAFF';
+
+    await pool.query(
+      `UPDATE tickets SET
+        escalation_stage = $1,
+        assigned_to = NULL,
+        stage_entered_at = CURRENT_TIMESTAMP,
+        stage_accepted_at = NULL,
+        status = CASE WHEN status = 'NEW' THEN 'OPEN' ELSE status END,
+        updated_at = CURRENT_TIMESTAMP
+       WHERE id = $2`,
+      [targetUnit, ticket.id]
+    );
+
+    await pool.query(
+      `INSERT INTO ticket_timeline (ticket_id, action, message, visibility, actor_id, actor_role, actor_name)
+       VALUES ($1, 'ESCALATED', $2, 'public', $3, $4, $5)`,
+      [ticket.id, `Escalated from ${fromLabel} to ${toLabel} — awaiting assignment. Reason: ${reason}`, req.authUser.id, actorRole, actorName]
+    );
+    if (notes) {
+      await pool.query(
+        `INSERT INTO ticket_timeline (ticket_id, action, message, visibility, actor_id, actor_role, actor_name)
+         VALUES ($1, 'COMMENT', $2, 'internal', $3, $4, $5)`,
+        [ticket.id, `Escalation notes: ${notes}`, req.authUser.id, actorRole, actorName]
+      );
+    }
+
+    recordTimingEvent({
+      workflowType: 'ticket', recordId: ticket.id, eventType: 'transferred_to_unit',
+      stageName: targetUnit, toUnitSlug: targetUnit, toUserId: null,
+      triggeredByUserId: req.authUser.id, notes: reason,
+    }).catch(() => {});
+
+    logUserAction(req.authUser, {
+      actionType: 'ticket_escalated', recordType: 'ticket', recordId: ticket.id, recordRef: ticket.ticket_id,
+      description: `${actorName} escalated Ticket #${ticket.ticket_id} from ${fromLabel} to ${toLabel}`,
+    });
+
+    try {
+      const io = getRealtimeIo();
+      await postTicketSystemMessage({ ticketId: ticket.ticket_id, title: ticket.title, actorName, action: 'routed', io });
+    } catch (e) {
+      console.warn('[chat] escalate ticket system message failed:', e.message);
+    }
+
+    const fullTicket = await getTicketByIdForStaff(id);
+    const timeline = await getTicketTimeline(id);
+    res.json({ ticket: fullTicket, timeline });
+  } catch (err) {
+    console.error('PATCH /tickets/:id/escalate-unit error:', err);
+    res.status(500).json({ error: err.message || 'Failed to escalate ticket' });
   }
 });
 
@@ -1201,17 +1310,30 @@ router.patch('/clients/:id/sites', async (req, res) => {
 
 router.get('/sites', async (req, res) => {
   try {
-    const sites = await listAllSites({
+    const { rows, total } = await listAllSites({
       client_id: req.query.client_id || req.query.customer_id,
       unassigned: req.query.unassigned,
+      assignment: req.query.assignment,
       connection_status: req.query.connection_status,
       region: req.query.region,
       search: req.query.search,
+      page: req.query.page,
+      pageSize: req.query.pageSize,
     });
-    res.json({ success: true, data: sites });
+    res.json({ success: true, data: rows, total, page: Number(req.query.page) || 1, pageSize: Number(req.query.pageSize) || total });
   } catch (err) {
     console.error('GET /sites error:', err);
     res.status(500).json({ error: 'Failed to fetch sites' });
+  }
+});
+
+router.get('/sites/stats', async (req, res) => {
+  try {
+    const stats = await getSitesStats();
+    res.json({ success: true, data: stats });
+  } catch (err) {
+    console.error('GET /sites/stats error:', err);
+    res.status(500).json({ error: 'Failed to fetch site stats' });
   }
 });
 

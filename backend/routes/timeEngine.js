@@ -22,7 +22,14 @@ import { buildStaffAssessmentWorkbook, buildTeamAssessmentWorkbook, sendWorkbook
 const router = express.Router();
 
 const TIME_ENGINE_MANAGER_ROLES = [...MANAGER_ROLES, ...SUPERVISOR_ROLES, 'director', 'cto'];
-const isTimeEngineManager = (user) => isSystemAdminAccount(user) || userHasAnyRole(user, TIME_ENGINE_MANAGER_ROLES);
+/** Many real accounts represent "manager/supervisor" via free-text position rather than a role
+ *  slug (e.g. "IP Supervisor") — same gap found and fixed for IP Unit access earlier, and the
+ *  same check ReportsHub.tsx already trusts client-side to decide who can open this report. */
+function hasManagerPosition(user) {
+  const pos = String(user?.position || '').trim().toLowerCase();
+  return pos.includes('manager') || pos.includes('supervisor') || pos === 'director' || pos === 'cto';
+}
+const isTimeEngineManager = (user) => isSystemAdminAccount(user) || userHasAnyRole(user, TIME_ENGINE_MANAGER_ROLES) || hasManagerPosition(user);
 
 /** Admin sees every unit; a unit manager/supervisor is scoped to their own effective units. */
 function managerScope(user) {
@@ -36,16 +43,24 @@ const requireManager = (req, res, next) =>
 const requireAdmin = (req, res, next) =>
   isSystemAdminAccount(req.user) ? next() : res.status(403).json({ error: 'Only System Admins can update workflow time configuration' });
 
-let initialized = false;
+// Shared in-flight promise, not a boolean set after the await — otherwise every request that
+// arrives before the first init finishes (a real burst right after a restart) starts its own
+// parallel init run, and duplicate ALTER TABLE/ADD CONSTRAINT calls race and fail under load.
+let initPromise = null;
 router.use(async (_req, _res, next) => {
   try {
-    if (!initialized) {
-      await ensureTimeEngineTables();
-      await seedDefaultConfig();
-      initialized = true;
+    if (!initPromise) {
+      initPromise = (async () => {
+        await ensureTimeEngineTables();
+        await seedDefaultConfig();
+      })();
     }
+    await initPromise;
     next();
-  } catch (e) { next(e); }
+  } catch (e) {
+    initPromise = null;
+    next(e);
+  }
 });
 router.use(authenticateToken);
 

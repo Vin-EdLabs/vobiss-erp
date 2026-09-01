@@ -61,6 +61,19 @@ const pool = new Pool({
   database: process.env.PG_DATABASE,
   user: process.env.PG_USER,
   password: String(process.env.PG_PASSWORD || ''),
+  // Default (10) was getting saturated under normal concurrent page loads — every page
+  // fires several requests at once (notifications, workspace, dashboard widgets, etc.), and
+  // background intervals (SLA sweep, ticket auto-escalation) compete for the same pool. This
+  // was measured causing multi-second queuing delays on otherwise-fast, correctly-indexed
+  // queries. Postgres here supports up to 100 connections (confirmed via SHOW max_connections)
+  // with typically under 15 in use — raised again ahead of ~200 concurrent staff to leave
+  // real headroom for burst concurrency (everyone loading a dashboard at once, Vobi chat spikes)
+  // while still leaving ~40 connections free for Postgres overhead and any other process.
+  max: 60,
+  // Fail fast instead of hanging forever if the pool is genuinely exhausted — surfaces as a
+  // clear 500 the client can retry, rather than a request that silently stalls for minutes.
+  connectionTimeoutMillis: 10_000,
+  idleTimeoutMillis: 30_000,
 });
 
 pool.on('connect', (client) => {
@@ -437,6 +450,8 @@ export async function initDB() {
     await addColumnIfNotExists('users', 'phone', 'TEXT');
     await addColumnIfNotExists('users', 'department', 'TEXT');
     await addColumnIfNotExists('users', 'avatar_url', 'TEXT');
+    await addColumnIfNotExists('users', 'chat_status_text', 'VARCHAR(100)');
+    await addColumnIfNotExists('users', 'chat_status_emoji', 'VARCHAR(8)');
 
     await migrateUserRoleConstraint(pool);
     

@@ -108,11 +108,18 @@ export interface BreachEntry {
   link: string;
 }
 
+export interface AttendanceSummary {
+  rate: number | null;
+  presentDays: number;
+  totalDays: number;
+}
+
 export interface StaffAssessment {
   user: { id: number; name: string; unit: string | null; role: string | null };
   period: { from: string; to: string };
   previousPeriod: { from: string; to: string };
   score: AssessmentScore;
+  attendance: AttendanceSummary;
   vsUnit: VsUnit | null;
   byWorkflow: ByWorkflowRow[];
   trend: TrendPoint[];

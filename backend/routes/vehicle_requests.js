@@ -659,7 +659,7 @@ router.post('/:id/approve', async (req, res) => {
       eventType: 'approved',
       stageName: allApproved ? 'finance_processing' : 'pending_approval',
       toUnitSlug: allApproved ? 'finance' : null,
-      triggeredByUserId: req.user.id,
+      triggeredByUserId: req.user.id, attributeToUserId: req.user.id,
     }).catch(() => {});
 
     if (!allApproved) {
@@ -739,7 +739,7 @@ router.post('/:id/reject', async (req, res) => {
     });
     recordTimingEvent({
       workflowType: 'vehicle_request', recordId: form.id,
-      eventType: 'rejected', stageName: 'pending_approval', triggeredByUserId: req.user.id,
+      eventType: 'rejected', stageName: 'pending_approval', triggeredByUserId: req.user.id, attributeToUserId: req.user.id,
     }).catch(() => {});
 
     res.json({ message: 'Vehicle request rejected.', form: serializeForm(updated.rows[0]) });
@@ -784,7 +784,7 @@ router.post('/:id/issue', async (req, res) => {
     });
     recordTimingEvent({
       workflowType: 'vehicle_request', recordId: form.id,
-      eventType: 'completed', stageName: 'finance_processing', triggeredByUserId: req.user.id,
+      eventType: 'completed', stageName: 'finance_processing', triggeredByUserId: req.user.id, attributeToUserId: req.user.id,
     }).catch(() => {});
 
     res.json({ message: 'Cash issued for vehicle request.', form: serializeForm(updated.rows[0]) });

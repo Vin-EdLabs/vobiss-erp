@@ -166,6 +166,18 @@ export type ProjectRequest = {
   design_reference?: string;
   is_design_request?: boolean;
   design_materials?: DesignRequestMaterial[];
+  customer_id?: number | null;
+  site_id?: number | null;
+  design_confirmed_at?: string | null;
+  account_manager?: string | null;
+  feasibility_type?: string | null;
+  request_type?: string | null;
+  technical_contact_name?: string | null;
+  technical_contact_email?: string | null;
+  technical_contact_phone?: string | null;
+  site_coordinates?: string | null;
+  ts_notes?: string | null;
+  noc_notes?: string | null;
 };
 
 export type DesignMaterial = {
@@ -256,13 +268,33 @@ export async function submitDesignRequest(id: number, data: Record<string, unkno
   return res.json();
 }
 
+/** "Confirm & Forward to Project" — Sales's review of Design's completed survey
+ *  (current_stage='sales'). Generates the SR's real identity (design_confirmed_at) and moves
+ *  current_stage straight to 'project'. */
+export async function confirmDesignRequest(id: number): Promise<ProjectRequest> {
+  const res = await prjFetch(projectRequestUrl('sales', 'requests', String(id), 'confirm'), { method: 'POST' });
+  return res.json();
+}
+
+/** Sales rejects Design's survey and bounces it back to Design — comment required. */
+export async function rejectSalesReview(id: number, comment: string): Promise<ProjectRequest> {
+  const res = await prjFetch(projectRequestUrl('sales', 'requests', String(id), 'reject'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ comment }) });
+  return res.json();
+}
+
 export async function salesForwardProjectRequest(id: number): Promise<ProjectRequest> {
   const res = await prjFetch(projectRequestUrl('sales', 'requests', String(id), 'forward'), { method: 'POST' });
   return res.json();
 }
 
-export async function projectForwardProjectRequest(id: number, routeToStage: 'ts' | 'ip' | 'noc'): Promise<ProjectRequest> {
-  const res = await prjFetch(projectRequestUrl('requests', String(id), 'project', 'forward'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ route_to_stage: routeToStage }) });
+export type ProjectStageFields = {
+  capacity?: string; bandwidth?: string; cpe?: string; cable_displacement?: string;
+  adss?: string; drop_cable?: string; start_date?: string; completion_date?: string;
+  confirmation_date?: string; mrc?: string | number; nrc?: string | number;
+};
+
+export async function projectForwardProjectRequest(id: number, routeToStage: 'ts' | 'ip' | 'noc', fields?: ProjectStageFields): Promise<ProjectRequest> {
+  const res = await prjFetch(projectRequestUrl('requests', String(id), 'project', 'forward'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ route_to_stage: routeToStage, fields }) });
   return res.json();
 }
 
@@ -387,11 +419,11 @@ export async function uploadProjectRequestAttachment(
   return res.json();
 }
 
-export async function tsAcceptProjectRequest(id: number, routeTo: 'ip' | 'project' = 'ip') {
+export async function tsAcceptProjectRequest(id: number, routeTo: 'ip' | 'project' = 'ip', notes?: string) {
   const res = await prjFetch(projectRequestUrl('requests', String(id), 'ts', 'accept'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ route_to_stage: routeTo }),
+    body: JSON.stringify({ route_to_stage: routeTo, notes }),
   });
   return res.json();
 }
@@ -421,12 +453,11 @@ export async function ipForwardProjectRequest(id: number, data: Record<string, u
   return res.json();
 }
 
-export async function nocApproveProjectRequest(id: number) {
-  const res = await prjPostFirst([
-    `requests/${id}/noc/complete`,
-    `requests/${id}/noc/approve`,
-    `noc-approve/${id}`,
-  ]);
+export async function nocApproveProjectRequest(id: number, notes?: string) {
+  const res = await prjPostFirst(
+    [`requests/${id}/noc/complete`, `requests/${id}/noc/approve`, `noc-approve/${id}`],
+    { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ notes }) }
+  );
   return res.json();
 }
 

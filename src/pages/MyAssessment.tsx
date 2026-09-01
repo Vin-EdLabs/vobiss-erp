@@ -19,7 +19,7 @@ import { UnitRankingTable } from '@/components/assessment/UnitRankingTable';
 import { NotableList } from '@/components/assessment/NotableList';
 import { TrendChart } from '@/components/assessment/TrendChart';
 import { formatMinutes, formatWorkflowType } from '@/components/assessment/shared';
-import { Clock, ListChecks, ShieldCheck, AlertTriangle, Timer, ListTodo } from 'lucide-react';
+import { Clock, ListChecks, ShieldCheck, AlertTriangle, Timer, ListTodo, CalendarCheck } from 'lucide-react';
 
 type PeriodKey = 'this_week' | 'this_month' | 'last_month' | 'custom';
 
@@ -125,13 +125,20 @@ export default function MyAssessment() {
         <>
           <ScoreHero score={data.score} />
 
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-7">
             <StatCard label="Segments Completed" value={data.score.segmentsCompleted} icon={ListChecks} accentIndex={0} />
             <StatCard label="Records Handled" value={data.score.recordsHandled} icon={ListTodo} accentIndex={1} />
             <StatCard label="Avg Time" value={formatMinutes(data.score.avgMinutes)} icon={Clock} accentIndex={3} />
             <StatCard label="Median Time" value={formatMinutes(data.score.medianMinutes)} icon={Timer} accentIndex={3} />
             <StatCard label="SLA Compliance" value={data.score.compliancePct != null ? `${data.score.compliancePct}%` : '—'} icon={ShieldCheck} accentIndex={0} />
             <StatCard label="Critical Breaches" value={data.score.criticalBreaches} icon={AlertTriangle} accentIndex={4} />
+            <StatCard
+              label="Attendance"
+              value={data.attendance?.rate != null ? `${data.attendance.rate}%` : '—'}
+              hint={data.attendance?.totalDays ? `${data.attendance.presentDays} of ${data.attendance.totalDays} days` : 'No attendance recorded'}
+              icon={CalendarCheck}
+              accentIndex={2}
+            />
           </div>
 
           <VsUnitPanel score={data.score} vsUnit={data.vsUnit} />

@@ -1,5 +1,5 @@
 import express from 'express';
-import rateLimit from 'express-rate-limit';
+import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import { authenticateToken } from '../middleware/auth.js';
 import {
   getVobiOverview,
@@ -43,6 +43,12 @@ const vobiLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Too many requests. Please slow down.' },
+  // Per-user, not per-IP — this router requires auth first (router.use(authenticateToken)
+  // above runs before this), so req.user is always populated here. Without this, everyone
+  // behind the same office network/VPN/NAT shares one IP and therefore one 30-req/min budget:
+  // a handful of people chatting with Vobi would silently rate-limit every coworker on the
+  // same connection for the rest of that minute.
+  keyGenerator: (req, res) => (req.user?.id != null ? `user:${req.user.id}` : ipKeyGenerator(req, res)),
 });
 
 function vobiIdentity(req) {

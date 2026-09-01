@@ -13,11 +13,13 @@ import { RecordChatButton } from '@/components/chat/RecordChatButton';
 import { ShareButton } from '@/components/ShareButton';
 import { useSharedView } from '@/context/SharedViewContext';
 import { WorkflowTimeline } from '@/components/timeline/WorkflowTimeline';
+import { FieldWorkPanel } from '@/components/fieldwork/FieldWorkPanel';
 import { buildPreviewTable } from '@/lib/shareRecord';
 import { staffCxTicketPath, toFullTicketNumber } from '@/lib/ticketPaths';
 import { vobiAmbientStore } from '@/stores/vobiAmbientStore';
 import { TicketTagsEditor } from '@/components/tickets/TicketTagsEditor';
 import { TicketFullReportPanel } from '@/components/tickets/TicketFullReportPanel';
+import { TicketUnitBadge } from '@/components/tickets/TicketUnitBadge';
 
 interface MaterialRequest {
   id: number;
@@ -55,6 +57,7 @@ interface Ticket {
   site_name?: string;
   site_code?: string;
   site?: { id?: number; site_name?: string; site_code?: string; connection_status?: string } | null;
+  escalation_stage?: string;
   source?: 'portal' | 'email' | 'phone';
   description?: string;
   creator_name?: string;
@@ -216,10 +219,17 @@ const TicketDetailPage: React.FC = () => {
   useEffect(() => {
     if (ticketRouteId) {
       fetchTicket();
-      fetchTeamMembers();
       fetchLinkedRequests();
     }
   }, [ticketRouteId]);
+
+  // Scoped to whichever unit currently owns the ticket (its real escalation_stage), not the
+  // page you happened to navigate here from — a ticket sitting with IP should only ever offer
+  // IP people to assign, however you got to its detail page.
+  useEffect(() => {
+    fetchTeamMembers();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ticket?.escalation_stage]);
 
   useEffect(() => {
     if (!ticket) return;
@@ -259,6 +269,7 @@ const TicketDetailPage: React.FC = () => {
   };
 
   const fetchTeamMembers = async () => {
+    if (!ticket) return;
     try {
       setLoadingTeam(true);
       const token = localStorage.getItem('token');
@@ -268,20 +279,16 @@ const TicketDetailPage: React.FC = () => {
       if (!response.ok) throw new Error('Failed to load team members');
       const data = await response.json();
 
-      let filtered = data;
-      if (isNOC) {
-        filtered = data.filter((m: any) => m.role?.toLowerCase() === 'noc' || m.role?.toLowerCase().includes('noc'));
-      } else if (isIP) {
-        filtered = data.filter((m: any) =>
-          m.role?.toLowerCase() === 'ip' ||
-          m.role?.toLowerCase().includes('implementation') ||
-          m.role?.toLowerCase().includes('project')
-        );
-      } else if (isField) {
-        filtered = data.filter((m: any) =>
-          ['field_engineer', 'field_engineer_admin'].includes(m.role?.toLowerCase())
-        );
-      }
+      // Scoped to whichever unit currently owns the ticket (its real escalation_stage), read
+      // via the real `units` array the backend resolves through effectiveUnitsForUser (units
+      // JSONB + legacy unit column + role defaults combined) — matching on the legacy single
+      // `role` string alone missed real unit staff whose membership only lived in
+      // `units`/`main_role`, which is why this dropdown could come back empty for a unit that
+      // actually has people in it.
+      const targetUnit = String(ticket.escalation_stage || '').toLowerCase() === 'tx' ? 'ts' : String(ticket.escalation_stage || '').toLowerCase();
+      const filtered = ['noc', 'ip', 'ts', 'cx'].includes(targetUnit)
+        ? data.filter((m: any) => (m.units || []).includes(targetUnit))
+        : data;
 
       setTeamMembers(filtered);
     } catch (err) {
@@ -609,6 +616,7 @@ const TicketDetailPage: React.FC = () => {
                     <span className={`h-3 w-3 rounded-full ${getPriorityColor(ticket.priority)}`}></span>
                     <span className="text-sm font-semibold text-slate-700">{ticket.priority}</span>
                   </div>
+                  <TicketUnitBadge escalationStage={ticket.escalation_stage} />
                 </div>
                 <p className="text-sm text-slate-500 font-mono">{ticket.ticket_id}</p>
                 <div className="mt-3">
@@ -809,6 +817,13 @@ const TicketDetailPage: React.FC = () => {
 
             {!isSharedView && <WorkflowTimeline workflowType="ticket" recordId={ticket.id ?? Number(ticketRouteId)} />}
 
+            {!isSharedView && ['tx', 'ts'].includes(String(ticket.escalation_stage || '').toLowerCase()) && (
+              <FieldWorkPanel
+                sourceType="ticket" sourceId={ticket.id ?? Number(ticketRouteId)}
+                sourceTitle={ticket.title} sourceSiteName={ticket.site_name} sourceClientName={ticket.customer_name}
+              />
+            )}
+
             {linkedRequests.length > 0 && (
               <div className="bg-white rounded-2xl shadow-[var(--shadow-md)] border border-slate-200 p-6">
                 <h2 className="text-lg font-bold text-slate-900 mb-4 flex items-center gap-2">
@@ -977,14 +992,23 @@ const TicketDetailPage: React.FC = () => {
                     </div>
                   )}
                 </div>
-                <button
-                  onClick={() => navigate(`/staff/cx/escalate/${ticket.ticket_id}`)}
-                  className="w-full px-4 py-2 bg-[var(--primary)] text-white rounded-lg text-sm font-medium hover:bg-[var(--primary-hover)]"
-                >
-                  Ticket Escalation
-                </button>
               </div>
             </div>
+            )}
+
+            {!isSharedView && (
+              <div className="bg-white rounded-2xl shadow-[var(--shadow-md)] border border-slate-200 p-6">
+                <h3 className="text-sm font-bold text-slate-900 mb-1">Wrong unit?</h3>
+                <p className="text-xs text-slate-500 mb-3">
+                  Move this ticket to another team — it becomes unassigned there for them to pick up.
+                </p>
+                <button
+                  onClick={() => navigate(`/staff/cx/escalate/${ticket.ticket_id}`)}
+                  className="w-full px-4 py-2 border border-[var(--primary)] text-[var(--primary)] rounded-lg text-sm font-medium hover:bg-[var(--accent-green-light)]"
+                >
+                  Escalate to Another Unit
+                </button>
+              </div>
             )}
 
             {!isSharedView && (ticket.customer_email || ticket.contact_email) && (

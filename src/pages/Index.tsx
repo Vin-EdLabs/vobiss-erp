@@ -100,6 +100,17 @@ import ShiftSchedule from './staff/noc/ShiftSchedule';
 import WorkflowPerformance from './admin/WorkflowPerformance';
 import WorkflowTimeConfig from './admin/WorkflowTimeConfig';
 import MyAssessment from './MyAssessment';
+import FieldWorkList from './staff/field/FieldWorkList';
+import MyFieldWork from './staff/field/MyFieldWork';
+import FieldWorkDetailPage from './staff/field/FieldWorkDetailPage';
+import Archive from './Archive';
+import IpUnitDashboard from './ipUnit/Dashboard';
+import CircuitInventory from './ipUnit/CircuitInventory';
+import AddCircuit from './ipUnit/AddCircuit';
+import CircuitProfile from './ipUnit/CircuitProfile';
+import CircuitRequests from './ipUnit/CircuitRequests';
+import CircuitRequestDetail from './ipUnit/CircuitRequestDetail';
+import IpUnitReports from './ipUnit/Reports';
 import IPDashboard from './staff/ip/Dashboard';
 import IPAllTickets from './staff/ip/IPAllTickets';
 import FieldTicketDashboard from './staff/field/TicketDashboard';
@@ -120,9 +131,16 @@ import TicketDetail from './customer/TicketDetail';
 import ProductionHub from './production/ProductionHub';
 import ProjectUnitHub from './production/ProjectUnitHub';
 import WipPage from './production/WipPage';
+import PerformanceDashboard from './performance/Dashboard';
+import PerformanceMyReports from './performance/MyReports';
+import PerformanceReportDetail from './performance/ReportDetail';
+import { TeamReportsPage, UnitReviewsPage, ExecutiveReviewPage, HrAccessPage } from './performance/ReviewQueue';
+import PerformanceAssessmentPeriods from './performance/AssessmentPeriods';
+import PerformanceAnalytics from './performance/Analytics';
 import SignoffFormPage, { SignoffFormsList } from './production/SignoffForms';
-import ProductionCreate from './production/ProductionCreate';
 import ProductionDetail from './production/ProductionDetail';
+import ProjectRequestSingleSegmentRoute from './production/ProjectRequestSingleSegmentRoute';
+import ProjectRequestLegacyRedirect from './production/ProjectRequestLegacyRedirect';
 import ProductionUnitsPage from './production/ProductionUnitsPage';
 import DesignUnitPage from './production/DesignUnitPage';
 import DesignConfigurationPage from './production/DesignConfigurationPage';
@@ -168,6 +186,7 @@ import {
   NOC_DASHBOARD_ROLES,
   IP_TICKET_ROLES,
   FIELD_TICKET_ROLES,
+  IP_UNIT_ROLES,
   FINANCE_ROLES,
   INVENTORY_ADMIN_ROLES,
   APPROVER_ROLES,
@@ -194,6 +213,12 @@ import {
 
 /** Mirrors backend/routes/timeEngine.js's TIME_ENGINE_MANAGER_ROLES — system admins always pass via ProtectedRoute's isAdminSuper bypass. */
 const WORKFLOW_TIME_ENGINE_ROLES = ['noc_manager', 'ts_manager', 'ip_manager', 'finance_manager', 'noc_supervisor', 'ts_supervisor', 'ip_supervisor', 'approver', 'director', 'cto'];
+
+// Performance & Report Assessment System — Team Reports/Unit Reviews share one queue page
+// (backend/db/performanceReports.js's listQueueForUser already scopes by the viewer's own
+// tier+unit), so both roles just need to reach the same route.
+const PERFORMANCE_REVIEWER_ROLES = ['noc_supervisor', 'ts_supervisor', 'ip_supervisor', 'noc_manager', 'ts_manager', 'ip_manager', 'director', 'cto'];
+const PERFORMANCE_EXEC_ROLES = ['director', 'cto'];
 
 const Index = () => {
   const { user, ackUnsuspendNotice } = useAuth();
@@ -689,18 +714,10 @@ const Index = () => {
                 }
               />
               <Route
-                path="/project-request/create"
-                element={
-                  <ProtectedRoute allowedRoles={PRODUCTION_ACCESS_ROLES} allowedUnits={['design', 'project', 'sales', 'tx', 'ts', 'ip', 'noc']}>
-                    <ProductionCreate />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
                 path="/project-request/:unitSlug/:id"
                 element={
                   <ProtectedRoute allowedRoles={PRODUCTION_ACCESS_ROLES} allowedUnits={['design', 'project', 'sales', 'tx', 'ts', 'ip', 'noc']}>
-                    <ProductionDetail />
+                    <ProjectRequestLegacyRedirect />
                   </ProtectedRoute>
                 }
               />
@@ -712,14 +729,14 @@ const Index = () => {
                   </ProtectedRoute>
                 }
               />
-              <Route path="/project-unit/wip" element={<ProtectedRoute allowedRoles={PRODUCTION_ACCESS_ROLES}><WipPage /></ProtectedRoute>} />
+              <Route path="/project-unit/wip" element={<ProtectedRoute allowedRoles={PRODUCTION_ACCESS_ROLES} allowedUnits={['design', 'project', 'sales', 'tx', 'ts', 'ip', 'noc']} allowedPositions={['Manager', 'Supervisor', 'Director', 'CTO']}><WipPage /></ProtectedRoute>} />
               <Route path="/project-unit/signoff" element={<ProtectedRoute allowedRoles={PRODUCTION_ACCESS_ROLES}><SignoffFormsList /></ProtectedRoute>} />
               <Route path="/project-unit/signoff/:id" element={<ProtectedRoute allowedRoles={PRODUCTION_ACCESS_ROLES}><SignoffFormPage /></ProtectedRoute>} />
               <Route
                 path="/project-request/:unitSlug"
                 element={
-                  <ProtectedRoute allowedRoles={PRODUCTION_ACCESS_ROLES} allowedUnits={['project', 'sales', 'tx', 'ts', 'ip', 'noc']}>
-                    <ProductionHub />
+                  <ProtectedRoute allowedRoles={PRODUCTION_ACCESS_ROLES} allowedUnits={['design', 'project', 'sales', 'tx', 'ts', 'ip', 'noc']}>
+                    <ProjectRequestSingleSegmentRoute />
                   </ProtectedRoute>
                 }
               />
@@ -920,9 +937,20 @@ const Index = () => {
                 element={<ProtectedRoute allowedRoles={WORKFLOW_TIME_ENGINE_ROLES}><WorkflowPerformance /></ProtectedRoute>}
               />
               <Route path="/my-assessment" element={<ProtectedRoute><MyAssessment /></ProtectedRoute>} />
+              <Route path="/performance-reports/dashboard" element={<ProtectedRoute><PerformanceDashboard /></ProtectedRoute>} />
+              <Route path="/performance-reports/my-reports" element={<ProtectedRoute><PerformanceMyReports /></ProtectedRoute>} />
+              <Route path="/performance-reports/report/:id" element={<ProtectedRoute><PerformanceReportDetail /></ProtectedRoute>} />
+              <Route path="/performance-reports/queue" element={<ProtectedRoute allowedRoles={PERFORMANCE_REVIEWER_ROLES} allowedPositions={['Manager', 'Supervisor']}><TeamReportsPage /></ProtectedRoute>} />
+              <Route path="/performance-reports/team" element={<ProtectedRoute allowedRoles={PERFORMANCE_REVIEWER_ROLES} allowedPositions={['Manager', 'Supervisor']}><TeamReportsPage /></ProtectedRoute>} />
+              <Route path="/performance-reports/unit-reviews" element={<ProtectedRoute allowedRoles={PERFORMANCE_REVIEWER_ROLES} allowedPositions={['Manager', 'Supervisor']}><UnitReviewsPage /></ProtectedRoute>} />
+              <Route path="/performance-reports/executive" element={<ProtectedRoute allowedRoles={PERFORMANCE_EXEC_ROLES} allowedPositions={['Director', 'CTO']}><ExecutiveReviewPage /></ProtectedRoute>} />
+              <Route path="/performance-reports/hr" element={<ProtectedRoute allowedPositions={['HR']} allowedRoles={['hr']}><HrAccessPage /></ProtectedRoute>} />
+              <Route path="/performance-reports/periods" element={<ProtectedRoute allowedRoles={PERFORMANCE_EXEC_ROLES}><PerformanceAssessmentPeriods /></ProtectedRoute>} />
+              <Route path="/performance-reports/analytics" element={<ProtectedRoute allowedRoles={['hr', 'director', 'cto']} allowedPositions={['HR', 'Director', 'CTO']}><PerformanceAnalytics /></ProtectedRoute>} />
+              <Route path="/archive" element={<ProtectedRoute><Archive /></ProtectedRoute>} />
               <Route
                 path="/staff-assessment/:userId"
-                element={<ProtectedRoute allowedRoles={WORKFLOW_TIME_ENGINE_ROLES}><MyAssessment /></ProtectedRoute>}
+                element={<ProtectedRoute allowedRoles={[...WORKFLOW_TIME_ENGINE_ROLES, 'hr']} allowedPositions={['Manager', 'Supervisor', 'Director', 'CTO', 'HR']}><MyAssessment /></ProtectedRoute>}
               />
               <Route
                 path="/settings/workflow-time-config"
@@ -1014,7 +1042,7 @@ const Index = () => {
                 element={
                   <ProtectedRoute
                     allowedRoles={SERVICE_REQUEST_REPORT_ROLES}
-                    allowedPositions={['Director', 'Project Manager', 'TX Manager', 'IP Manager', 'NOC Manager', 'Project Supervisor', 'TX Supervisor', 'IP Supervisor', 'NOC Supervisor']}
+                    allowedPositions={['Director', 'Project Manager', 'TX Manager', 'IP Manager', 'NOC Manager', 'Sales Manager', 'Design Manager', 'Project Supervisor', 'TX Supervisor', 'IP Supervisor', 'NOC Supervisor', 'Design Supervisor']}
                   >
                     <ServiceRequestReport />
                   </ProtectedRoute>
@@ -1183,7 +1211,7 @@ const Index = () => {
                 }
               />
 
-              {/* TS / FIELD TICKETING */}
+              {/* TX / FIELD TICKETING */}
               <Route
                 path="/staff/field/dashboard"
                 element={
@@ -1199,6 +1227,46 @@ const Index = () => {
                     <FieldAllTickets />
                   </ProtectedRoute>
                 }
+              />
+              <Route
+                path="/staff/field/field-work"
+                element={
+                  <ProtectedRoute allowedRoles={FIELD_TICKET_ROLES} allowedUnits={['tx', 'ts']}>
+                    <FieldWorkList />
+                  </ProtectedRoute>
+                }
+              />
+              <Route path="/staff/field/my-field-work" element={<ProtectedRoute><MyFieldWork /></ProtectedRoute>} />
+              <Route path="/staff/field/field-work/:id" element={<ProtectedRoute><FieldWorkDetailPage /></ProtectedRoute>} />
+
+              {/* IP UNIT — circuit inventory, deliberately IP-Unit-only, no general-staff entry point */}
+              <Route
+                path="/ip-unit/dashboard"
+                element={<ProtectedRoute allowedRoles={IP_UNIT_ROLES} allowedUnits={['ip']}><IpUnitDashboard /></ProtectedRoute>}
+              />
+              <Route
+                path="/ip-unit/circuits"
+                element={<ProtectedRoute allowedRoles={IP_UNIT_ROLES} allowedUnits={['ip']}><CircuitInventory /></ProtectedRoute>}
+              />
+              <Route
+                path="/ip-unit/circuits/new"
+                element={<ProtectedRoute allowedRoles={IP_UNIT_ROLES} allowedUnits={['ip']}><AddCircuit /></ProtectedRoute>}
+              />
+              <Route
+                path="/ip-unit/circuits/:id"
+                element={<ProtectedRoute allowedRoles={IP_UNIT_ROLES} allowedUnits={['ip']}><CircuitProfile /></ProtectedRoute>}
+              />
+              <Route
+                path="/ip-unit/requests"
+                element={<ProtectedRoute allowedRoles={IP_UNIT_ROLES} allowedUnits={['ip']}><CircuitRequests /></ProtectedRoute>}
+              />
+              <Route
+                path="/ip-unit/requests/:id"
+                element={<ProtectedRoute allowedRoles={IP_UNIT_ROLES} allowedUnits={['ip']}><CircuitRequestDetail /></ProtectedRoute>}
+              />
+              <Route
+                path="/ip-unit/reports"
+                element={<ProtectedRoute allowedRoles={IP_UNIT_ROLES} allowedUnits={['ip']}><IpUnitReports /></ProtectedRoute>}
               />
 
               {/* CUSTOMER PORTAL */}

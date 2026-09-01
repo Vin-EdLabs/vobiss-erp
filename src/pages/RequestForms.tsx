@@ -9,7 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Checkbox } from "@/components/ui/checkbox";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { userHasAnyRole } from '../config/roles';
 import { vobiAmbientStore } from '@/stores/vobiAmbientStore';
@@ -59,6 +59,13 @@ const RequestForms: React.FC = () => {
   const [items, setItems] = useState<Item[]>([]);
   const [approvers, setApprovers] = useState<Approver[]>([]);
   const { toast } = useToast();
+  const location = useLocation();
+  const fieldWorkLinks = (location.state as { fieldWorkLinks?: { type: string; id: number }[] } | null)?.fieldWorkLinks;
+
+  useEffect(() => {
+    if (fieldWorkLinks?.length) setIsFormOpen(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     vobiAmbientStore.getState().setFormHint('material-request');
@@ -197,6 +204,7 @@ const RequestForms: React.FC = () => {
         items: formData.items,
         ticket_id: formData.ticket_id,
         linked_cash_request_id: formData.linked_cash_request_id,
+        ...(fieldWorkLinks?.length ? { linked_references: fieldWorkLinks } : {}),
       }, formData.selectedApproverIds, 'material_request');
 
       setIsFormOpen(false);

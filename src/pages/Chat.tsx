@@ -65,6 +65,8 @@ import {
   reactToMessage,
   reactToDmMessage,
   createDm,
+  createGroupDm,
+  updateMyChatStatus,
   getChannelMembers,
   createUnitGroup,
   addGroupMembers,
@@ -73,6 +75,8 @@ import {
   pinMessage,
   unpinMessage,
   searchChatMessages,
+  searchChatGlobal,
+  getMessageThread,
   editChatMessage,
   deleteChatMessage,
   getChatRecordContext,
@@ -523,6 +527,36 @@ const Chat: React.FC<{
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [hasMore, setHasMore] = useState(true);
   const [input, setInput] = useState('');
+  const draftRestoreKeyRef = useRef<string | null>(null);
+
+  // Unsent-message drafts, kept per conversation in localStorage so switching away and back
+  // (or a page reload) doesn't lose what you were typing.
+  useEffect(() => {
+    const key = activeChannelId
+      ? `chat-draft:channel:${activeChannelId}`
+      : activeDmId
+        ? `chat-draft:dm:${activeDmId}`
+        : null;
+    draftRestoreKeyRef.current = key;
+    if (!key) return;
+    try {
+      setInput(localStorage.getItem(key) || '');
+    } catch {
+      setInput('');
+    }
+  }, [activeChannelId, activeDmId]);
+
+  useEffect(() => {
+    const key = draftRestoreKeyRef.current;
+    if (!key) return;
+    try {
+      if (input.trim()) localStorage.setItem(key, input);
+      else localStorage.removeItem(key);
+    } catch {
+      /* localStorage unavailable (private browsing, quota) — drafts just won't persist */
+    }
+  }, [input]);
+
   const [replyTo, setReplyTo] = useState<ChatMessage | null>(null);
   const [forwardingMessage, setForwardingMessage] = useState<ChatMessage | null>(null);
   const forwardOriginCacheRef = useRef<Map<string, NonNullable<ChatMessage['forwardedOrigin']>>>(new Map());
@@ -533,7 +567,14 @@ const Chat: React.FC<{
   const [voiceRecording, setVoiceRecording] = useState(false);
   const [typingUser, setTypingUser] = useState<string | null>(null);
   const [onlineIds, setOnlineIds] = useState<Set<number>>(new Set());
+  const [showStatusModal, setShowStatusModal] = useState(false);
+  const [statusTextDraft, setStatusTextDraft] = useState('');
+  const [statusEmojiDraft, setStatusEmojiDraft] = useState('');
+  const [savingStatus, setSavingStatus] = useState(false);
   const [showNewDm, setShowNewDm] = useState(false);
+  const [newDmMode, setNewDmMode] = useState<'single' | 'group'>('single');
+  const [groupDmSelectedIds, setGroupDmSelectedIds] = useState<number[]>([]);
+  const [creatingGroupDm, setCreatingGroupDm] = useState(false);
   const [showCreateGroup, setShowCreateGroup] = useState(false);
   const [groupName, setGroupName] = useState('');
   const [groupDescription, setGroupDescription] = useState('');
@@ -544,6 +585,11 @@ const Chat: React.FC<{
   const [addingMembers, setAddingMembers] = useState(false);
   const [showMembers, setShowMembers] = useState(false);
   const [showContext, setShowContext] = useState(false);
+  const [activeThreadRootId, setActiveThreadRootId] = useState<string | null>(null);
+  const activeThreadRootIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    activeThreadRootIdRef.current = activeThreadRootId;
+  }, [activeThreadRootId]);
   const [recordContext, setRecordContext] = useState<ChatRecordContext | null>(null);
   const [contextLoading, setContextLoading] = useState(false);
   const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
@@ -707,6 +753,45 @@ const Chat: React.FC<{
     queryKey: ['chat-users'],
     queryFn: getChatUsers,
   });
+
+  const myStatus = useMemo(() => users.find((u) => u.id === user?.id), [users, user?.id]);
+
+  const openStatusModal = () => {
+    setStatusTextDraft(myStatus?.status_text || '');
+    setStatusEmojiDraft(myStatus?.status_emoji || '');
+    setShowStatusModal(true);
+  };
+
+  const applyStatusUpdate = (userId: number, statusText: string | null, statusEmoji: string | null) => {
+    queryClient.setQueryData<ChatUser[]>(['chat-users'], (old) =>
+      old?.map((u) => (u.id === userId ? { ...u, status_text: statusText, status_emoji: statusEmoji } : u))
+    );
+    queryClient.invalidateQueries({ queryKey: ['chat-members'] });
+    queryClient.setQueryData<ChatDm[]>(['chat-dms'], (old) =>
+      old?.map((d) =>
+        d.other_user?.id === userId
+          ? { ...d, other_user: { ...d.other_user, status_text: statusText, status_emoji: statusEmoji } }
+          : d
+      )
+    );
+  };
+
+  const handleSaveStatus = async (text: string, emoji: string) => {
+    setSavingStatus(true);
+    try {
+      const saved = await updateMyChatStatus(text.trim() || null, emoji.trim() || null);
+      if (user?.id) applyStatusUpdate(user.id, saved.status_text, saved.status_emoji);
+      setShowStatusModal(false);
+    } catch (e) {
+      toast({
+        title: 'Could not update status',
+        description: e instanceof Error ? e.message : 'Please try again.',
+        variant: 'destructive',
+      });
+    } finally {
+      setSavingStatus(false);
+    }
+  };
 
   const markConversationRead = useCallback(
     async (target: { channelId?: string | null; dmId?: string | null }) => {
@@ -885,6 +970,30 @@ const Chat: React.FC<{
   });
 
   const messageSearchResults = messageSearchData?.messages ?? [];
+
+  const { data: globalSearchData } = useQuery({
+    queryKey: ['chat-global-search', deferredSearch],
+    queryFn: () => searchChatGlobal(deferredSearch),
+    enabled: deferredSearch.length >= 2,
+  });
+
+  const globalMessageResults = useMemo(
+    () => (deferredSearch.length >= 2 ? (globalSearchData?.messages ?? []).slice(0, 20) : []),
+    [deferredSearch, globalSearchData]
+  );
+
+  const { data: threadData, isFetching: threadLoading } = useQuery({
+    queryKey: ['chat-thread', activeThreadRootId],
+    queryFn: () => getMessageThread(activeThreadRootId!),
+    enabled: !!activeThreadRootId,
+  });
+  const threadRoot = threadData?.root ?? null;
+  const threadReplies = threadData?.replies ?? [];
+
+  const openThread = (msg: ChatMessage) => {
+    setShowContext(false);
+    setActiveThreadRootId(msg.id);
+  };
 
   const combinedSearchResults = useMemo(() => {
     const q = messageSearchQuery.trim();
@@ -1207,6 +1316,27 @@ const Chat: React.FC<{
     socket.on('new_message', (msg: ChatMessage) => {
       void (async () => {
         const enriched = await enrichMessageWithForwardOrigin(msg);
+
+        // Thread reply — keep the open thread panel and the parent's "N replies" affordance
+        // live, independent of which branch (own message / active conversation / elsewhere)
+        // handles the rest of this event below.
+        if (enriched.reply_to?.id) {
+          const parentId = enriched.reply_to.id;
+          if (parentId === activeThreadRootIdRef.current) {
+            queryClient.setQueryData<{ root: ChatMessage; replies: ChatMessage[] } | undefined>(
+              ['chat-thread', parentId],
+              (old) => {
+                if (!old) return old;
+                if (old.replies.some((r) => r.id === enriched.id)) return old;
+                return { ...old, replies: [...old.replies, enriched] };
+              }
+            );
+          }
+          setMessages((prev) =>
+            prev.map((m) => (m.id === parentId ? { ...m, thread_count: (m.thread_count ?? 0) + 1 } : m))
+          );
+        }
+
         const isOwnForward =
           enriched.forwarded_from != null &&
           enriched.sender_id != null &&
@@ -1240,6 +1370,20 @@ const Chat: React.FC<{
         queryClient.invalidateQueries({ queryKey: ['chat-unread-total'] });
         emitChatUnreadChanged();
       })();
+    });
+
+    socket.on('user_status_update', (payload: { userId: number; status_text: string | null; status_emoji: string | null }) => {
+      queryClient.setQueryData<ChatUser[]>(['chat-users'], (old) =>
+        old?.map((u) => (u.id === payload.userId ? { ...u, status_text: payload.status_text, status_emoji: payload.status_emoji } : u))
+      );
+      queryClient.invalidateQueries({ queryKey: ['chat-members'] });
+      queryClient.setQueryData<ChatDm[]>(['chat-dms'], (old) =>
+        old?.map((d) =>
+          d.other_user?.id === payload.userId
+            ? { ...d, other_user: { ...d.other_user, status_text: payload.status_text, status_emoji: payload.status_emoji } }
+            : d
+        )
+      );
     });
 
     socket.on('chat:action_required', (payload: ActionRequiredAlert) => {
@@ -1556,6 +1700,11 @@ const Chat: React.FC<{
 
   const unitGroups = customUnitGroups;
 
+  const groupDms = useMemo(
+    () => channels.filter((c) => c.channel_type === 'group_dm').filter((c) => channelMatchesSearch(searchQuery, c)),
+    [channels, searchQuery]
+  );
+
   const filteredDms = useMemo(
     () => dms.filter((d) => dmMatchesSearch(searchQuery, d)),
     [dms, searchQuery]
@@ -1587,8 +1736,10 @@ const Chat: React.FC<{
     categoryChannels.length > 0 ||
     recordThreads.length > 0 ||
     unitGroups.length > 0 ||
+    groupDms.length > 0 ||
     filteredDms.length > 0 ||
-    matchingUsers.length > 0;
+    matchingUsers.length > 0 ||
+    globalMessageResults.length > 0;
 
   const activeCategoryHubName = useMemo(() => {
     if (!activeChannel) return null;
@@ -1666,6 +1817,17 @@ const Chat: React.FC<{
     setSearchParams({ dm: dm.id });
     setReplyTo(null);
     mobileNav.goToThread();
+  };
+
+  const openMessageResult = (msg: ChatMessage) => {
+    if (msg.channel_id) {
+      const ch = channels.find((c) => c.id === msg.channel_id);
+      if (ch) selectChannel(ch);
+    } else if (msg.dm_id) {
+      const dm = dms.find((d) => d.id === msg.dm_id);
+      if (dm) selectDm(dm);
+    }
+    setSidebarSearch('');
   };
 
   const openSavedPanel = () => {
@@ -1916,6 +2078,38 @@ const Chat: React.FC<{
     setSearchParams({ dm: dmId });
   };
 
+  const toggleGroupDmMember = (id: number) => {
+    setGroupDmSelectedIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  };
+
+  const closeNewDmModal = () => {
+    setShowNewDm(false);
+    setNewDmMode('single');
+    setGroupDmSelectedIds([]);
+    setDmSearch('');
+  };
+
+  const handleCreateGroupDm = async () => {
+    if (groupDmSelectedIds.length < 2) return;
+    setCreatingGroupDm(true);
+    try {
+      const { channelId } = await createGroupDm(groupDmSelectedIds);
+      await queryClient.invalidateQueries({ queryKey: ['chat-channels'] });
+      closeNewDmModal();
+      setActiveChannelId(channelId);
+      setActiveDmId(null);
+      setSearchParams({ channel: channelId });
+    } catch (e) {
+      toast({
+        title: 'Could not start group chat',
+        description: e instanceof Error ? e.message : 'Please try again.',
+        variant: 'destructive',
+      });
+    } finally {
+      setCreatingGroupDm(false);
+    }
+  };
+
   const openDmWithUser = async (target: ChatUser) => {
     if (target.id === user?.id) return;
     const existing = dms.find((d) => d.other_user?.id === target.id);
@@ -1963,12 +2157,14 @@ const Chat: React.FC<{
     ? 'Company-wide — everyone in Vobiss can see and post here'
     : activeChannel?.channel_type === 'announcements'
       ? 'Official updates for the whole company'
-      : null;
+      : !activeChannel && activeDm?.other_user?.status_text
+        ? `${activeDm.other_user.status_emoji || ''} ${activeDm.other_user.status_text}`.trim()
+        : null;
 
   const renderChannelButton = (ch: ChatChannel) => {
     const active = ch.id === activeChannelId;
     const isAnnounce = ch.channel_type === 'announcements';
-    const isUnit = ch.channel_type === 'unit';
+    const isUnit = ch.channel_type === 'unit' || ch.channel_type === 'group_dm';
     const isGeneral = isCompanyGeneral(ch);
 
     return (
@@ -2071,6 +2267,18 @@ const Chat: React.FC<{
               <p className="text-[11px] text-gray-500">Vobiss Workspace</p>
             </div>
           </div>
+          <button
+            type="button"
+            onClick={openStatusModal}
+            className="mt-2.5 flex w-full items-center gap-1.5 rounded-md bg-gray-800/40 px-2 py-1.5 text-left text-xs text-gray-400 transition-colors hover:bg-gray-800/70 hover:text-gray-200"
+          >
+            {myStatus?.status_emoji ? (
+              <span>{myStatus.status_emoji}</span>
+            ) : (
+              <Smile className="h-3.5 w-3.5 shrink-0" />
+            )}
+            <span className="truncate">{myStatus?.status_text || 'Set a status'}</span>
+          </button>
         </div>
 
         <div className="px-3 py-3">
@@ -2189,6 +2397,30 @@ const Chat: React.FC<{
             </>
           )}
 
+          {(groupDms.length > 0 || !searchQuery) && (
+            <>
+              <div className="mt-4 flex items-center justify-between px-2 py-1">
+                <p className="chat-section-label text-[10px] font-semibold uppercase tracking-wider text-gray-500">Group Chats</p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setNewDmMode('group');
+                    setShowNewDm(true);
+                  }}
+                  className="rounded p-0.5 text-gray-500 hover:bg-gray-800 hover:text-gray-200"
+                  title="Start group chat"
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                </button>
+              </div>
+              {groupDms.length === 0 && !searchQuery ? (
+                <p className="px-2 py-2 text-xs text-gray-600">No group chats yet</p>
+              ) : (
+                groupDms.map(renderChannelButton)
+              )}
+            </>
+          )}
+
           {(filteredDms.length > 0 || !searchQuery) && (
             <>
               <p className="chat-section-label mt-4 px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-gray-500">
@@ -2221,6 +2453,11 @@ const Chat: React.FC<{
                   />
                 </div>
                 <span className="flex-1 truncate">{other?.name || 'Unknown'}</span>
+                {other?.status_emoji && (
+                  <span className="shrink-0 text-xs" title={other.status_text || undefined}>
+                    {other.status_emoji}
+                  </span>
+                )}
                 {dm.unread_count > 0 && (
                   <span className="h-2 w-2 rounded-full bg-red-500" />
                 )}
@@ -2254,6 +2491,36 @@ const Chat: React.FC<{
               ))}
             </>
           )}
+
+          {globalMessageResults.length > 0 && (
+            <>
+              <p className="chat-section-label mt-4 px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-gray-500">
+                Messages
+              </p>
+              {globalMessageResults.map((msg) => {
+                const source = msg.channel_id
+                  ? channels.find((c) => c.id === msg.channel_id)
+                  : dms.find((d) => d.id === msg.dm_id);
+                const sourceName = msg.channel_id
+                  ? (source as ChatChannel | undefined)?.name || 'Channel'
+                  : (source as ChatDm | undefined)?.other_user?.name || 'Direct message';
+                return (
+                  <button
+                    key={msg.id}
+                    type="button"
+                    onClick={() => openMessageResult(msg)}
+                    className="mb-0.5 flex w-full flex-col items-start gap-0.5 rounded-md px-2.5 py-2 text-left text-[13px] text-gray-300 hover:bg-gray-800/60"
+                  >
+                    <span className="flex w-full items-center justify-between gap-2 text-[10px] text-gray-500">
+                      <span className="truncate font-medium text-gray-400">{sourceName}</span>
+                      <span className="shrink-0">{msg.sender_name}</span>
+                    </span>
+                    <span className="line-clamp-2 w-full truncate text-gray-300">{msg.body}</span>
+                  </button>
+                );
+              })}
+            </>
+          )}
         </div>
 
         <div className="border-t border-gray-800 p-3 space-y-2">
@@ -2269,7 +2536,10 @@ const Chat: React.FC<{
           )}
           <button
             type="button"
-            onClick={() => setShowNewDm(true)}
+            onClick={() => {
+              setNewDmMode('single');
+              setShowNewDm(true);
+            }}
             className="chat-dashed-btn flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-gray-600 py-2 text-xs text-gray-400 transition-colors hover:border-gray-500 hover:text-gray-200"
           >
             <Plus className="h-3.5 w-3.5" />
@@ -2356,7 +2626,9 @@ const Chat: React.FC<{
                     />
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-sm font-medium text-white">{m.name}</p>
-                      <p className="truncate text-[11px] text-gray-500">{m.role}</p>
+                      <p className="truncate text-[11px] text-gray-500">
+                        {m.status_text ? `${m.status_emoji || ''} ${m.status_text}`.trim() : m.role}
+                      </p>
                     </div>
                     {onlineIds.has(m.id) && (
                       <span className="h-2 w-2 shrink-0 rounded-full bg-emerald-400" title="Online" />
@@ -2931,6 +3203,16 @@ const Chat: React.FC<{
                                   ))}
                                 </div>
                               )}
+                              {(msg.thread_count ?? 0) > 0 && (
+                                <button
+                                  type="button"
+                                  onClick={() => openThread(msg)}
+                                  className="mt-1 flex items-center gap-1.5 text-xs text-blue-400 hover:underline"
+                                >
+                                  <MessageCircle className="h-3 w-3" />
+                                  {msg.thread_count} {msg.thread_count === 1 ? 'reply' : 'replies'}
+                                </button>
+                              )}
                             </div>
                           )}
                         </div>
@@ -3117,7 +3399,7 @@ const Chat: React.FC<{
         ) : null}
         </>
         )}
-        {showContext && activeChannel && hasRecordContext && activePanelView === 'chat' && !isVobiChannel && (
+        {showContext && !activeThreadRootId && activeChannel && hasRecordContext && activePanelView === 'chat' && !isVobiChannel && (
           <aside className="chat-context-panel flex w-72 shrink-0 flex-col border-l border-gray-800 bg-[#13151c]">
             <div className="flex items-center justify-between border-b border-gray-800 px-4 py-3">
               <div>
@@ -3174,6 +3456,78 @@ const Chat: React.FC<{
           </aside>
         )}
         </>
+        )}
+
+        {activeThreadRootId && (
+          <aside className="chat-context-panel flex w-80 shrink-0 flex-col border-l border-gray-800 bg-[#13151c]">
+            <div className="flex items-center justify-between border-b border-gray-800 px-4 py-3">
+              <p className="chat-members-title text-sm font-semibold text-white">Thread</p>
+              <button
+                type="button"
+                onClick={() => setActiveThreadRootId(null)}
+                className="rounded p-1 text-gray-400 hover:bg-gray-800 hover:text-white"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-4">
+              {threadLoading && !threadRoot ? (
+                <p className="text-xs text-gray-500">Loading…</p>
+              ) : threadRoot ? (
+                <>
+                  <div className="mb-3">
+                    <div className="flex items-center gap-2">
+                      <UserAvatar
+                        src={threadRoot.sender_avatar_url}
+                        name={threadRoot.sender_name}
+                        colorClass={threadRoot.sender_avatar_color}
+                        className="h-6 w-6 text-[10px] font-bold"
+                      />
+                      <span className="text-xs font-semibold text-white">{threadRoot.sender_name}</span>
+                      <span className="text-[10px] text-gray-500">{formatTime(threadRoot.created_at)}</span>
+                    </div>
+                    <p className="mt-1 whitespace-pre-wrap text-sm text-gray-300">{renderBody(threadRoot.body)}</p>
+                  </div>
+                  <p className="mb-2 border-t border-gray-800 pt-3 text-[10px] font-semibold uppercase tracking-wider text-gray-500">
+                    {threadReplies.length} {threadReplies.length === 1 ? 'reply' : 'replies'}
+                  </p>
+                  <div className="space-y-3">
+                    {threadReplies.map((reply) => (
+                      <div key={reply.id}>
+                        <div className="flex items-center gap-2">
+                          <UserAvatar
+                            src={reply.sender_avatar_url}
+                            name={reply.sender_name}
+                            colorClass={reply.sender_avatar_color}
+                            className="h-6 w-6 text-[10px] font-bold"
+                          />
+                          <span className="text-xs font-semibold text-white">{reply.sender_name}</span>
+                          <span className="text-[10px] text-gray-500">{formatTime(reply.created_at)}</span>
+                        </div>
+                        <p className="mt-1 whitespace-pre-wrap text-sm text-gray-300">{renderBody(reply.body)}</p>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              ) : (
+                <p className="text-xs text-gray-500">Could not load this thread.</p>
+              )}
+            </div>
+            {canCompose && threadRoot && (
+              <div className="border-t border-gray-800 p-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setReplyTo(threadRoot);
+                    inputRef.current?.focus();
+                  }}
+                  className="w-full rounded-md bg-gray-800/60 px-3 py-2 text-left text-xs text-gray-400 hover:bg-gray-800"
+                >
+                  Reply in thread…
+                </button>
+              </div>
+            )}
+          </aside>
         )}
         </div>
       </div>
@@ -3273,16 +3627,31 @@ const Chat: React.FC<{
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
           <div className="chat-modal-panel w-full max-w-md rounded-xl border border-gray-700 bg-[#13151c] p-4 shadow-xl">
             <div className="mb-3 flex items-center justify-between">
-              <h3 className="chat-modal-title font-semibold text-white">New direct message</h3>
+              <h3 className="chat-modal-title font-semibold text-white">
+                {newDmMode === 'group' ? 'New group chat' : 'New direct message'}
+              </h3>
+              <button type="button" onClick={closeNewDmModal} className="text-gray-400 hover:text-white">
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="mb-3 flex gap-1 rounded-lg bg-[#0f1117] p-1">
               <button
                 type="button"
-                onClick={() => {
-                  setShowNewDm(false);
-                  setDmSearch('');
-                }}
-                className="text-gray-400 hover:text-white"
+                onClick={() => setNewDmMode('single')}
+                className={`flex-1 rounded-md px-2 py-1.5 text-xs font-medium transition-colors ${
+                  newDmMode === 'single' ? 'bg-gray-700 text-white' : 'text-gray-400 hover:text-gray-200'
+                }`}
               >
-                <X className="h-5 w-5" />
+                Direct message
+              </button>
+              <button
+                type="button"
+                onClick={() => setNewDmMode('group')}
+                className={`flex-1 rounded-md px-2 py-1.5 text-xs font-medium transition-colors ${
+                  newDmMode === 'group' ? 'bg-gray-700 text-white' : 'text-gray-400 hover:text-gray-200'
+                }`}
+              >
+                Group chat
               </button>
             </div>
             <input
@@ -3292,26 +3661,140 @@ const Chat: React.FC<{
               className="mb-3 w-full rounded-lg border border-gray-700 bg-[#0f1117] px-3 py-2 text-sm text-gray-200 focus:border-blue-500 focus:outline-none"
             />
             <div className="max-h-64 overflow-y-auto">
-              {filteredDmUsers.map((u) => (
+              {filteredDmUsers.map((u) =>
+                newDmMode === 'group' ? (
+                  <button
+                    key={u.id}
+                    type="button"
+                    onClick={() => toggleGroupDmMember(u.id)}
+                    className="flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left hover:bg-gray-800"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={groupDmSelectedIds.includes(u.id)}
+                      onChange={() => {}}
+                      className="h-4 w-4 shrink-0 rounded border-gray-600 bg-gray-800 text-blue-500"
+                    />
+                    <UserAvatar
+                      src={u.avatar_url}
+                      name={u.name}
+                      colorClass={u.avatar_color}
+                      className="h-8 w-8 text-xs font-bold"
+                    />
+                    <div>
+                      <p className="text-sm font-medium text-white">{u.name}</p>
+                      <p className="text-xs text-gray-500">{u.role}</p>
+                    </div>
+                    {u.is_online && <span className="ml-auto h-2 w-2 rounded-full bg-emerald-400" />}
+                  </button>
+                ) : (
+                  <button
+                    key={u.id}
+                    type="button"
+                    onClick={() => handleNewDm(u)}
+                    className="flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left hover:bg-gray-800"
+                  >
+                    <UserAvatar
+                      src={u.avatar_url}
+                      name={u.name}
+                      colorClass={u.avatar_color}
+                      className="h-8 w-8 text-xs font-bold"
+                    />
+                    <div>
+                      <p className="text-sm font-medium text-white">{u.name}</p>
+                      <p className="text-xs text-gray-500">{u.role}</p>
+                    </div>
+                    {u.is_online && <span className="ml-auto h-2 w-2 rounded-full bg-emerald-400" />}
+                  </button>
+                )
+              )}
+            </div>
+            {newDmMode === 'group' && (
+              <div className="mt-3 border-t border-gray-800 pt-3">
+                <p className="mb-2 text-xs text-gray-500">
+                  {groupDmSelectedIds.length < 2
+                    ? `Select at least ${2 - groupDmSelectedIds.length} more ${groupDmSelectedIds.length === 1 ? 'person' : 'people'}`
+                    : `${groupDmSelectedIds.length} people selected`}
+                </p>
                 <button
-                  key={u.id}
                   type="button"
-                  onClick={() => handleNewDm(u)}
-                  className="flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left hover:bg-gray-800"
+                  disabled={groupDmSelectedIds.length < 2 || creatingGroupDm}
+                  onClick={() => void handleCreateGroupDm()}
+                  className="w-full rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  <UserAvatar
-                    src={u.avatar_url}
-                    name={u.name}
-                    colorClass={u.avatar_color}
-                    className="h-8 w-8 text-xs font-bold"
-                  />
-                  <div>
-                    <p className="text-sm font-medium text-white">{u.name}</p>
-                    <p className="text-xs text-gray-500">{u.role}</p>
-                  </div>
-                  {u.is_online && <span className="ml-auto h-2 w-2 rounded-full bg-emerald-400" />}
+                  {creatingGroupDm ? 'Creating…' : 'Start group chat'}
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {showStatusModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+          <div className="chat-modal-panel w-full max-w-sm rounded-xl border border-gray-700 bg-[#13151c] p-4 shadow-xl">
+            <div className="mb-3 flex items-center justify-between">
+              <h3 className="chat-modal-title font-semibold text-white">Set a status</h3>
+              <button type="button" onClick={() => setShowStatusModal(false)} className="text-gray-400 hover:text-white">
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="mb-3 flex items-center gap-2">
+              <input
+                value={statusEmojiDraft}
+                onChange={(e) => setStatusEmojiDraft(e.target.value)}
+                placeholder="🙂"
+                maxLength={4}
+                className="w-14 rounded-lg border border-gray-700 bg-[#0f1117] px-2 py-2 text-center text-sm text-gray-200 focus:border-blue-500 focus:outline-none"
+              />
+              <input
+                value={statusTextDraft}
+                onChange={(e) => setStatusTextDraft(e.target.value)}
+                placeholder="What's your status?"
+                maxLength={100}
+                className="flex-1 rounded-lg border border-gray-700 bg-[#0f1117] px-3 py-2 text-sm text-gray-200 focus:border-blue-500 focus:outline-none"
+              />
+            </div>
+            <div className="mb-4 flex flex-wrap gap-1.5">
+              {[
+                ['📅', 'In a meeting'],
+                ['🌙', 'Away'],
+                ['⛔', 'Do not disturb'],
+                ['🏖️', 'On leave'],
+                ['🎯', 'Focusing'],
+              ].map(([emoji, text]) => (
+                <button
+                  key={text}
+                  type="button"
+                  onClick={() => {
+                    setStatusEmojiDraft(emoji);
+                    setStatusTextDraft(text);
+                  }}
+                  className="rounded-full border border-gray-700 bg-gray-800/40 px-2.5 py-1 text-xs text-gray-300 hover:bg-gray-800"
+                >
+                  {emoji} {text}
                 </button>
               ))}
+            </div>
+            <div className="flex gap-2">
+              {(myStatus?.status_text || myStatus?.status_emoji) && (
+                <button
+                  type="button"
+                  disabled={savingStatus}
+                  onClick={() => void handleSaveStatus('', '')}
+                  className="rounded-lg border border-gray-700 px-3 py-2 text-sm text-gray-300 hover:bg-gray-800"
+                >
+                  Clear
+                </button>
+              )}
+              <button
+                type="button"
+                disabled={savingStatus}
+                onClick={() => void handleSaveStatus(statusTextDraft, statusEmojiDraft)}
+                className="flex-1 rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {savingStatus ? 'Saving…' : 'Save'}
+              </button>
             </div>
           </div>
         </div>

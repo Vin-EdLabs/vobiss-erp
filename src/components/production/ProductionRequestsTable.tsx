@@ -125,7 +125,7 @@ export function ProductionRequestsTable({
                       />
                     </span>
                     <Button asChild size="sm" variant="outline" className="h-8 border-[var(--border)]">
-                      <Link to={`/project-request/${detailUnitSlug?.(r) ?? unitSlug}/${r.id}`}>
+                      <Link to={`/project-request/${r.id}`}>
                         <Eye className="mr-1 h-3.5 w-3.5" />
                         View
                       </Link>

@@ -257,13 +257,6 @@ export const vobiPageGuides: Record<string, VobiPageGuide> = {
       { label: 'Close with notes', hint: 'Completion notes prevent repeat visits.', visibleTo: VOBI_ALL_STAFF },
     ],
   },
-  '/project-request/create': {
-    pageName: 'Create service request',
-    actions: [
-      { label: 'Fill client/site', hint: 'Correct site identity drives the whole unit pipeline.', visibleTo: VOBI_ALL_STAFF },
-      { label: 'Submit', hint: 'After create, track progress in your unit queue.', visibleTo: VOBI_ALL_STAFF },
-    ],
-  },
   '/assets': {
     pageName: 'Assets registry',
     actions: [

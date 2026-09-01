@@ -42,7 +42,7 @@ export const UNIT_THEMES: Record<string, UnitTheme> = {
     Icon: FolderKanban,
   },
   ts: {
-    label: 'TS — Transmission',
+    label: 'TX — Transmission',
     subtitle: 'Accept or reject new service requests at the transmission stage.',
     ...NOC_LOOK,
     Icon: Radio,

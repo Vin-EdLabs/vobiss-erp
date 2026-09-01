@@ -45,6 +45,8 @@ export interface ChatDm {
     role: string;
     avatar_color: string;
     avatar_url?: string | null;
+    status_text?: string | null;
+    status_emoji?: string | null;
   } | null;
   last_message: {
     body: string;
@@ -124,6 +126,8 @@ export interface ChatMessage {
     attachments: { file_name: string; file_url: string; mime_type: string }[];
   } | null;
   bookmark_id?: string | null;
+  thread_count?: number;
+  thread_last_reply_at?: string | null;
 }
 
 export interface BookmarkSource {
@@ -158,6 +162,16 @@ export interface ChatUser {
   avatar_color: string;
   avatar_url?: string | null;
   is_online: boolean;
+  status_text?: string | null;
+  status_emoji?: string | null;
+}
+
+export async function updateMyChatStatus(statusText: string | null, statusEmoji: string | null): Promise<{ status_text: string | null; status_emoji: string | null }> {
+  return chatFetch('/me/status', {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ status_text: statusText, status_emoji: statusEmoji }),
+  });
 }
 
 export async function getChatUnreadTotal(): Promise<{ total: number; count: number }> {
@@ -240,6 +254,15 @@ export async function createDm(targetUserId: number): Promise<{ dmId: string }> 
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ targetUserId }),
+  });
+}
+
+/** Ad-hoc group chat — open to any user, unlike admin-managed unit groups. */
+export async function createGroupDm(memberIds: number[], name?: string): Promise<{ channelId: string }> {
+  return chatFetch('/group-dms', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ memberIds, name }),
   });
 }
 
@@ -331,6 +354,16 @@ export async function searchChatMessages(
     return chatFetch(`/channels/${target.channelId}/search?q=${q}`);
   }
   return chatFetch(`/dms/${target.dmId}/search?q=${q}`);
+}
+
+/** Cross-channel/cross-DM search over everything the caller is a member of. */
+export async function searchChatGlobal(q: string): Promise<{ messages: ChatMessage[] }> {
+  return chatFetch(`/search?q=${encodeURIComponent(q)}`);
+}
+
+/** A message's full thread — the root plus every reply, chronological. */
+export async function getMessageThread(messageId: string): Promise<{ root: ChatMessage; replies: ChatMessage[] }> {
+  return chatFetch(`/messages/${messageId}/thread`);
 }
 
 export async function editChatMessage(

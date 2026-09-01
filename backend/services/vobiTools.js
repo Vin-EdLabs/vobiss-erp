@@ -4,6 +4,41 @@
 import pool from '../db.js';
 import { getRoleAccess, canSeePayroll, ticketRecordLink, MODULE_LINKS } from './vobiRoles.js';
 import { SchemaType } from '@google/generative-ai';
+import { tierOfUser, unitsOfUser, listMyReports, listQueueForUser, listHrAccessible } from '../db/performanceReports.js';
+import { getStaffAssessment } from './staffAssessment.js';
+
+/** Adapts Vobi's toolCtx shape into the user-like object Performance Reports' own
+ *  tierOfUser/unitsOfUser/listQueueForUser expect — reuses that module's real routing/visibility
+ *  logic instead of re-deriving it here, so Vobi never drifts out of sync with it. */
+function userLikeFrom(userCtx, userId) {
+  const units = Array.isArray(userCtx.units) ? userCtx.units : [];
+  return {
+    id: userId,
+    main_role: userCtx.role,
+    role: userCtx.role,
+    position: userCtx.position,
+    unit: units[0] || null,
+    units,
+  };
+}
+
+/** {} (omit dateFrom/dateTo) means "this month" — getStaffAssessment's own default. */
+function periodRangeFor(period) {
+  const now = new Date();
+  if (period === 'this_week') {
+    const day = now.getDay();
+    const from = new Date(now);
+    from.setDate(now.getDate() - (day === 0 ? 6 : day - 1));
+    from.setHours(0, 0, 0, 0);
+    return { dateFrom: from.toISOString(), dateTo: now.toISOString() };
+  }
+  if (period === 'last_month') {
+    const from = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const to = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59);
+    return { dateFrom: from.toISOString(), dateTo: to.toISOString() };
+  }
+  return {};
+}
 
 const OPEN_TICKET = `status NOT IN ('RESOLVED', 'CLOSED')`;
 
@@ -216,6 +251,121 @@ export const VOBI_TOOL_DECLARATIONS = [
     parameters: {
       type: SchemaType.OBJECT,
       properties: {},
+    },
+  },
+  {
+    name: 'get_my_performance_reports',
+    description: 'The current user\'s own Performance & Reports submissions — status, stage, scores.',
+    parameters: { type: SchemaType.OBJECT, properties: {} },
+  },
+  {
+    name: 'get_performance_review_queue',
+    description: 'Performance reports currently awaiting the current user\'s review (their tier + unit), or HR-accessible reports if the user is HR/exec.',
+    parameters: { type: SchemaType.OBJECT, properties: {} },
+  },
+  {
+    name: 'search_transport_requests',
+    description: 'Search transport, fuel, or rental-vehicle requests by status. Regular staff see only their own; approvers/finance/admins/directors see everyone\'s.',
+    parameters: {
+      type: SchemaType.OBJECT,
+      properties: {
+        kind: { type: SchemaType.STRING, description: '"transport", "fuel", "vehicle", or omit for all three' },
+        status: { type: SchemaType.STRING, description: 'e.g. pending, approved, rejected' },
+        limit: { type: SchemaType.NUMBER },
+      },
+    },
+  },
+  {
+    name: 'get_assessment_score',
+    description: 'Workflow-performance assessment (compliance/speed/volume score + attendance %) for the current user, or for a named staff member if the caller is a manager/director/HR.',
+    parameters: {
+      type: SchemaType.OBJECT,
+      properties: {
+        staff_name: { type: SchemaType.STRING, description: 'Look up someone else\'s assessment by name (managers/HR/directors only)' },
+        period: { type: SchemaType.STRING, description: '"this_week", "this_month", or "last_month" (default this_month)' },
+      },
+    },
+  },
+  {
+    name: 'search_network_assets',
+    description: 'Search Network Assets — PoP register or Equipment inventory.',
+    parameters: {
+      type: SchemaType.OBJECT,
+      properties: {
+        kind: { type: SchemaType.STRING, description: '"pop" or "equipment"' },
+        query: { type: SchemaType.STRING },
+        limit: { type: SchemaType.NUMBER },
+      },
+      required: ['kind'],
+    },
+  },
+  {
+    name: 'get_noc_shift_schedule',
+    description: 'NOC shift schedule (who is on which shift) for today or this week.',
+    parameters: {
+      type: SchemaType.OBJECT,
+      properties: {
+        range: { type: SchemaType.STRING, description: '"today" or "week" (default today)' },
+      },
+    },
+  },
+  {
+    name: 'search_incident_notes',
+    description: 'Search NOC incident notes by site, client, or status.',
+    parameters: {
+      type: SchemaType.OBJECT,
+      properties: {
+        query: { type: SchemaType.STRING },
+        status: { type: SchemaType.STRING, description: 'Open, Resolved, Monitoring, or Escalated' },
+        limit: { type: SchemaType.NUMBER },
+      },
+    },
+  },
+  {
+    name: 'search_ip_circuits',
+    description: 'Search IP Unit circuit inventory by circuit id, client, or status.',
+    parameters: {
+      type: SchemaType.OBJECT,
+      properties: {
+        query: { type: SchemaType.STRING },
+        status: { type: SchemaType.STRING, description: 'active, available, inactive, or decommissioned' },
+        limit: { type: SchemaType.NUMBER },
+      },
+    },
+  },
+  {
+    name: 'search_wip_entries',
+    description: 'Search Project/Production WIP (work-in-progress) entries by customer, site, or status.',
+    parameters: {
+      type: SchemaType.OBJECT,
+      properties: {
+        query: { type: SchemaType.STRING },
+        status: { type: SchemaType.STRING },
+        limit: { type: SchemaType.NUMBER },
+      },
+    },
+  },
+  {
+    name: 'search_signoff_forms',
+    description: 'Search Sign-Off Forms by reference number, site, client, or status.',
+    parameters: {
+      type: SchemaType.OBJECT,
+      properties: {
+        query: { type: SchemaType.STRING },
+        status: { type: SchemaType.STRING, description: 'draft, pending, approved, or rejected' },
+        limit: { type: SchemaType.NUMBER },
+      },
+    },
+  },
+  {
+    name: 'search_archive',
+    description: 'Search the Archive — folders and files the current user has access to (global, their unit, or their own private uploads).',
+    parameters: {
+      type: SchemaType.OBJECT,
+      properties: {
+        query: { type: SchemaType.STRING, description: 'Folder or file name to search for' },
+        limit: { type: SchemaType.NUMBER },
+      },
     },
   },
 ];
@@ -628,6 +778,295 @@ export async function executeVobiTool(name, args = {}, userCtx = {}) {
           recent_mentions: mentions,
           links: { workspace: MODULE_LINKS.workspace.my, chat: MODULE_LINKS.chat.general },
         };
+      }
+
+      case 'get_my_performance_reports': {
+        const reports = await listMyReports(userId).catch(() => []);
+        return {
+          ok: true,
+          reports: reports.map((r) => ({
+            id: r.id, title: r.title, status: r.status, current_stage: r.current_stage,
+            final_score: r.final_score, submitted_at: r.submitted_at,
+            link: `/performance-reports/report/${r.id}`,
+          })),
+          links: { my_reports: MODULE_LINKS.performance_reports.my_reports },
+        };
+      }
+
+      case 'get_performance_review_queue': {
+        const userLike = userLikeFrom(userCtx, userId);
+        const isHrOrExec = ctx.seesAll || ctx.access.hr_full_access;
+        if (isHrOrExec) {
+          const hrRows = await listHrAccessible().catch(() => []);
+          return {
+            ok: true,
+            scope: 'hr_or_executive',
+            reports: hrRows.map((r) => ({
+              id: r.id, employee_name: r.employee_name, unit: r.unit, title: r.title,
+              status: r.status, current_stage: r.current_stage, final_score: r.final_score,
+              link: `/performance-reports/report/${r.id}`,
+            })),
+            links: { hr_access: MODULE_LINKS.performance_reports.hr_access },
+          };
+        }
+        const tier = tierOfUser(userLike);
+        if (tier === 'employee') {
+          return { ok: true, scope: 'employee', reports: [], note: 'This user is not a reviewer for any performance reports — they only see their own submissions (use get_my_performance_reports).' };
+        }
+        const rows = await listQueueForUser(userLike).catch(() => []);
+        return {
+          ok: true,
+          scope: tier,
+          reports: rows.map((r) => ({
+            id: r.id, employee_name: r.employee_name, unit: r.unit, title: r.title,
+            status: r.status, current_stage: r.current_stage,
+            link: `/performance-reports/report/${r.id}`,
+          })),
+          links: { team: MODULE_LINKS.performance_reports.team, unit_reviews: MODULE_LINKS.performance_reports.unit_reviews, executive: MODULE_LINKS.performance_reports.executive },
+        };
+      }
+
+      case 'search_transport_requests': {
+        const kind = String(args.kind || '').trim().toLowerCase();
+        const status = String(args.status || '').trim().toLowerCase();
+        const tLimit = Math.min(Math.max(Number(args.limit) || 10, 1), 25);
+        // Approvers/finance/admin operators/directors see everyone's requests; regular staff see only their own.
+        const canSeeAll = ctx.seesAll || allow('finance', ctx) || /manager|supervisor|approver|director|cto/i.test(String(userCtx.position || ''));
+        const results = {};
+        if (!kind || kind === 'transport') {
+          results.transport = await safeQuery(
+            `SELECT id, requester_name, site_name, client_name, status, created_at
+               FROM transport_requests
+              WHERE deleted_at IS NULL
+                AND ($1::boolean OR requester_id = $2)
+                AND ($3 = '' OR status = $3)
+              ORDER BY created_at DESC LIMIT $4`,
+            [canSeeAll, userId, status, tLimit]
+          );
+        }
+        if (!kind || kind === 'fuel') {
+          results.fuel = await safeQuery(
+            `SELECT id, ref_no, requester_name, vehicle_plate, estimated_amount, status, created_at
+               FROM fuel_requests
+              WHERE deleted_at IS NULL
+                AND ($1::boolean OR requester_id = $2)
+                AND ($3 = '' OR status = $3)
+              ORDER BY created_at DESC LIMIT $4`,
+            [canSeeAll, userId, status, tLimit]
+          );
+        }
+        if (!kind || kind === 'vehicle') {
+          results.vehicle_rental = await safeQuery(
+            `SELECT id, requestor_name, department, purpose, status, created_at
+               FROM vehicle_request_forms
+              WHERE deleted_at IS NULL
+                AND ($1::boolean OR requester_id = $2)
+                AND ($3 = '' OR status = $3)
+              ORDER BY created_at DESC LIMIT $4`,
+            [canSeeAll, userId, status, tLimit]
+          );
+        }
+        return {
+          ok: true,
+          scope: canSeeAll ? 'all_requests' : 'own_requests_only',
+          currency: 'GHS',
+          ...results,
+          links: MODULE_LINKS.transport,
+        };
+      }
+
+      case 'get_assessment_score': {
+        const staffName = String(args.staff_name || '').trim();
+        let targetId = userId;
+        let targetLabel = 'you';
+        if (staffName) {
+          const canLookupOthers = ctx.seesAll || ctx.access.hr_full_access || /manager|supervisor|director|cto/i.test(String(userCtx.position || ''));
+          if (!canLookupOthers) return deny('You can only ask about your own assessment score.');
+          const match = await safeQuery(
+            `SELECT id, first_name, last_name FROM users
+              WHERE deleted_at IS NULL AND (first_name || ' ' || last_name) ILIKE $1
+              ORDER BY first_name LIMIT 1`,
+            [`%${staffName}%`]
+          );
+          if (!match[0]) return deny(`No staff member found matching "${staffName}".`);
+          targetId = match[0].id;
+          targetLabel = `${match[0].first_name} ${match[0].last_name}`;
+        }
+        const period = String(args.period || 'this_month');
+        const range = periodRangeFor(period);
+        const assessment = await getStaffAssessment(targetId, range).catch(() => null);
+        if (!assessment) return deny('Could not load an assessment for that person.');
+        return {
+          ok: true,
+          for: targetLabel,
+          period: assessment.period,
+          score: assessment.score,
+          attendance: assessment.attendance,
+          link: staffName ? `/staff-assessment/${targetId}` : MODULE_LINKS.my_assessment.mine,
+        };
+      }
+
+      case 'search_network_assets': {
+        if (!allow('network_assets', ctx) && !ctx.seesAll) return deny('Network assets are not in your role access.');
+        const kind = String(args.kind || '').trim().toLowerCase();
+        if (kind === 'equipment') {
+          const rows = await safeQuery(
+            `SELECT pe.id, pe.quantity, pe.serial_number, pe.status, ec.category, ec.model_name, p.location_name AS pop_name
+               FROM pop_equipment pe
+               LEFT JOIN equipment_catalogue ec ON ec.id = pe.equipment_catalogue_id
+               LEFT JOIN pops p ON p.id = pe.pop_id
+              WHERE pe.deleted_at IS NULL
+                AND ($1 = '' OR ec.model_name ILIKE $2 OR ec.category ILIKE $2 OR p.location_name ILIKE $2 OR pe.serial_number ILIKE $2)
+              ORDER BY pe.id DESC LIMIT $3`,
+            [q, `%${q}%`, limit]
+          );
+          return { ok: true, kind: 'equipment', equipment: rows, links: MODULE_LINKS.network_assets };
+        }
+        const rows = await safeQuery(
+          `SELECT p.id, p.location_name, p.status, p.pop_type, r.name AS region, t.name AS territory
+             FROM pops p
+             LEFT JOIN regions r ON r.id = p.region_id
+             LEFT JOIN territories t ON t.id = p.territory_id
+            WHERE p.deleted_at IS NULL
+              AND ($1 = '' OR p.location_name ILIKE $2 OR r.name ILIKE $2)
+            ORDER BY p.location_name ASC LIMIT $3`,
+          [q, `%${q}%`, limit]
+        );
+        return { ok: true, kind: 'pop', pops: rows, links: MODULE_LINKS.network_assets };
+      }
+
+      case 'get_noc_shift_schedule': {
+        if (!allow('noc_shifts', ctx) && !ctx.seesAll) return deny('NOC shift schedule is not in your role access.');
+        const range = String(args.range || 'today').trim().toLowerCase();
+        const today = new Date();
+        const from = today.toISOString().slice(0, 10);
+        let to = from;
+        if (range === 'week') {
+          const end = new Date(today);
+          end.setDate(today.getDate() + 6);
+          to = end.toISOString().slice(0, 10);
+        }
+        const rows = await safeQuery(
+          `SELECT s.schedule_date, d.name AS shift_name, d.start_time, d.end_time,
+                  COALESCE(NULLIF(TRIM(COALESCE(u.first_name,'') || ' ' || COALESCE(u.last_name,'')), ''), u.username) AS staff_name,
+                  a.is_shift_lead
+             FROM noc_shift_schedules s
+             JOIN noc_shift_definitions d ON d.id = s.shift_definition_id
+             LEFT JOIN noc_shift_staff_assignments a ON a.schedule_id = s.id
+             LEFT JOIN users u ON u.id = a.user_id
+            WHERE s.schedule_date BETWEEN $1 AND $2 AND s.is_published = true
+            ORDER BY s.schedule_date ASC, d.display_order ASC`,
+          [from, to]
+        );
+        return { ok: true, range, from, to, shifts: rows, links: { schedule: MODULE_LINKS.noc_shifts.schedule } };
+      }
+
+      case 'search_incident_notes': {
+        if (!allow('noc_shifts', ctx) && !allow('tickets_noc', ctx) && !ctx.seesAll) {
+          return deny('Incident notes are not in your role access.');
+        }
+        const status = String(args.status || '').trim();
+        const rows = await safeQuery(
+          `SELECT id, site_name, description, note_date, status, priority, client_name
+             FROM noc_incident_notes
+            WHERE deleted_at IS NULL
+              AND ($1 = '' OR status ILIKE $1)
+              AND ($2 = '' OR site_name ILIKE $3 OR client_name ILIKE $3 OR description ILIKE $3)
+            ORDER BY note_date DESC LIMIT $4`,
+          [status, q, `%${q}%`, limit]
+        );
+        return {
+          ok: true,
+          notes: rows.map((r) => ({ ...r, link: `/noc/incident-notes/${r.id}` })),
+          links: { home: MODULE_LINKS.noc_shifts.incident_notes },
+        };
+      }
+
+      case 'search_ip_circuits': {
+        if (!allow('ip_unit', ctx) && !allow('tickets_ip', ctx) && !ctx.seesAll) {
+          return deny('IP circuit inventory is not in your role access.');
+        }
+        const status = String(args.status || '').trim();
+        const rows = await safeQuery(
+          `SELECT c.id, c.circuit_id, c.status, c.capacity, c.service_type, c.pop_name, c.region, cu.customer_name
+             FROM ip_circuits c
+             LEFT JOIN customers cu ON cu.id = c.client_id
+            WHERE c.deleted_at IS NULL
+              AND ($1 = '' OR c.status = $1)
+              AND ($2 = '' OR c.circuit_id ILIKE $3 OR cu.customer_name ILIKE $3 OR c.pop_name ILIKE $3)
+            ORDER BY c.id DESC LIMIT $4`,
+          [status, q, `%${q}%`, limit]
+        );
+        return {
+          ok: true,
+          circuits: rows.map((r) => ({ ...r, link: `/ip-unit/circuits/${r.id}` })),
+          links: MODULE_LINKS.ip_unit,
+        };
+      }
+
+      case 'search_wip_entries': {
+        if (!allow('production', ctx) && !allow('service_requests', ctx) && !ctx.seesAll) {
+          return deny('WIP entries are not in your role access.');
+        }
+        const status = String(args.status || '').trim();
+        const rows = await safeQuery(
+          `SELECT id, customer_name, site_name, region, service_type, status, created_at
+             FROM project_wip_entries
+            WHERE deleted_at IS NULL
+              AND ($1 = '' OR status ILIKE $1)
+              AND ($2 = '' OR customer_name ILIKE $3 OR site_name ILIKE $3)
+            ORDER BY created_at DESC LIMIT $4`,
+          [status, q, `%${q}%`, limit]
+        );
+        return {
+          ok: true,
+          wip_entries: rows.map((r) => ({ ...r, link: MODULE_LINKS.production.wip })),
+          links: MODULE_LINKS.production,
+        };
+      }
+
+      case 'search_signoff_forms': {
+        if (!allow('production', ctx) && !allow('service_requests', ctx) && !ctx.seesAll) {
+          return deny('Sign-off forms are not in your role access.');
+        }
+        const status = String(args.status || '').trim();
+        const rows = await safeQuery(
+          `SELECT id, reference_no, site_name, status, client_name, created_at
+             FROM project_signoff_forms
+            WHERE ($1 = '' OR status = $1)
+              AND ($2 = '' OR site_name ILIKE $3 OR client_name ILIKE $3 OR reference_no ILIKE $3)
+            ORDER BY created_at DESC LIMIT $4`,
+          [status, q, `%${q}%`, limit]
+        );
+        return {
+          ok: true,
+          signoff_forms: rows.map((r) => ({ ...r, link: `/project-unit/signoff/${r.id}` })),
+          links: MODULE_LINKS.production,
+        };
+      }
+
+      case 'search_archive': {
+        const units = unitsOfUser(userLikeFrom(userCtx, userId));
+        const folderRows = await safeQuery(
+          `SELECT id, name, scope, unit_slug FROM archive_folders
+            WHERE scope = 'global'
+               OR (scope = 'unit' AND unit_slug = ANY($1::text[]))
+               OR (scope = 'private' AND created_by = $2)
+            ORDER BY name ASC`,
+          [units, userId]
+        );
+        const folderIds = folderRows.map((f) => f.id);
+        let fileRows = [];
+        if (q && folderIds.length) {
+          fileRows = await safeQuery(
+            `SELECT id, folder_id, display_name, original_name, extension, size_bytes, created_at
+               FROM archive_files
+              WHERE folder_id = ANY($1::int[]) AND (display_name ILIKE $2 OR original_name ILIKE $2)
+              ORDER BY created_at DESC LIMIT $3`,
+            [folderIds, `%${q}%`, limit]
+          );
+        }
+        return { ok: true, folders: folderRows, files: fileRows, links: MODULE_LINKS.archive };
       }
 
       default:

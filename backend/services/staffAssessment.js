@@ -297,6 +297,31 @@ async function unitMemberRows({ unitSlug, dateFrom, dateTo }) {
   });
 }
 
+/** Attendance for the same period this assessment covers — mirrors the HR dashboard's
+ *  attendance_rate calculation (backend/routes/hr.js) and Performance Reports' own
+ *  attendanceRateFor (backend/db/performanceReports.js), scoped to one person via
+ *  hr_employees.user_id (hr_attendance links to hr_employees, not users, directly). Kept as its
+ *  own small query here rather than importing across modules — Performance Reports and My
+ *  Assessment are deliberately separate features that happen to both need this. */
+async function attendanceSummaryFor(employeeUserId, startDate, endDate) {
+  const { rows } = await pool.query(
+    `SELECT
+       COUNT(*) FILTER (WHERE LOWER(a.status) IN ('present','late','half-day')) AS present_days,
+       COUNT(*) AS total_days
+     FROM hr_attendance a
+     JOIN hr_employees e ON e.id = a.employee_id
+     WHERE e.user_id = $1 AND a.date BETWEEN $2 AND $3`,
+    [employeeUserId, startDate, endDate]
+  );
+  const totalDays = Number(rows[0]?.total_days) || 0;
+  const presentDays = Number(rows[0]?.present_days) || 0;
+  return {
+    rate: totalDays > 0 ? Math.round((presentDays / totalDays) * 1000) / 10 : null,
+    presentDays,
+    totalDays,
+  };
+}
+
 function rankOf(rows, userId, key, dir = 'desc') {
   const sorted = [...rows].filter((r) => r[key] != null).sort((a, b) => (dir === 'desc' ? b[key] - a[key] : a[key] - b[key]));
   const idx = sorted.findIndex((r) => r.userId === userId);
@@ -317,13 +342,14 @@ export async function getStaffAssessment(userId, { dateFrom, dateTo, minSegments
   const paramsPrev = [];
   const wherePrev = personalWhere(paramsPrev, { userId, dateFrom: prev.from.toISOString(), dateTo: prev.to.toISOString() });
 
-  const [main, previous, byWorkflow, notable, breaches, trend] = await Promise.all([
+  const [main, previous, byWorkflow, notable, breaches, trend, attendance] = await Promise.all([
     personalAggregate(whereMain, paramsMain),
     personalAggregate(wherePrev, paramsPrev),
     byWorkflowBreakdown({ userId, dateFrom: from.toISOString(), dateTo: to.toISOString() }),
     fastestSlowest({ userId, dateFrom: from.toISOString(), dateTo: to.toISOString() }),
     breachList({ userId, dateFrom: from.toISOString(), dateTo: to.toISOString() }),
     weeklyTrend({ userId }),
+    attendanceSummaryFor(userId, from.toISOString(), to.toISOString()),
   ]);
 
   const unitSlug = user.unit || null;
@@ -417,6 +443,7 @@ export async function getStaffAssessment(userId, { dateFrom, dateTo, minSegments
     period: { from: from.toISOString(), to: to.toISOString() },
     previousPeriod: { from: prev.from.toISOString(), to: prev.to.toISOString() },
     score,
+    attendance,
     vsUnit,
     byWorkflow,
     trend,

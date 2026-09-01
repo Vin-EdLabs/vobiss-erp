@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { FileText, Plus, Trash2, Upload, Download, Eye, X, Search, Check } from 'lucide-react';
-import { API_URL, getTransportRequests, uploadTransportFiles, getTransportSettings, getUsers, getWorkflowConfig, type TransportRequest, type VehicleLineItem, type AttachmentItem, type User } from '../../api';
+import { API_URL, getTransportRequests, uploadTransportFiles, getTransportSettings, getUserDirectory, getWorkflowConfig, type TransportRequest, type VehicleLineItem, type AttachmentItem, type UserDirectoryEntry } from '../../api';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '@/hooks/use-toast';
 import ReferencePicker from '@/components/transport/ReferencePicker';
@@ -26,6 +26,8 @@ export default function NewRentalVehicleRequestPage() {
   const { user } = useAuth();
   const { toast } = useToast();
   const navigate = useNavigate();
+  const location = useLocation();
+  const fieldWorkLinks = (location.state as { fieldWorkLinks?: ReferenceSummary[] } | null)?.fieldWorkLinks;
   const [saving, setSaving] = useState(false);
   const [lineItems, setLineItems] = useState<VehicleLineItem[]>([emptyRow()]);
   const [attachments, setAttachments] = useState<AttachmentItem[]>([]);
@@ -33,13 +35,13 @@ export default function NewRentalVehicleRequestPage() {
   const [showTransportDropdown, setShowTransportDropdown] = useState(false);
   const [transportSearchTerm, setTransportSearchTerm] = useState('');
   const [selectedTransport, setSelectedTransport] = useState<TransportRequest | null>(null);
-  const [allUsers, setAllUsers] = useState<User[]>([]);
-  const [approvers, setApprovers] = useState<User[]>([]);
+  const [allUsers, setAllUsers] = useState<UserDirectoryEntry[]>([]);
+  const [approvers, setApprovers] = useState<UserDirectoryEntry[]>([]);
   const [selectedApprovers, setSelectedApprovers] = useState<number[]>([]);
   const [linkedReference, setLinkedReference] = useState<LinkedReference | null>(null);
   const [referenceError, setReferenceError] = useState('');
   const [requireReference, setRequireReference] = useState(false);
-  const [linkedReferences, setLinkedReferences] = useState<ReferenceSummary[]>([]);
+  const [linkedReferences, setLinkedReferences] = useState<ReferenceSummary[]>(fieldWorkLinks || []);
   const [form, setForm] = useState({
     dept: '',
     requestor: '',
@@ -60,7 +62,7 @@ export default function NewRentalVehicleRequestPage() {
         const [requests, settings, users, workflow] = await Promise.all([
           getTransportRequests(),
           getTransportSettings(),
-          getUsers(),
+          getUserDirectory(),
           getWorkflowConfig().catch(() => ({ transport: {} } as any)),
         ]);
         setAvailableTransportRequests(Array.isArray(requests) ? requests : []);

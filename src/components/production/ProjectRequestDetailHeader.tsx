@@ -2,18 +2,21 @@ import React from 'react';
 import { Building2, Calendar, MapPin, User, Layers } from 'lucide-react';
 import type { ProjectRequest } from '@/api/project';
 import { StatusBadge } from '@/components/production/StatusBadge';
-import { StageStepper } from '@/components/production/StageStepper';
+import { StageIndicator } from '@/components/production/StageIndicator';
 import { RecordChatButton } from '@/components/chat/RecordChatButton';
+import { ServiceRequestReportButton } from '@/components/production/ServiceRequestReportPanel';
 import { ShareButton } from '@/components/ShareButton';
 import { buildPreviewTable } from '@/lib/shareRecord';
 import { useSharedView } from '@/context/SharedViewContext';
 
 const STAGE_LABELS: Record<string, string> = {
-  ts: 'TS',
+  sales: 'Sales',
+  design: 'Design',
+  ts: 'TX',
   ip: 'IP',
   noc: 'NOC',
   project: 'Project Unit',
-  done: 'Complete',
+  done: 'Active',
   rejected: 'Rejected',
 };
 
@@ -128,6 +131,7 @@ export function ProjectRequestDetailHeader({ request }: { request: ProjectReques
               className="border-indigo-200 text-indigo-700 hover:bg-indigo-50 dark:border-indigo-500/30 dark:text-indigo-300 dark:hover:bg-indigo-500/15"
             />
             )}
+            {!isSharedView && <ServiceRequestReportButton requestId={request.id} />}
             <span className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--border)] bg-[var(--surface-secondary)] px-2.5 py-1 text-xs text-[var(--text-secondary)]">
               <Layers className="h-3 w-3 text-[var(--text-muted)]" aria-hidden />
               <span className="text-[var(--text-muted)]">Stage</span>
@@ -151,7 +155,7 @@ export function ProjectRequestDetailHeader({ request }: { request: ProjectReques
           <p className="mb-3 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
             Workflow progress
           </p>
-          <StageStepper request={request} />
+          <StageIndicator request={request} />
         </div>
       </div>
     </div>

@@ -1,5 +1,11 @@
 import { isSystemAdminAccount, parseUserUnitsArray, canonicalizeUnitSlug } from '../roles.js';
 
+// Every role gets these regardless of unit/department — mirrors 'my_work'/'chat' already being
+// universal: every employee submits their own performance reports and transport/fuel/vehicle
+// requests, and can ask about their own workflow-performance/attendance score, no matter which
+// unit they're in.
+const UNIVERSAL_MODULES = ['my_work', 'chat', 'performance_reports', 'transport', 'my_assessment', 'archive'];
+
 export const ROLE_ACCESS = {
   cx: {
     sees_everything: false,
@@ -15,13 +21,13 @@ export const ROLE_ACCESS = {
   director: {
     sees_everything: true,
     hr_full_access: true,
-    modules: ['inventory', 'finance', 'tickets', 'hr', 'assets', 'field', 'service_requests', 'clients', 'users', 'chat'],
+    modules: ['inventory', 'finance', 'tickets', 'hr', 'assets', 'field', 'service_requests', 'clients', 'users', 'chat', 'production', 'network_assets', 'noc_shifts', 'archive', 'admin_config'],
     description: 'Executive full view',
   },
   superadmin: {
     sees_everything: true,
     hr_full_access: true,
-    modules: ['inventory', 'finance', 'tickets', 'hr', 'assets', 'field', 'service_requests', 'clients', 'users', 'audit', 'chat'],
+    modules: ['inventory', 'finance', 'tickets', 'hr', 'assets', 'field', 'service_requests', 'clients', 'users', 'audit', 'chat', 'production', 'network_assets', 'noc_shifts', 'archive', 'admin_config'],
     description: 'Full system access (System Admin only)',
   },
   hr: {
@@ -37,22 +43,22 @@ export const ROLE_ACCESS = {
   },
   noc: {
     sees_everything: false,
-    modules: ['tickets_noc', 'service_requests', 'field', 'chat'],
+    modules: ['tickets_noc', 'service_requests', 'field', 'chat', 'noc_shifts'],
     description: 'NOC operations',
   },
   ip: {
     sees_everything: false,
-    modules: ['tickets_ip', 'service_requests', 'chat'],
+    modules: ['tickets_ip', 'service_requests', 'chat', 'network_assets', 'ip_unit'],
     description: 'IP operations',
   },
   tx: {
     sees_everything: false,
-    modules: ['tickets_tx', 'service_requests', 'chat'],
+    modules: ['tickets_tx', 'service_requests', 'chat', 'network_assets'],
     description: 'TX/Transmission operations',
   },
   project_unit: {
     sees_everything: false,
-    modules: ['service_requests', 'field', 'chat'],
+    modules: ['service_requests', 'field', 'chat', 'production'],
     description: 'Project management',
   },
   field_engineer: {
@@ -76,6 +82,13 @@ export const ROLE_ACCESS = {
     description: 'Standard staff access',
   },
 };
+
+// Apply the universal set to every role so it doesn't have to be repeated above.
+for (const key of Object.keys(ROLE_ACCESS)) {
+  const mods = new Set(ROLE_ACCESS[key].modules || []);
+  UNIVERSAL_MODULES.forEach((m) => mods.add(m));
+  ROLE_ACCESS[key].modules = [...mods];
+}
 
 const ROLE_ALIASES = {
   system_admin: 'superadmin',
@@ -111,13 +124,14 @@ const ROLE_ALIASES = {
 };
 
 const UNIT_MODULE_MAP = {
-  noc: ['tickets_noc', 'service_requests', 'field', 'chat'],
-  ip: ['tickets_ip', 'service_requests', 'chat'],
-  ts: ['tickets_tx', 'service_requests', 'field', 'chat'],
-  tx: ['tickets_tx', 'service_requests', 'field', 'chat'],
+  noc: ['tickets_noc', 'service_requests', 'field', 'chat', 'noc_shifts'],
+  ip: ['tickets_ip', 'service_requests', 'chat', 'network_assets', 'ip_unit'],
+  ts: ['tickets_tx', 'service_requests', 'field', 'chat', 'network_assets'],
+  tx: ['tickets_tx', 'service_requests', 'field', 'chat', 'network_assets'],
   cx: ['tickets_cx', 'service_requests', 'clients', 'chat'],
   sales: ['tickets_cx', 'clients', 'service_requests', 'chat'],
-  project: ['service_requests', 'field', 'chat'],
+  project: ['service_requests', 'field', 'chat', 'production'],
+  design: ['service_requests', 'chat', 'production'],
   finance: ['finance', 'cash_requests', 'chat'],
   hr: ['hr', 'chat'],
   operations: ['field', 'service_requests', 'chat'],
@@ -154,7 +168,7 @@ function normalizeUnitList(units, unit) {
 
 /** Map assigned ERP units → Vobi module keys. */
 export function modulesFromUnits(units = [], unit = null) {
-  const mods = new Set(['my_work', 'chat']);
+  const mods = new Set(UNIVERSAL_MODULES);
   for (const raw of normalizeUnitList(units, unit)) {
     const slug = String(raw).toLowerCase();
     const mapped = UNIT_MODULE_MAP[slug];
@@ -376,6 +390,49 @@ export const MODULE_LINKS = {
   reports: '/staff/reports',
   users: '/users',
   audit: '/audit-logs',
+  performance_reports: {
+    dashboard: '/performance-reports/dashboard',
+    my_reports: '/performance-reports/my-reports',
+    team: '/performance-reports/team',
+    unit_reviews: '/performance-reports/unit-reviews',
+    executive: '/performance-reports/executive',
+    hr_access: '/performance-reports/hr',
+    periods: '/performance-reports/periods',
+    analytics: '/performance-reports/analytics',
+  },
+  transport: {
+    requests: '/transport-request',
+    approvals: '/transport-approvals',
+    fuel_requests: '/transport/fuel-requests',
+    fuel_approvals: '/transport/fuel-approvals',
+    rental_requests: '/transport/rental-vehicle-requests',
+    rental_approvals: '/transport/rental-approvals',
+  },
+  my_assessment: {
+    mine: '/my-assessment',
+    staff: '/staff-assessment',
+    workflow_performance: '/workflow-performance',
+  },
+  network_assets: {
+    pops: '/network-assets/pops',
+    equipment: '/network-assets/equipment',
+    passive: '/network-assets/passive',
+  },
+  noc_shifts: {
+    schedule: '/noc/shift-schedule',
+    incident_notes: '/noc/incident-notes',
+  },
+  ip_unit: {
+    circuits: '/ip-unit/circuits',
+    requests: '/ip-unit/requests',
+  },
+  production: {
+    wip: '/project-unit/wip',
+    signoff: '/project-unit/signoff',
+  },
+  archive: {
+    home: '/archive',
+  },
 };
 
 export function ticketRecordLink(queue, ticketId) {

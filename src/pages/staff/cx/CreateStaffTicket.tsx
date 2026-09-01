@@ -52,7 +52,7 @@ interface CreatedTicket {
 const MANUAL_TICKET_UNITS: TicketEscalationStage[] = [
   { key: 'noc', label: 'NOC', minutes: 0, target_roles: ['noc'] },
   { key: 'ip', label: 'IP', minutes: 0, target_roles: ['ip'] },
-  { key: 'tx', label: 'TS', minutes: 0, target_roles: ['tx', 'field_engineer'] },
+  { key: 'tx', label: 'TX', minutes: 0, target_roles: ['tx', 'field_engineer'] },
 ];
 
 const CreateStaffTicketPage: React.FC = () => {

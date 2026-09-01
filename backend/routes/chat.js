@@ -610,6 +610,40 @@ router.get('/messages/:messageId', async (req, res) => {
   }
 });
 
+// GET /api/chat/messages/:messageId/thread — the root message plus every reply to it, in
+// chronological order. Replies always live in the same channel/DM as their root, so access to
+// the root implies access to the whole thread.
+router.get('/messages/:messageId/thread', async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { messageId } = req.params;
+
+    await assertMessageAccess(messageId, userId);
+    if (await isMessageHiddenForUser(messageId, userId)) {
+      return res.status(404).json({ error: 'Message not found' });
+    }
+
+    const { rows: rootRows } = await pool.query('SELECT * FROM chat_messages WHERE id = $1', [messageId]);
+    if (!rootRows[0]) return res.status(404).json({ error: 'Message not found' });
+
+    const { rows: replyRows } = await pool.query(
+      `SELECT m.* FROM chat_messages m
+       WHERE m.reply_to = $1
+         AND m.message_type = 'user'
+         AND NOT EXISTS (
+           SELECT 1 FROM chat_message_deletions d WHERE d.message_id = m.id AND d.user_id = $2
+         )
+       ORDER BY m.created_at ASC`,
+      [messageId, userId]
+    );
+
+    const [root, ...replies] = await hydrateMessages([...rootRows, ...replyRows], userId);
+    res.json({ root, replies });
+  } catch (e) {
+    res.status(e.status || 500).json({ error: e.message });
+  }
+});
+
 // POST /api/chat/messages/:messageId/forward
 router.post('/messages/:messageId/forward', async (req, res) => {
   const client = await pool.connect();
@@ -1079,7 +1113,8 @@ router.get('/channels', async (req, res) => {
            WHEN 'general' THEN 1
            WHEN 'category' THEN 2
            WHEN 'unit' THEN 3
-           ELSE 4
+           WHEN 'group_dm' THEN 4
+           ELSE 5
          END,
          c.name`,
       [userId]
@@ -1283,7 +1318,8 @@ router.get('/channels/:channelId/members', async (req, res) => {
   try {
     await assertChannelMember(req.params.channelId, req.user.id);
     const { rows } = await pool.query(
-      `SELECT u.id, u.first_name, u.last_name, u.username, u.role, u.main_role, u.unit, u.position, u.avatar_url, cm.role AS channel_role
+      `SELECT u.id, u.first_name, u.last_name, u.username, u.role, u.main_role, u.unit, u.position, u.avatar_url,
+              u.chat_status_text, u.chat_status_emoji, cm.role AS channel_role
        FROM channel_members cm
        JOIN users u ON u.id = cm.user_id
        WHERE cm.channel_id = $1 AND u.deleted_at IS NULL
@@ -1300,6 +1336,8 @@ router.get('/channels/:channelId/members', async (req, res) => {
         channel_role: u.channel_role,
         avatar_color: getAvatarColorClass(u.id),
         avatar_url: u.avatar_url || null,
+        status_text: u.chat_status_text || null,
+        status_emoji: u.chat_status_emoji || null,
       }))
     );
   } catch (e) {
@@ -1381,7 +1419,8 @@ router.get('/dms', async (req, res) => {
     const result = [];
     for (const r of rows) {
       const other = await pool.query(
-        `SELECT u.id, u.first_name, u.last_name, u.username, u.role, u.main_role, u.unit, u.position, u.avatar_url
+        `SELECT u.id, u.first_name, u.last_name, u.username, u.role, u.main_role, u.unit, u.position, u.avatar_url,
+                u.chat_status_text, u.chat_status_emoji
          FROM dm_participants dp
          JOIN users u ON u.id = dp.user_id
          WHERE dp.dm_id = $1 AND dp.user_id <> $2`,
@@ -1400,6 +1439,8 @@ router.get('/dms', async (req, res) => {
               role: formatUserChatBadge(o),
               avatar_color: getAvatarColorClass(o.id),
               avatar_url: o.avatar_url || null,
+              status_text: o.chat_status_text || null,
+              status_emoji: o.chat_status_emoji || null,
             }
           : null,
         last_message: r.last_body
@@ -1636,6 +1677,83 @@ router.post('/groups', async (req, res) => {
   }
 });
 
+// POST /api/chat/group-dms — ad-hoc group chat, open to any user (unlike /groups, which is
+// admin/HR/manager-only for org-wide unit groups). Auto-named from participants unless a name
+// is given; needs at least 2 other people (3 total) or it's just a regular DM.
+router.post('/group-dms', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const userId = req.user.id;
+    const memberIds = Array.isArray(req.body.memberIds)
+      ? req.body.memberIds.map((id) => parseInt(id, 10)).filter(Boolean)
+      : [];
+    const ids = [...new Set([userId, ...memberIds])];
+    if (ids.length < 3) {
+      return res.status(400).json({ error: 'Select at least 2 other people to start a group chat' });
+    }
+
+    const otherIds = ids.filter((id) => id !== userId);
+    const namesRes = await client.query(
+      `SELECT first_name, last_name, username FROM users WHERE id = ANY($1::int[])`,
+      [otherIds]
+    );
+    const names = namesRes.rows.map((r) => getDisplayName(r));
+    const requestedName = String(req.body.name || '').trim().slice(0, 100);
+    const autoName = names.slice(0, 3).join(', ') + (names.length > 3 ? ` +${names.length - 3}` : '');
+    const finalName = requestedName || autoName || 'Group chat';
+
+    await client.query('BEGIN');
+    const { rows } = await client.query(
+      `INSERT INTO chat_channels (name, description, channel_type, created_by)
+       VALUES ($1, $2, 'group_dm', $3)
+       RETURNING id, name, description, channel_type, created_at`,
+      [finalName, finalName, userId]
+    );
+    const channel = rows[0];
+
+    for (const uid of ids) {
+      await client.query(
+        `INSERT INTO channel_members (channel_id, user_id, role)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (channel_id, user_id) DO NOTHING`,
+        [channel.id, uid, uid === userId ? 'admin' : 'member']
+      );
+    }
+    await client.query('COMMIT');
+
+    const io = getRealtimeIo();
+    if (io) {
+      for (const uid of ids) {
+        io.to(`user:${uid}`).emit('chat:join_channel', { channelId: channel.id });
+        io.to(`user:${uid}`).emit('chat:group_created', { channelId: channel.id, name: channel.name });
+      }
+    }
+
+    res.status(201).json({
+      id: channel.id,
+      channelId: channel.id,
+      name: channel.name,
+      description: channel.description,
+      channel_type: 'group_dm',
+      member_count: ids.length,
+      unread_count: 0,
+      last_message: null,
+    });
+    logChatAudit(req, 'chat_create_group_dm', {
+      channel_id: channel.id,
+      channel_name: channel.name,
+      member_count: ids.length,
+      member_ids: ids,
+    });
+  } catch (e) {
+    try { await client.query('ROLLBACK'); } catch { /* ignore */ }
+    console.error('[chat] create group dm failed:', e);
+    res.status(e.status || 500).json({ error: e.message || 'Failed to create group chat' });
+  } finally {
+    client.release();
+  }
+});
+
 // POST /api/chat/channels/:channelId/members — add members to a unit group
 router.post('/channels/:channelId/members', async (req, res) => {
   try {
@@ -1761,6 +1879,47 @@ router.get('/dms/:dmId/pins', async (req, res) => {
          )
        ORDER BY p.pinned_at DESC`,
       [dmId, userId]
+    );
+    const messages = await hydrateMessages(rows, userId);
+    res.json({ messages });
+  } catch (e) {
+    res.status(e.status || 500).json({ error: e.message });
+  }
+});
+
+// GET /api/chat/search?q= — cross-channel/cross-DM search over every channel and DM the
+// caller is a member of, not just the one currently open (Teams-style global search).
+router.get('/search', async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const q = String(req.query.q || '').trim();
+    if (!q) return res.json({ messages: [] });
+
+    const { rows } = await pool.query(
+      `SELECT m.* FROM chat_messages m
+       LEFT JOIN chat_channels c ON c.id = m.channel_id
+       WHERE m.message_type = 'user'
+         AND (
+           (m.channel_id IS NOT NULL AND COALESCE(c.is_archived, false) = false
+             AND EXISTS (SELECT 1 FROM channel_members cm WHERE cm.channel_id = m.channel_id AND cm.user_id = $2))
+           OR (m.dm_id IS NOT NULL
+             AND EXISTS (SELECT 1 FROM dm_participants dp WHERE dp.dm_id = m.dm_id AND dp.user_id = $2))
+         )
+         AND NOT EXISTS (
+           SELECT 1 FROM chat_message_deletions d
+           WHERE d.message_id = m.id AND d.user_id = $2
+         )
+         AND (
+           m.body ILIKE $1
+           OR regexp_replace(m.body, '@\\[([^\\]]+)\\]\\([0-9]+\\)', '@\\1', 'g') ILIKE $1
+           OR EXISTS (
+             SELECT 1 FROM chat_attachments a
+             WHERE a.message_id = m.id AND a.file_name ILIKE $1
+           )
+         )
+       ORDER BY m.created_at DESC
+       LIMIT 60`,
+      [`%${q}%`, userId]
     );
     const messages = await hydrateMessages(rows, userId);
     res.json({ messages });
@@ -1909,11 +2068,35 @@ router.delete('/dms/:dmId/messages/:messageId/pin', async (req, res) => {
 
 // Legacy duplicate handlers below removed — see pinMessageForUser above
 
+// PATCH /api/chat/me/status — set or clear the caller's custom status text/emoji.
+router.patch('/me/status', async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const statusText = String(req.body.status_text || '').trim().slice(0, 100) || null;
+    const statusEmoji = String(req.body.status_emoji || '').trim().slice(0, 8) || null;
+
+    await pool.query(
+      `UPDATE users SET chat_status_text = $1, chat_status_emoji = $2 WHERE id = $3`,
+      [statusText, statusEmoji, userId]
+    );
+
+    const io = getRealtimeIo();
+    if (io) {
+      io.emit('user_status_update', { userId, status_text: statusText, status_emoji: statusEmoji });
+    }
+
+    res.json({ status_text: statusText, status_emoji: statusEmoji });
+  } catch (e) {
+    res.status(e.status || 500).json({ error: e.message });
+  }
+});
+
 // GET /api/chat/users
 router.get('/users', async (req, res) => {
   try {
     const { rows } = await pool.query(
-      `SELECT id, first_name, last_name, username, role, main_role, unit, position, avatar_url
+      `SELECT id, first_name, last_name, username, role, main_role, unit, position, avatar_url,
+              chat_status_text, chat_status_emoji
        FROM users WHERE deleted_at IS NULL
        ORDER BY first_name, last_name`
     );
@@ -1931,6 +2114,8 @@ router.get('/users', async (req, res) => {
         avatar_color: getAvatarColorClass(u.id),
         is_online: onlineSet.has(u.id),
         avatar_url: u.avatar_url || null,
+        status_text: u.chat_status_text || null,
+        status_emoji: u.chat_status_emoji || null,
       }))
     );
   } catch (e) {

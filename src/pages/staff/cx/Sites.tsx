@@ -14,15 +14,15 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-
-const REGIONS = ['Greater Accra', 'Ashanti', 'Western', 'Eastern', 'Central', 'Volta', 'Northern', 'Upper East', 'Upper West', 'Bono', 'Other'];
+import { GHANA_REGIONS, SERVICE_TYPES } from '@/lib/lookups';
 
 export const emptySiteForm = {
   site_name: '',
   site_address: '',
+  location: '',
   region: 'Greater Accra',
   bandwidth: '',
-  service_type: 'Fibre',
+  service_type: SERVICE_TYPES[0],
   ip_address: '',
   connection_status: 'Pending',
   customer_id: '',
@@ -33,6 +33,7 @@ type SiteRow = {
   site_code: string;
   site_name: string;
   site_address?: string | null;
+  location?: string | null;
   region?: string | null;
   bandwidth?: string | null;
   service_type?: string | null;
@@ -44,6 +45,8 @@ type SiteRow = {
   ticket_count?: number;
 };
 
+const PAGE_SIZE = 50;
+
 function connectionBadge(status?: string) {
   const s = (status || 'Pending').toLowerCase();
   if (s === 'live') return 'bg-green-100 text-green-800 border-green-200';
@@ -54,6 +57,9 @@ function connectionBadge(status?: string) {
 
 const SitesPage: React.FC = () => {
   const [sites, setSites] = useState<SiteRow[]>([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
+  const [stats, setStats] = useState({ total: 0, unassigned: 0, assigned: 0 });
   const [clients, setClients] = useState<{ id: number; company_name: string; customer_code: string }[]>([]);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('All');
@@ -70,14 +76,29 @@ const SitesPage: React.FC = () => {
     setForm(emptySiteForm);
   };
 
+  // Reset to page 1 whenever a filter changes so pagination never gets stuck past the new,
+  // narrower result set.
+  useEffect(() => {
+    setPage(1);
+  }, [search, statusFilter, assignmentFilter]);
+
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [sitesRes, clientsRes] = await Promise.all([
-        cxApi.getAllSites({ search: search.trim() || undefined }),
+      const [sitesRes, statsRes, clientsRes] = await Promise.all([
+        cxApi.getAllSites({
+          search: search.trim() || undefined,
+          connection_status: statusFilter !== 'All' ? statusFilter : undefined,
+          assignment: assignmentFilter === 'Assigned' ? 'assigned' : assignmentFilter === 'Unassigned' ? 'unassigned' : undefined,
+          page,
+          pageSize: PAGE_SIZE,
+        }),
+        cxApi.getSitesStats(),
         cxApi.getClients({ limit: 200 }),
       ]);
       setSites(Array.isArray(sitesRes?.data) ? sitesRes.data : []);
+      setTotal(sitesRes?.total || 0);
+      if (statsRes?.data) setStats(statsRes.data);
       const clientRows = Array.isArray(clientsRes?.data) ? clientsRes.data : [];
       setClients(clientRows.map((c: any) => ({
         id: c.id,
@@ -89,19 +110,15 @@ const SitesPage: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [search]);
+  }, [search, statusFilter, assignmentFilter, page]);
 
   useEffect(() => {
     const t = setTimeout(() => void load(), 250);
     return () => clearTimeout(t);
   }, [load]);
 
-  const filtered = sites.filter((s) => {
-    if (statusFilter !== 'All' && (s.connection_status || 'Pending') !== statusFilter) return false;
-    if (assignmentFilter === 'Unassigned' && s.customer_id) return false;
-    if (assignmentFilter === 'Assigned' && !s.customer_id) return false;
-    return true;
-  });
+  const filtered = sites;
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   const startEdit = (site: SiteRow) => {
     setEditingId(site.id);
@@ -109,9 +126,10 @@ const SitesPage: React.FC = () => {
     setForm({
       site_name: site.site_name || '',
       site_address: site.site_address || '',
-      region: site.region || 'Other',
+      location: site.location || '',
+      region: site.region || GHANA_REGIONS[0],
       bandwidth: site.bandwidth || '',
-      service_type: site.service_type || 'Fibre',
+      service_type: site.service_type || SERVICE_TYPES[0],
       ip_address: site.ip_address || '',
       connection_status: site.connection_status || 'Pending',
       customer_id: site.customer_id ? String(site.customer_id) : '',
@@ -130,6 +148,7 @@ const SitesPage: React.FC = () => {
       const payload = {
         site_name: form.site_name.trim(),
         site_address: form.site_address.trim() || undefined,
+        location: form.location.trim() || undefined,
         region: form.region,
         bandwidth: form.bandwidth.trim() || undefined,
         service_type: form.service_type,
@@ -152,8 +171,6 @@ const SitesPage: React.FC = () => {
       setSaving(false);
     }
   };
-
-  const unassignedCount = sites.filter((s) => !s.customer_id).length;
 
   return (
     <div className="min-h-screen bg-[var(--content-bg)] px-4 py-8 sm:px-6 lg:px-8">
@@ -182,9 +199,9 @@ const SitesPage: React.FC = () => {
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
           {[
-            { label: 'Total Sites', value: sites.length },
-            { label: 'Unassigned', value: unassignedCount },
-            { label: 'Assigned', value: sites.length - unassignedCount },
+            { label: 'Total Sites', value: stats.total },
+            { label: 'Unassigned', value: stats.unassigned },
+            { label: 'Assigned', value: stats.assigned },
           ].map(({ label, value }) => (
             <div
               key={label}
@@ -238,11 +255,19 @@ const SitesPage: React.FC = () => {
                   />
                 </div>
                 <div>
+                  <Label>Location / Town</Label>
+                  <Input
+                    value={form.location}
+                    onChange={(e) => setForm((f) => ({ ...f, location: e.target.value }))}
+                    placeholder="e.g. Bogoso"
+                  />
+                </div>
+                <div>
                   <Label>Region</Label>
                   <Select value={form.region} onValueChange={(v) => setForm((f) => ({ ...f, region: v }))}>
                     <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
-                      {REGIONS.map((r) => <SelectItem key={r} value={r}>{r}</SelectItem>)}
+                      {GHANA_REGIONS.map((r) => <SelectItem key={r} value={r}>{r}</SelectItem>)}
                     </SelectContent>
                   </Select>
                 </div>
@@ -259,9 +284,7 @@ const SitesPage: React.FC = () => {
                   <Select value={form.service_type} onValueChange={(v) => setForm((f) => ({ ...f, service_type: v }))}>
                     <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="Fibre">Fibre</SelectItem>
-                      <SelectItem value="Wireless">Wireless</SelectItem>
-                      <SelectItem value="Hybrid">Hybrid</SelectItem>
+                      {SERVICE_TYPES.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
                     </SelectContent>
                   </Select>
                 </div>
@@ -333,7 +356,7 @@ const SitesPage: React.FC = () => {
             <table className="min-w-full divide-y divide-[var(--border)] text-sm">
               <thead className="bg-[var(--surface-secondary)]">
                 <tr>
-                  {['Code', 'Site Name', 'Region', 'Client', 'Status', 'Tickets', 'Actions'].map((h) => (
+                  {['Code', 'Site Name', 'Location', 'Region', 'Client', 'Status', 'Tickets', 'Actions'].map((h) => (
                     <th key={h} className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">
                       {h}
                     </th>
@@ -342,9 +365,9 @@ const SitesPage: React.FC = () => {
               </thead>
               <tbody className="divide-y divide-[var(--border)]">
                 {loading ? (
-                  <tr><td colSpan={7} className="px-4 py-10 text-center text-[var(--text-muted)]">Loading sites…</td></tr>
+                  <tr><td colSpan={8} className="px-4 py-10 text-center text-[var(--text-muted)]">Loading sites…</td></tr>
                 ) : filtered.length === 0 ? (
-                  <tr><td colSpan={7} className="px-4 py-10 text-center text-[var(--text-muted)]">No sites found.</td></tr>
+                  <tr><td colSpan={8} className="px-4 py-10 text-center text-[var(--text-muted)]">No sites found.</td></tr>
                 ) : (
                   filtered.map((site) => (
                     <tr key={site.id} className="hover:bg-[var(--surface-hover)]">
@@ -354,6 +377,7 @@ const SitesPage: React.FC = () => {
                         </span>
                       </td>
                       <td className="px-4 py-3 font-medium text-[var(--text-primary)]">{site.site_name}</td>
+                      <td className="px-4 py-3 text-[var(--text-secondary)]">{site.location || '—'}</td>
                       <td className="px-4 py-3 text-[var(--text-secondary)]">{site.region || '—'}</td>
                       <td className="px-4 py-3">
                         {site.customer_id ? (
@@ -382,6 +406,21 @@ const SitesPage: React.FC = () => {
               </tbody>
             </table>
           </div>
+          {totalPages > 1 && (
+            <div className="flex items-center justify-between border-t border-[var(--border)] px-4 py-3">
+              <p className="text-xs text-[var(--text-muted)]">
+                Page {page} of {totalPages} · {total.toLocaleString()} sites
+              </p>
+              <div className="flex gap-2">
+                <Button size="sm" variant="outline" disabled={page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>
+                  Previous
+                </Button>
+                <Button size="sm" variant="outline" disabled={page >= totalPages} onClick={() => setPage((p) => Math.min(totalPages, p + 1))}>
+                  Next
+                </Button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>

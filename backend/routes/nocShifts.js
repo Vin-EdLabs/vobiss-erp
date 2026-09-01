@@ -91,7 +91,7 @@ function formatTimeForMessage(timeStr) {
   return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
 }
 
-async function getShiftDefinitions({ activeOnly = false } = {}) {
+export async function getShiftDefinitions({ activeOnly = false } = {}) {
   const result = await pool.query(
     `SELECT * FROM noc_shift_definitions ${activeOnly ? 'WHERE is_active = TRUE' : ''} ORDER BY display_order ASC, id ASC`
   );
@@ -601,7 +601,7 @@ router.post('/weeks/:weekStart/publish', requireNocManager, async (req, res) => 
 // Current duty — ticket-integration-ready snapshot
 // ---------------------------------------------------------------------------
 
-async function buildDutySnapshot(shift) {
+export async function buildDutySnapshot(shift) {
   if (!shift) return null;
   const schedule = await getScheduleByDateAndShift(shift.date, shift.shiftDef.id);
   const staff = schedule ? await getScheduleStaff(schedule.id) : [];

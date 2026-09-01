@@ -1,60 +1,40 @@
-import React, { useEffect, useState, useCallback } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
-import {
-  Check,
-  FileText,
-  MessageSquare,
-  RefreshCw,
-  Send,
-  User,
-} from 'lucide-react';
+import { useEffect, useState, useCallback } from 'react';
+import { useParams } from 'react-router-dom';
+import { RefreshCw, ShoppingBag, PenLine, ClipboardCheck, Building2, Cable, Wifi, Radio, MessageSquare } from 'lucide-react';
 import { ProductionPageShell } from '@/components/production/ProductionPageShell';
-import { DetailCard, FormField, InfoField, InfoGrid } from '@/components/production/production-ui';
-import { Button } from '@/components/ui/button';
+import { DetailCard, InfoField } from '@/components/production/production-ui';
+import { RemarksThread } from '@/components/production/RemarksThread';
+import { PipelineHistory } from '@/components/production/PipelineHistory';
+import { ProjectRequestDetailHeader } from '@/components/production/ProjectRequestDetailHeader';
+import { CollapsibleStageSection, type StageSectionStatus } from '@/components/production/CollapsibleStageSection';
+import { SalesStageSection } from '@/components/production/stages/SalesStageSection';
+import { DesignStageSection } from '@/components/production/stages/DesignStageSection';
+import { SalesReviewStageSection } from '@/components/production/stages/SalesReviewStageSection';
+import { ProjectStageSection } from '@/components/production/stages/ProjectStageSection';
+import { TxStageSection } from '@/components/production/stages/TxStageSection';
+import { IpStageSection } from '@/components/production/stages/IpStageSection';
+import { NocStageSection } from '@/components/production/stages/NocStageSection';
+import { getProjectRequest, addProjectRequestRemark, uploadProjectRequestAttachment, type ProjectRequest } from '@/api/project';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/context/AuthContext';
-import { RemarksThread } from '@/components/production/RemarksThread';
-import { AttachmentZone } from '@/components/production/AttachmentZone';
-import { PipelineHistory } from '@/components/production/PipelineHistory';
-import { SubmittedRequestDetails, IpIntegrationDetails } from '@/components/production/SubmittedRequestDetails';
-import { ProjectRequestDetailHeader } from '@/components/production/ProjectRequestDetailHeader';
-import {
-  getProjectRequest,
-  addProjectRequestRemark,
-  uploadProjectRequestAttachment,
-  tsAcceptProjectRequest,
-  ipForwardProjectRequest,
-  nocApproveProjectRequest,
-  projectCompleteProjectRequest,
-  projectForwardProjectRequest,
-  salesForwardProjectRequest,
-  type ProjectRequest,
-} from '@/api/project';
 import { useSharedView } from '@/context/SharedViewContext';
 import { WorkflowTimeline } from '@/components/timeline/WorkflowTimeline';
+import { FieldWorkPanel } from '@/components/fieldwork/FieldWorkPanel';
+import { LinkedReferencesSection } from '@/components/references/LinkedReferencesSection';
 
-type WorkflowView = 'design' | 'sales' | 'project' | 'ts' | 'ip' | 'noc';
+// current_stage's position for "done / active / upcoming" — design and rejected sit at 1 since
+// a reject-to-design loop must re-open Design's section rather than treat it as skipped ahead.
+const STAGE_RANK: Record<string, number> = { design: 1, sales: 2, project: 3, ts: 4, ip: 5, noc: 6, done: 7, rejected: 7 };
 
-export default function ProductionDetail() {
+export default function ProductionDetail({ id: idProp }: { id?: string; unitSlug?: string } = {}) {
   const { isSharedView, routeParams } = useSharedView();
-  const { id: routeId, unitSlug: routeSlug } = useParams<{ id: string; unitSlug: string }>();
-  const id = isSharedView ? routeParams?.id : routeId;
-  const rawSlug = isSharedView ? routeParams?.unitSlug : routeSlug;
-  const unitSlug = rawSlug === 'tx' ? 'ts' : rawSlug;
-  const navigate = useNavigate();
+  const { id: routeId } = useParams<{ id: string; unitSlug: string }>();
+  const id = idProp ?? (isSharedView ? routeParams?.id : routeId);
   const { toast } = useToast();
   const { user } = useAuth();
-  const [request, setRequest] = useState<(ProjectRequest & { fullPipeline?: boolean }) | null>(null);
+  const [request, setRequest] = useState<ProjectRequest | null>(null);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
-  const [ipForm, setIpForm] = useState({
-    circuit_id: '',
-    integration_date: '',
-    ip_address: '',
-    mac_address: '',
-    integrated_by: '',
-    comment: '',
-  });
 
   const units: string[] = Array.isArray(user?.units) ? user.units : [];
   const isAdmin = user?.role === 'superadmin' || user?.main_role === 'superadmin';
@@ -65,7 +45,18 @@ export default function ProductionDetail() {
   const isSales = isAdmin || units.includes('sales') || user?.main_role === 'sales' || user?.role === 'sales';
   const isDesign = isAdmin || units.includes('design') || ['design_manager', 'design_supervisor'].includes(String(user?.main_role || user?.role || ''));
   const isCreator = request?.created_by_user_id === user?.id;
-  const fullPipeline = request?.fullPipeline ?? (units.includes('project') || isAdmin);
+  // Real unit membership only — isDesign/isSales/etc above all fold in the isAdmin bypass (any
+  // superadmin-role account reads as "every unit"), which made this always resolve to 'design'
+  // for admin accounts regardless of which unit they actually belong to or came from. Only fall
+  // back to the bypassed flags (then 'project') when the account has no specific unit at all.
+  const myPrimaryUnit =
+    units.includes('design') || ['design_manager', 'design_supervisor'].includes(String(user?.main_role || user?.role || '')) ? 'design'
+      : units.includes('sales') || user?.main_role === 'sales' || user?.role === 'sales' ? 'sales'
+      : units.includes('ts') ? 'ts'
+      : units.includes('ip') ? 'ip'
+      : units.includes('noc') ? 'noc'
+      : units.includes('project') ? 'project'
+      : isDesign ? 'design' : isSales ? 'sales' : isTs ? 'ts' : isIp ? 'ip' : isNoc ? 'noc' : 'project';
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -73,50 +64,28 @@ export default function ProductionDetail() {
       setLoading(true);
       const data = await getProjectRequest(parseInt(id, 10));
       setRequest(data);
-      const ipRemarks = (data.remarks || []).filter((r) => r.stage === 'ip');
-      const latestIpComment = ipRemarks.length ? ipRemarks[ipRemarks.length - 1].comment_text : '';
-      setIpForm({
-        circuit_id: data.circuit_id || '',
-        integration_date: data.integration_date?.slice(0, 10) || '',
-        ip_address: data.ip_address || '',
-        mac_address: data.mac_address || '',
-        integrated_by: data.integrated_by || '',
-        comment: latestIpComment,
-      });
     } catch (e: unknown) {
-      toast({
-        title: 'Error',
-        description: e instanceof Error ? e.message : 'Failed to load',
-        variant: 'destructive',
-      });
+      toast({ title: 'Error', description: e instanceof Error ? e.message : 'Failed to load', variant: 'destructive' });
     } finally {
       setLoading(false);
     }
   }, [id, toast]);
 
-  useEffect(() => {
-    void load();
-  }, [load]);
+  useEffect(() => { void load(); }, [load]);
+  const refresh = async () => { await load(); };
 
-  const refresh = async () => {
-    await load();
-  };
-
-  const backTo = `/project-request/${unitSlug || 'project'}`;
+  const backTo = `/project-request/${myPrimaryUnit}`;
   const backLabel =
-    unitSlug === 'project'
-      ? 'Back to Project Unit'
-      : unitSlug === 'ts'
-        ? 'Back to TS'
-        : unitSlug === 'ip'
-          ? 'Back to IP'
-          : unitSlug === 'noc'
-            ? 'Back to NOC'
-            : 'Back';
+    myPrimaryUnit === 'project' ? 'Back to Project Unit'
+      : myPrimaryUnit === 'ts' ? 'Back to TX'
+      : myPrimaryUnit === 'ip' ? 'Back to IP'
+      : myPrimaryUnit === 'noc' ? 'Back to NOC'
+      : myPrimaryUnit === 'design' ? 'Back to Design Unit'
+      : 'Back to Sales';
 
   if (loading || !request) {
     return (
-      <ProductionPageShell backTo={backTo} backLabel={backLabel} unitSlug={unitSlug}>
+      <ProductionPageShell backTo={backTo} backLabel={backLabel}>
         <div className="flex flex-col items-center justify-center py-24">
           <RefreshCw className="mb-4 h-10 w-10 animate-spin text-indigo-600" />
           <p className="text-sm text-[var(--text-secondary)]">Loading request details…</p>
@@ -125,437 +94,128 @@ export default function ProductionDetail() {
     );
   }
 
-  const workflowView: WorkflowView =
-    unitSlug === 'design' || unitSlug === 'sales' || unitSlug === 'ts' || unitSlug === 'ip' || unitSlug === 'noc'
-      ? unitSlug
-      : fullPipeline
-        ? 'project'
-        : 'project';
-
-  const canTsAct =
-    !isSharedView &&
-    workflowView === 'ts' &&
-    isTs &&
-    request.current_stage === 'ts' &&
-    request.status === 'pending';
-  const canIpAct =
-    !isSharedView &&
-    workflowView === 'ip' &&
-    isIp &&
-    request.current_stage === 'ip' &&
-    request.status === 'ongoing';
-  const isLocked =
-    request.status === 'completed' || request.current_stage === 'done';
-
-  const awaitingProjectSignOff = request.status === 'noc_approved';
-  const canProjectComplete =
-    !isSharedView &&
-    workflowView === 'project' &&
-    (isProject || isCreator || isAdmin) &&
-    !isLocked &&
-    awaitingProjectSignOff;
-  const canSalesForward = !isSharedView && workflowView === 'sales' && isSales && request.current_stage === 'sales' && request.status === 'submitted_to_sales';
-  const canProjectRoute = !isSharedView && workflowView === 'project' && isProject && request.current_stage === 'project' && request.status === 'pending';
-  const canProjectSendNoc = !isSharedView && workflowView === 'project' && isProject && request.current_stage === 'project' && request.status === 'integrated';
-  const canNocApprove = !isSharedView && workflowView === 'noc' && isNoc && request.current_stage === 'noc' && request.status === 'integrated';
-
-  const showIpIntegration =
-    !!(request.circuit_id || request.ip_address || request.mac_address || request.integrated_by);
-
+  const currentRank = STAGE_RANK[request.current_stage] ?? 3;
   const remarks = request.remarks || [];
-  const attachments = request.attachments || [];
-  const ipRemarks = remarks.filter((r) => r.stage === 'ip');
-  const ipAttachments = attachments.filter((a) => a.stage === 'ip');
+  const isLocked = request.status === 'completed' || request.current_stage === 'done';
+  // Documents and comments are cross-unit collaboration primitives, available to anyone on the
+  // flow at any stage — unlike field edits/approvals, which stay locked to whichever unit
+  // currently owns the stage (enforced server-side too). NOC is excluded from attachments only,
+  // matching the pre-existing backend rule that NOC works via Tickets for live issues instead.
+  const canContribute = !isSharedView && !isLocked && (isDesign || isSales || isProject || isTs || isIp || isNoc || isCreator || isAdmin);
+  const canUploadAttachment = !isSharedView && !isLocked && (isDesign || isSales || isProject || isTs || isIp || isCreator || isAdmin);
 
-  const ipForwardPayload = () => {
-    const { comment, ...fields } = ipForm;
-    return { ...fields, comment_text: comment.trim() || undefined };
+  // A reject-to-design loop resets current_stage back to 'design' — this signal (any remark
+  // ever tagged 'sales', or design_confirmed_at, or having already passed stage rank 2) stays
+  // true even mid-loop, so the Sales Review section doesn't regress to a locked placeholder.
+  const hasReachedSalesReview = remarks.some((r) => r.stage === 'sales') || !!request.design_confirmed_at || currentRank >= 2;
+
+  const statusFor = (rank: number, alreadyReached?: boolean): StageSectionStatus => {
+    if (currentRank === rank) return 'active';
+    if (currentRank > rank || alreadyReached) return 'done';
+    return 'upcoming';
   };
 
-  const formatDate = (d?: string | null) =>
-    d
-      ? new Date(d).toLocaleString('en-US', {
-          month: 'short',
-          day: 'numeric',
-          year: 'numeric',
-          hour: 'numeric',
-          minute: '2-digit',
-        })
-      : '—';
+  const designStatus = statusFor(1);
+  const salesReviewStatus = currentRank === 2 ? 'active' : hasReachedSalesReview ? 'done' : 'upcoming';
+  const projectStatus = statusFor(3);
+  const tsStatus = statusFor(4);
+  const ipStatus = statusFor(5);
+  const nocStatus = currentRank === 6 ? 'active' : currentRank > 6 || (request.current_stage === 'project' && request.status === 'noc_approved') ? 'done' : 'upcoming';
+
+  const canDesignAct = !isSharedView && isDesign && request.current_stage === 'design';
+  const canSalesReview = !isSharedView && isSales && request.current_stage === 'sales';
+  const canProjectRoute = !isSharedView && isProject && request.current_stage === 'project' && request.status === 'pending';
+  const canProjectSendNoc = !isSharedView && isProject && request.current_stage === 'project' && request.status === 'integrated';
+  const canProjectComplete = !isSharedView && (isProject || isCreator || isAdmin) && request.current_stage === 'project' && request.status === 'noc_approved' && !isLocked;
+  const canTsAct = !isSharedView && isTs && request.current_stage === 'ts' && request.status === 'pending';
+  const canIpAct = !isSharedView && isIp && request.current_stage === 'ip' && request.status === 'ongoing';
+  const canNocApprove = !isSharedView && isNoc && request.current_stage === 'noc' && request.status === 'integrated';
 
   return (
-    <ProductionPageShell
-      backTo={backTo}
-      backLabel={backLabel}
-      header={<ProjectRequestDetailHeader request={request} />}
-    >
+    <ProductionPageShell backTo={backTo} backLabel={backLabel} header={<ProjectRequestDetailHeader request={request} />}>
       {!isSharedView && (
         <div className="mb-6">
           <WorkflowTimeline workflowType={request.is_design_request ? 'design_request' : 'service_request'} recordId={request.id} />
         </div>
       )}
+      {!isSharedView && request.current_stage === 'ts' && (
+        <div className="mb-6">
+          <FieldWorkPanel
+            sourceType="service_request" sourceId={request.id}
+            sourceTitle={`${request.customer_name || ''} — ${request.site_name || ''}`.trim()}
+            sourceSiteName={request.site_name} sourceClientName={request.customer_name}
+          />
+        </div>
+      )}
+
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         <div className="min-w-0 space-y-6 lg:col-span-2">
-          {workflowView === 'design' && (
-            <>
-              <DesignRequestOutput request={request} />
-              <DetailCard title="Request status" icon={FileText}><p className="text-sm text-[var(--text-secondary)]">{request.current_stage === 'design' ? 'This request is awaiting survey completion. Return to the Design Unit queue and choose Complete survey.' : 'This request has been submitted to Sales.'}</p></DetailCard>
-              <DetailCard title="Attachments" icon={FileText}><AttachmentZone attachments={attachments} allowUpload={false} /></DetailCard>
-            </>
-          )}
-          {workflowView === 'sales' && (
-            <>
-              <DesignRequestOutput request={request} />
-              <DetailCard title="Design attachments" icon={FileText}><AttachmentZone attachments={attachments} allowUpload={false} /></DetailCard>
-              {canSalesForward && <DetailCard title="Sales action" icon={Send}><p className="mb-4 text-sm text-[var(--text-secondary)]">Review the Design survey and material estimate, then send the completed request to Project Unit.</p><Button disabled={actionLoading} onClick={async () => { setActionLoading(true); try { await salesForwardProjectRequest(request.id); toast({ title: 'Sent to Project Unit' }); navigate(`/project-request/project/${request.id}`); } catch (e: unknown) { toast({ title: 'Could not forward', description: e instanceof Error ? e.message : 'Try again', variant: 'destructive' }); } finally { setActionLoading(false); } }}><Send className="mr-2 h-4 w-4" />Forward to Project Unit</Button></DetailCard>}
-            </>
-          )}
-          {/* ── Project Unit: full monitor view (no tabs) ── */}
-          {workflowView === 'project' && (
-            <>
-              {request.is_design_request && <DesignRequestOutput request={request} />}
-              <SubmittedRequestDetails request={request} />
-              {showIpIntegration && <IpIntegrationDetails request={request} />}
-              {canProjectRoute && <DetailCard title="Project Unit routing" icon={Send}><p className="mb-4 text-sm text-[var(--text-secondary)]">Choose the next technical unit to start the implementation work.</p><div className="flex flex-wrap gap-3"><Button disabled={actionLoading} onClick={async () => { setActionLoading(true); try { await projectForwardProjectRequest(request.id, 'ts'); navigate(`/project-request/ts/${request.id}`); } finally { setActionLoading(false); } }}>Send to TS</Button><Button disabled={actionLoading} variant="outline" onClick={async () => { setActionLoading(true); try { await projectForwardProjectRequest(request.id, 'ip'); navigate(`/project-request/ip/${request.id}`); } finally { setActionLoading(false); } }}>Send to IP</Button></div></DetailCard>}
-              {canProjectSendNoc && <DetailCard title="Project Unit routing" icon={Send}><p className="mb-4 text-sm text-[var(--text-secondary)]">TS has returned the request. Send the completed package to NOC for review.</p><Button disabled={actionLoading} onClick={async () => { setActionLoading(true); try { await projectForwardProjectRequest(request.id, 'noc'); navigate(`/project-request/noc/${request.id}`); } finally { setActionLoading(false); } }}>Send to NOC</Button></DetailCard>}
-              {canProjectComplete && (
-                <DetailCard title="Project Unit — mark complete" icon={Check}>
-                  <p className="mb-4 text-sm text-[var(--text-secondary)]">
-                    IP has submitted integration details. Review the IP work, then mark this request
-                    complete.
-                  </p>
-                  <Button
-                    type="button"
-                    disabled={actionLoading}
-                    className="w-full rounded-xl bg-emerald-600 py-6 text-base font-semibold hover:bg-emerald-700"
-                    onClick={async () => {
-                      setActionLoading(true);
-                      try {
-                        await projectCompleteProjectRequest(request.id);
-                        toast({ title: 'Request completed', description: 'Recorded as completed' });
-                        await refresh();
-                      } catch (e: unknown) {
-                        toast({
-                          title: 'Could not complete',
-                          description: e instanceof Error ? e.message : 'Something went wrong',
-                          variant: 'destructive',
-                        });
-                      } finally {
-                        setActionLoading(false);
-                      }
-                    }}
-                  >
-                    <Check className="mr-2 h-5 w-5" />
-                    {actionLoading ? 'Completing…' : 'Mark as complete'}
-                  </Button>
-                </DetailCard>
-              )}
-              <DetailCard title="All attachments" icon={FileText}>
-                <AttachmentZone
-                  attachments={attachments}
-                  allowUpload={!isLocked && (!!isCreator || isAdmin)}
-                  onUpload={async (file) => {
-                    await uploadProjectRequestAttachment(request.id, file, 'project');
-                    await refresh();
-                  }}
-                />
-              </DetailCard>
-              <DetailCard title="Comment / Remarks" icon={MessageSquare}>
-                <PipelineHistory request={request} remarks={remarks} />
-              </DetailCard>
-              {isLocked && (
-                <p className="rounded-xl border border-transparent bg-[var(--accent-green-light)] px-4 py-3 text-sm text-[var(--success-text)]">
-                  This request is complete. No further uploads or comments are allowed.
-                </p>
-              )}
-              {!isLocked && !canProjectComplete && (isCreator || isProject || isAdmin) && (
-                <DetailCard title="Add comment (Project Unit)" icon={MessageSquare}>
+          <CollapsibleStageSection title="Sales — Feasibility Request" icon={ShoppingBag} status="done" summary={request.customer_name}>
+            <SalesStageSection request={request} canUpload={canUploadAttachment} onUpdated={refresh} />
+          </CollapsibleStageSection>
+
+          <CollapsibleStageSection title="Design — Survey & Materials" icon={PenLine} status={designStatus} summary={designStatus === 'done' ? request.design_reference || 'Submitted' : undefined}>
+            <DesignStageSection request={request} canEdit={canDesignAct} canUpload={canUploadAttachment} onUpdated={refresh} />
+          </CollapsibleStageSection>
+
+          <CollapsibleStageSection title="Sales Review" icon={ClipboardCheck} status={salesReviewStatus} summary={salesReviewStatus === 'done' ? (request.design_confirmed_at ? 'Confirmed' : undefined) : undefined}>
+            <SalesReviewStageSection request={request} canReview={canSalesReview} onUpdated={refresh} />
+          </CollapsibleStageSection>
+
+          <CollapsibleStageSection title="Project Unit" icon={Building2} status={projectStatus} summary={projectStatus === 'done' ? [request.capacity, request.cpe].filter(Boolean).join(' · ') || undefined : undefined}>
+            <ProjectStageSection
+              request={request}
+              canRoute={canProjectRoute}
+              canSendNoc={canProjectSendNoc}
+              canComplete={canProjectComplete}
+              canUpload={canUploadAttachment}
+              actionLoading={actionLoading}
+              setActionLoading={setActionLoading}
+              onUpdated={refresh}
+            />
+          </CollapsibleStageSection>
+
+          <CollapsibleStageSection title="TX — Transmission" icon={Cable} status={tsStatus} summary={tsStatus === 'done' && request.ts_notes ? request.ts_notes : undefined}>
+            <TxStageSection request={request} canAct={canTsAct} canUpload={canUploadAttachment} actionLoading={actionLoading} setActionLoading={setActionLoading} onUpdated={refresh} />
+          </CollapsibleStageSection>
+
+          <CollapsibleStageSection title="IP — Integration" icon={Wifi} status={ipStatus} summary={ipStatus === 'done' ? request.circuit_id || undefined : undefined}>
+            <IpStageSection request={request} canAct={canIpAct} canUpload={canUploadAttachment} actionLoading={actionLoading} setActionLoading={setActionLoading} onUpdated={refresh} />
+          </CollapsibleStageSection>
+
+          <CollapsibleStageSection title="NOC — Monitoring" icon={Radio} status={nocStatus} summary={nocStatus === 'done' && request.noc_notes ? request.noc_notes : undefined}>
+            <NocStageSection request={request} canAct={canNocApprove} actionLoading={actionLoading} setActionLoading={setActionLoading} onUpdated={refresh} />
+          </CollapsibleStageSection>
+
+          {/* Cross-unit discussion — always available to every unit on the flow, regardless of
+              current_stage. Fields/approvals stay locked to whichever unit currently owns the
+              stage (enforced server-side too), but visibility and comments never do — this is
+              the one thread every department reads from and writes to. */}
+          {!isSharedView && (
+            <DetailCard title="Cross-Unit Discussion" icon={MessageSquare}>
+              <PipelineHistory request={request} remarks={remarks} title="Full history — every unit" />
+              {canContribute && (
+                <div className="mt-4 border-t border-[var(--border)] pt-4">
                   <RemarksThread
                     remarks={remarks}
-                    stage="project"
+                    stage="all"
                     onlyAdd
-                    addLabel="Add a Project Unit comment"
-                    disabled={isLocked}
+                    addLabel="Add an update or comment — visible to every unit on this flow"
                     onAdd={async (text) => {
-                      await addProjectRequestRemark(request.id, text, 'project');
+                      await addProjectRequestRemark(request.id, text, myPrimaryUnit);
                       await refresh();
                     }}
                   />
-                </DetailCard>
-              )}
-            </>
-          )}
-
-          {/* ── TX: view -> remarks -> send to IP ── */}
-          {workflowView === 'ts' && (
-            <>
-              <SubmittedRequestDetails request={request} />
-              <DetailCard title="All attachments" icon={FileText}>
-                <AttachmentZone attachments={attachments} allowUpload={false} />
-              </DetailCard>
-              <DetailCard title="Comment / Remarks" icon={MessageSquare}>
-                <PipelineHistory request={request} remarks={remarks} />
-              </DetailCard>
-              {!isSharedView && (
-              <DetailCard title="TS — your action" icon={MessageSquare}>
-                <RemarksThread
-                  remarks={remarks}
-                  stage="ts"
-                  onlyAdd
-                  addLabel="Add your TS comment (Project Unit comments stay in history above)"
-                  disabled={isLocked || (!canTsAct && !isAdmin)}
-                  onAdd={async (text) => {
-                    await addProjectRequestRemark(request.id, text, 'ts');
-                    await refresh();
-                  }}
-                />
-                {canTsAct && !isLocked && (
-                  <div className="mt-6 flex flex-col gap-3 border-t border-[var(--border)] pt-6">
-                    <Button
-                      className="w-full rounded-xl bg-indigo-600 py-6 text-base font-semibold hover:bg-indigo-700"
-                      disabled={actionLoading}
-                      onClick={async () => {
-                        setActionLoading(true);
-                        try {
-                          await tsAcceptProjectRequest(request.id, 'ip');
-                          toast({
-                            title: 'Sent to IP',
-                            description: 'Request is now with IP for integration',
-                          });
-                          await refresh();
-                          navigate(`/project-request/ip/${request.id}`);
-                        } finally {
-                          setActionLoading(false);
-                        }
-                      }}
-                    >
-                      <Send className="mr-2 h-5 w-5" />
-                      Send to IP
-                    </Button>
-                    <Button
-                      variant="outline"
-                      className="w-full rounded-xl py-6 text-base font-semibold"
-                      disabled={actionLoading}
-                      onClick={async () => {
-                        setActionLoading(true);
-                        try {
-                          await tsAcceptProjectRequest(request.id, 'project');
-                          toast({
-                            title: 'Sent to Project',
-                            description: 'Request returned to Project Unit for review',
-                          });
-                          await refresh();
-                          navigate(`/project-request/project/${request.id}`);
-                        } finally {
-                          setActionLoading(false);
-                        }
-                      }}
-                    >
-                      <Send className="mr-2 h-5 w-5" />
-                      Send to Project
-                    </Button>
-                  </div>
-                )}
-              </DetailCard>
-              )}
-              {canTsAct && !isLocked && (
-                <DetailCard title="TS attachments" icon={FileText}>
-                  <AttachmentZone
-                    attachments={attachments}
-                    allowUpload
-                    onUpload={async (file) => {
-                      await uploadProjectRequestAttachment(request.id, file, 'ts');
-                      await refresh();
-                    }}
-                  />
-                </DetailCard>
-              )}
-            </>
-          )}
-
-          {/* ── IP: form on top → remarks → send to NOC ── */}
-          {workflowView === 'ip' && (
-            <>
-              <SubmittedRequestDetails request={request} />
-              <DetailCard title="Comment / Remarks" icon={MessageSquare}>
-                <PipelineHistory request={request} remarks={remarks} />
-              </DetailCard>
-              <DetailCard title="All attachments" icon={FileText}>
-                <AttachmentZone attachments={attachments} allowUpload={false} />
-              </DetailCard>
-              <DetailCard title="IP integration" icon={FileText}>
-                {canIpAct ? (
-                  <>
-                    <p className="mb-4 text-sm text-[var(--text-secondary)]">
-                      Fill in integration details below. Comment is optional and is only sent when you
-                      submit to Project Unit and NOC.
-                    </p>
-                    <div className="grid gap-4 sm:grid-cols-2">
-                      <FormField
-                        label="Circuit ID"
-                        value={ipForm.circuit_id}
-                        onChange={(v) => setIpForm((f) => ({ ...f, circuit_id: v }))}
-                      />
-                      <FormField
-                        label="Integration Date"
-                        type="date"
-                        value={ipForm.integration_date}
-                        onChange={(v) => setIpForm((f) => ({ ...f, integration_date: v }))}
-                      />
-                      <FormField
-                        label="IP Address"
-                        value={ipForm.ip_address}
-                        onChange={(v) => setIpForm((f) => ({ ...f, ip_address: v }))}
-                      />
-                      <FormField
-                        label="MAC Address"
-                        value={ipForm.mac_address}
-                        onChange={(v) => setIpForm((f) => ({ ...f, mac_address: v }))}
-                      />
-                      <FormField
-                        label="Integrated By"
-                        value={ipForm.integrated_by}
-                        onChange={(v) => setIpForm((f) => ({ ...f, integrated_by: v }))}
-                        className="sm:col-span-2"
-                      />
-                      <FormField
-                        label="Comment (optional)"
-                        as="textarea"
-                        value={ipForm.comment}
-                        onChange={(v) => setIpForm((f) => ({ ...f, comment: v }))}
-                        placeholder="Optional notes for NOC — not required to send"
-                        className="sm:col-span-2"
-                      />
-                    </div>
-                    <div className="mt-6 flex flex-col gap-3 border-t border-[var(--border)] pt-6">
-                      <Button
-                        type="button"
-                        disabled={actionLoading}
-                        className="w-full rounded-xl bg-indigo-600 py-6 text-base font-semibold hover:bg-indigo-700"
-                        onClick={async () => {
-                          setActionLoading(true);
-                          try {
-                            await ipForwardProjectRequest(request.id, {
-                              ...ipForwardPayload(),
-                              route_to_stage: 'project',
-                            });
-                            toast({
-                              title: 'Submitted',
-                              description: 'Sent to Project Unit for review',
-                            });
-                            await refresh();
-                            navigate(`/project-request/project/${request.id}`);
-                          } catch (e: unknown) {
-                            toast({
-                              title: 'Could not send',
-                              description: e instanceof Error ? e.message : 'Something went wrong',
-                              variant: 'destructive',
-                            });
-                          } finally {
-                            setActionLoading(false);
-                          }
-                        }}
-                      >
-                        <Send className="mr-2 h-5 w-5" />
-                        Submit to Project
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        disabled={actionLoading}
-                        className="w-full rounded-xl py-6 text-base font-semibold"
-                        onClick={async () => {
-                          setActionLoading(true);
-                          try {
-                            await ipForwardProjectRequest(request.id, {
-                              ...ipForwardPayload(),
-                              route_to_stage: 'ts',
-                            });
-                            toast({
-                              title: 'Submitted',
-                              description: 'Sent back to TS for follow-up',
-                            });
-                            await refresh();
-                            navigate(`/project-request/ts/${request.id}`);
-                          } catch (e: unknown) {
-                            toast({
-                              title: 'Could not send',
-                              description: e instanceof Error ? e.message : 'Something went wrong',
-                              variant: 'destructive',
-                            });
-                          } finally {
-                            setActionLoading(false);
-                          }
-                        }}
-                      >
-                        <Send className="mr-2 h-5 w-5" />
-                        Submit to TS
-                      </Button>
-                    </div>
-                  </>
-                ) : (
-                  <p className="text-sm text-[var(--text-secondary)]">
-                    This request is no longer at the IP stage.
-                  </p>
-                )}
-              </DetailCard>
-
-              {canIpAct && !isLocked && (
-                <DetailCard title="IP attachments" icon={FileText}>
-                  <AttachmentZone
-                    attachments={attachments}
-                    allowUpload
-                    onUpload={async (file) => {
-                      await uploadProjectRequestAttachment(request.id, file, 'ip');
-                      await refresh();
-                    }}
-                  />
-                </DetailCard>
-              )}
-            </>
-          )}
-
-          {/* ── NOC: IP work only (read-only); Project Unit marks complete ── */}
-          {workflowView === 'noc' && (
-            <>
-              <div className="rounded-2xl border border-amber-200/60 bg-gradient-to-br from-slate-900 via-slate-800 to-amber-950 p-5 text-white shadow-lg sm:p-6">
-                <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-amber-300/90">
-                  NOC review stage
-                </p>
-                <h2 className="mt-1 text-lg font-bold sm:text-xl">IP integration package</h2>
-                <p className="mt-2 max-w-2xl text-sm text-white/75">
-                  Review what IP submitted before Project Unit signs off. You cannot edit fields here —
-                  use tickets for live network issues.
-                </p>
-              </div>
-              {showIpIntegration ? (
-                <DetailCard title="Integration summary" icon={FileText} accent="noc">
-                  <IpIntegrationDetails request={request} />
-                </DetailCard>
-              ) : (
-                <div className="rounded-2xl border border-dashed border-amber-200 bg-amber-50/50 px-6 py-12 text-center">
-                  <p className="text-sm font-medium text-amber-900">Waiting for IP submission</p>
-                  <p className="mt-1 text-xs text-amber-800/80">
-                    This request will appear here once IP completes integration details.
-                  </p>
                 </div>
               )}
-              <DetailCard title="IP attachments" icon={FileText} accent="noc">
-                <AttachmentZone attachments={ipAttachments} allowUpload={false} />
-              </DetailCard>
-              {ipRemarks.length > 0 && (
-                <DetailCard title="IP comments" icon={MessageSquare} accent="noc">
-                  <RemarksThread remarks={ipRemarks} stage="ip" readOnly />
-                </DetailCard>
-              )}
-              {canNocApprove && <DetailCard title="NOC action" icon={Check} accent="noc"><p className="mb-4 text-sm text-[var(--text-secondary)]">Confirm the network review and return this request to Project Unit for final completion.</p><Button disabled={actionLoading} onClick={async () => { setActionLoading(true); try { await nocApproveProjectRequest(request.id); toast({ title: 'Approved by NOC' }); navigate(`/project-request/project/${request.id}`); } catch (e: unknown) { toast({ title: 'Could not approve', description: e instanceof Error ? e.message : 'Try again', variant: 'destructive' }); } finally { setActionLoading(false); } }}><Check className="mr-2 h-4 w-4" />Approve and return to Project</Button></DetailCard>}
-            </>
+            </DetailCard>
           )}
         </div>
 
         <aside className="min-w-0 space-y-6">
           <DetailCard title="Request details">
             <div className="space-y-4">
+              <InfoField label="Reference" value={request.design_confirmed_at ? `SR-${String(request.id).padStart(3, '0')}` : 'Draft — not yet confirmed'} />
               <InfoField label="Status" value={request.status} />
               <InfoField label="Current stage" value={request.current_stage?.toUpperCase()} />
               <InfoField label="Service type" value={request.service_type} />
@@ -564,126 +224,13 @@ export default function ProductionDetail() {
               <InfoField label="Last updated" value={formatDate(request.updated_at)} />
             </div>
           </DetailCard>
+          {!isSharedView && <LinkedReferencesSection recordType="service_request" recordId={request.id} />}
         </aside>
       </div>
     </ProductionPageShell>
   );
 }
 
-function DesignRequestOutput({ request }: { request: ProjectRequest }) {
-  const materials = request.design_materials || [];
-  const total = materials.reduce((sum, item) => sum + Number(item.line_cost ?? item.quantity * item.unit_price), 0);
-  return <>
-    <DetailCard title="Design survey details" icon={FileText}>
-      <InfoGrid>
-        <InfoField label="ISP" value={request.isp || '—'} />
-        <InfoField label="Survey date" value={request.survey_date ? new Date(request.survey_date).toLocaleDateString() : '—'} />
-        <InfoField label="Reference" value={request.design_reference || '—'} />
-      </InfoGrid>
-      {request.design_specification && <p className="mt-4 whitespace-pre-wrap rounded-lg bg-[var(--surface-secondary)] p-3 text-sm text-[var(--text-body)]">{request.design_specification}</p>}
-    </DetailCard>
-    <DetailCard title="Design material request" icon={FileText}>
-      <div className="overflow-x-auto"><table className="w-full min-w-[520px] text-sm"><thead className="text-left text-[var(--text-muted)]"><tr><th className="pb-2">Material</th><th className="pb-2">Quantity</th><th className="pb-2">Unit price</th><th className="pb-2 text-right">Line cost</th></tr></thead><tbody>{materials.map((item) => <tr key={item.id || item.material_name} className="border-t border-[var(--border)]"><td className="py-2.5 font-medium">{item.material_name}</td><td className="py-2.5">{item.quantity} {item.unit}</td><td className="py-2.5">GH₵ {Number(item.unit_price).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td><td className="py-2.5 text-right">GH₵ {Number(item.line_cost ?? item.quantity * item.unit_price).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td></tr>)}</tbody><tfoot><tr className="border-t-2 border-[var(--border-strong)]"><td colSpan={3} className="pt-3 text-right font-bold">Grand total</td><td className="pt-3 text-right font-bold text-[var(--primary)]">GH₵ {total.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td></tr></tfoot></table></div>
-    </DetailCard>
-  </>;
+function formatDate(d?: string | null) {
+  return d ? new Date(d).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }) : '—';
 }
-
-const summaryFields = [
-  'customer_name',
-  'site_name',
-  'location',
-  'region',
-  'capacity',
-  'bandwidth',
-  'service_type',
-  'cpe',
-];
-
-function NocLimitedView({
-  request,
-  remarks,
-}: {
-  request: ProjectRequest;
-  remarks: { stage: string; comment_text: string; author_name: string; created_at: string }[];
-}) {
-  const ipRemarks = remarks.filter((r) => r.stage === 'ip');
-  return (
-    <div className="space-y-4">
-      <InfoGrid>
-        <InfoField label="Customer" value={request.customer_name} />
-        <InfoField label="Site" value={request.site_name} />
-        <InfoField label="Location" value={request.location} />
-        <InfoField label="IP Address" value={request.ip_address} />
-        <InfoField label="MAC Address" value={request.mac_address} />
-        <InfoField label="Circuit ID" value={request.circuit_id} />
-      </InfoGrid>
-      {ipRemarks.length > 0 && (
-        <div>
-          <p className="mb-2 text-sm font-semibold text-[var(--text-body)]">IP remarks</p>
-          {ipRemarks.map((r, i) => (
-            <div key={i} className="mb-2 rounded-lg border border-[var(--border)] bg-[var(--surface-secondary)] p-3 text-sm text-[var(--text-body)]">
-              <p className="font-medium text-[var(--text-primary)]">{r.author_name}</p>
-              <p className="text-xs text-[var(--text-muted)]">{new Date(r.created_at).toLocaleString()}</p>
-              <p className="mt-1">{r.comment_text}</p>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function ReadOnlyGrid({
-  request,
-  nocLimited,
-  fields,
-}: {
-  request: ProjectRequest;
-  nocLimited: boolean;
-  fields?: string[];
-}) {
-  const all: [string, string | undefined][] = [
-    ['Customer', request.customer_name],
-    ['Site', request.site_name],
-    ['Location', request.location],
-    ['Region', request.region],
-    ['Capacity', request.capacity],
-    ['Bandwidth', request.bandwidth],
-    ['Cable distance', request.cable_displacement],
-    ['Service type', request.service_type],
-    ['CPE', request.cpe],
-    ['Start date', request.start_date],
-    ['Completion date', request.completion_date],
-    ['Confirmation date', request.confirmation_date],
-    ['MRC', request.mrc != null ? String(request.mrc) : undefined],
-    ['NRC', request.nrc != null ? String(request.nrc) : undefined],
-    ['Circuit ID', request.circuit_id],
-    ['Integration date', request.integration_date],
-    ['IP address', request.ip_address],
-    ['MAC address', request.mac_address],
-    ['Integrated by', request.integrated_by],
-    ['Created by', request.created_by_name],
-    ['Project unit', request.project_unit_name],
-  ];
-
-  let items = all;
-  if (fields) {
-    items = fields.map((f) => {
-      const label = f.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
-      return [label, (request as Record<string, unknown>)[f] as string | undefined];
-    });
-  }
-  if (nocLimited) {
-    items = all.filter(([k]) =>
-      ['Customer', 'Site', 'Location', 'IP address', 'MAC address'].includes(k)
-    );
-  }
-  return (
-    <InfoGrid>
-      {items.map(([label, value]) => (
-        <InfoField key={label} label={label} value={value} />
-      ))}
-    </InfoGrid>
-  );
-}
-

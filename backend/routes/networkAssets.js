@@ -6,6 +6,23 @@ import { isSystemAdminAccount } from '../roles.js';
 
 const router = express.Router();
 
+// init() (defined below) runs a couple dozen CREATE TABLE/INDEX IF NOT EXISTS statements plus
+// seed-data inserts — safe to repeat, but not free. Every other route file in this app guards
+// its equivalent behind a boot-once flag; this one didn't, so it was re-running that whole
+// migration on every single request to almost every Network Assets route (Dashboard, Equipment,
+// Passive Infra, POPs...), which is real, avoidable latency on every page load and every search
+// keystroke. ensureInit() is the guarded entry point every route should call instead of init().
+// Caches the in-flight PROMISE, not just a boolean set after completion — several requests can
+// land before the first init() finishes, and a boolean lets every one of them start its own
+// init() in parallel, racing on the same CREATE INDEX/CREATE EXTENSION (Postgres's IF NOT
+// EXISTS check isn't atomic with the create, so two concurrent creators can genuinely collide
+// on a pg_class unique-constraint violation — this is not hypothetical, it was reproduced).
+let initPromise = null;
+function ensureInit() {
+  if (!initPromise) initPromise = init().catch((e) => { initPromise = null; throw e; });
+  return initPromise;
+}
+
 // Registered before the router-wide auth gate below so a valid share token can serve
 // this route without a user session — either one row (`network_asset` link, never more
 // than that row) or the full register listing (`network_asset_register` link, the
@@ -13,6 +30,10 @@ const router = express.Router();
 // still requires full authentication.
 router.get('/source/:sheet', authenticateOrShareToken(['network_asset', 'network_asset_register'], authenticateToken), async (req, res) => {
   try {
+    // Registered above the general init-gate below (for the share-token bypass), so this
+    // route needs its own guarded call to pick up index migrations like the trigram search
+    // index — never the unguarded init() directly, or every search keystroke re-runs it.
+    await ensureInit();
     if (req.isSharedView && req.shareLink.record_type === 'network_asset') {
       const row = await pool.query(
         `SELECT id, source_row, row_data, imported_at, sheet_name FROM network_asset_sheet_rows WHERE id = $1`,
@@ -322,19 +343,26 @@ router.put('/source/:sheet/:sourceRow', async (req, res, next) => {
     const data = row.row_data;
     if (!Array.isArray(data.cells)) data.cells = [];
     const old = data.cells[index] ?? null;
-    data.cells[index] = value;
-    await pool.query('UPDATE network_asset_sheet_rows SET row_data=$1,imported_at=NOW() WHERE id=$2', [
-      JSON.stringify(data),
-      row.id
-    ]);
-    await audit(
-      req,
-      'network_asset_sheet_rows',
-      row.id,
-      data.headers?.[index] || `Column ${index + 1}`,
-      old,
-      value
-    );
+    // Clicking into a cell and back out without typing (or a resend of the same value) must
+    // not write a no-op "changed from X to X" history entry — this was the actual cause of
+    // "duplicate history just from clicking."
+    const changed = String(old ?? '') !== String(value ?? '');
+    if (changed) {
+      data.cells[index] = value;
+      await pool.query('UPDATE network_asset_sheet_rows SET row_data=$1,imported_at=NOW() WHERE id=$2', [
+        JSON.stringify(data),
+        row.id
+      ]);
+      const headers = await buildSheetHeaders(req.params.sheet);
+      await audit(
+        req,
+        'network_asset_sheet_rows',
+        row.id,
+        headers[index] || `Column ${index + 1}`,
+        old,
+        value
+      );
+    }
     res.json({ id: row.id, source_row: sourceRow, row_data: data });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -527,18 +555,25 @@ router.put('/equipment/:id', async (req, res) => {
     const id = req.params.id,
       b = req.body;
     const allowed = ['quantity', 'serial_number', 'status'];
+    const before = await pool.query('SELECT * FROM pop_equipment WHERE id=$1', [id]);
+    if (!before.rowCount) return res.status(404).json({ error: 'Equipment record not found' });
     const updates = [],
       values = [];
+    // One (field, before, after) audit entry per changed field — matches the sheet grid's
+    // per-cell history instead of the old generic "updated" stub with no before/after values,
+    // and skips the audit write entirely for a field that was resent unchanged.
+    const changes = [];
     for (const key of allowed) {
-      if (b[key] !== undefined) {
-        values.push(b[key]);
-        updates.push(`${key}=$${values.length}`);
-      }
+      if (b[key] === undefined) continue;
+      if (String(before.rows[0][key] ?? '') === String(b[key] ?? '')) continue;
+      values.push(b[key]);
+      updates.push(`${key}=$${values.length}`);
+      changes.push({ key, oldValue: before.rows[0][key], newValue: b[key] });
     }
-    if (!updates.length) return res.json({ id });
+    if (!updates.length) return res.json(before.rows[0]);
     values.push(id);
     const q = await pool.query(`UPDATE pop_equipment SET ${updates.join(',')} WHERE id=$${values.length} RETURNING *`, values);
-    await audit(req, 'pop_equipment', id, 'updated', '', JSON.stringify(b));
+    for (const c of changes) await audit(req, 'pop_equipment', id, c.key, c.oldValue, c.newValue);
     res.json(q.rows[0]);
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -691,18 +726,22 @@ router.put('/catalogue/:id', async (req, res) => {
     const id = req.params.id,
       b = req.body;
     const allowed = ['category', 'model_name', 'notes'];
+    const before = await pool.query('SELECT * FROM equipment_catalogue WHERE id=$1', [id]);
+    if (!before.rowCount) return res.status(404).json({ error: 'Catalogue entry not found' });
     const updates = [],
       values = [];
+    const changes = [];
     for (const key of allowed) {
-      if (b[key] !== undefined) {
-        values.push(b[key]);
-        updates.push(`${key}=$${values.length}`);
-      }
+      if (b[key] === undefined) continue;
+      if (String(before.rows[0][key] ?? '') === String(b[key] ?? '')) continue;
+      values.push(b[key]);
+      updates.push(`${key}=$${values.length}`);
+      changes.push({ key, oldValue: before.rows[0][key], newValue: b[key] });
     }
-    if (!updates.length) return res.json({ id });
+    if (!updates.length) return res.json(before.rows[0]);
     values.push(id);
     const q = await pool.query(`UPDATE equipment_catalogue SET ${updates.join(',')} WHERE id=$${values.length} RETURNING *`, values);
-    await audit(req, 'equipment_catalogue', id, 'updated', '', JSON.stringify(b));
+    for (const c of changes) await audit(req, 'equipment_catalogue', id, c.key, c.oldValue, c.newValue);
     res.json(q.rows[0]);
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -780,6 +819,13 @@ async function init() {
 
     CREATE INDEX IF NOT EXISTS idx_sheet_rows_name ON network_asset_sheet_rows(sheet_name);
     CREATE INDEX IF NOT EXISTS idx_sheet_rows_gin ON network_asset_sheet_rows USING gin (row_data);
+    -- Matches sourceRowFilter below exactly: without this, the planner falls back to a full
+    -- table scan (all sheets combined) instead of the plain sheet_name index once a sheet's
+    -- share of the table gets large (e.g. ECG Metro was ~45% of all rows, ~600ms per request).
+    -- A partial index over exactly the predicate the route always filters by turns that into
+    -- a sub-millisecond index-only scan.
+    CREATE INDEX IF NOT EXISTS idx_sheet_rows_valid_source_row ON network_asset_sheet_rows (sheet_name, source_row)
+      WHERE jsonb_typeof(row_data->'cells') = 'array' AND COALESCE(row_data->'cells'->>0,'') ~ '^[0-9]+(\\.[0-9]+)?$';
     CREATE INDEX IF NOT EXISTS idx_pops_region ON pops(region_id);
     CREATE INDEX IF NOT EXISTS idx_pops_status ON pops(status);
     CREATE INDEX IF NOT EXISTS idx_pops_territory ON pops(territory_id);
@@ -796,11 +842,25 @@ async function init() {
   for (const n of regions) await pool.query('INSERT INTO regions(name) VALUES($1) ON CONFLICT DO NOTHING', [n]);
   for (const n of ['ECG', 'NEDCO']) await pool.query('INSERT INTO territories(name) VALUES($1) ON CONFLICT DO NOTHING', [n]);
   for (const [c, m] of catalogue) await pool.query('INSERT INTO equipment_catalogue(category,model_name) VALUES($1,$2) ON CONFLICT DO NOTHING', [c, m]);
+
+  // The search box does `row_data::text ILIKE '%term%'` — a leading wildcard, which a plain
+  // btree/gin(jsonb) index can never use (idx_sheet_rows_gin above is jsonb containment only,
+  // dead weight for this query shape). pg_trgm's trigram GIN index is what actually makes
+  // substring ILIKE fast, turning a multi-hundred-ms sequential scan into a few ms on a large
+  // sheet like ECG Metro. Isolated in its own try/catch — CREATE EXTENSION needs a privilege
+  // the app's DB role might not have on every environment, and it must never take the rest of
+  // init() (base tables/indexes) down with it if that's missing here.
+  try {
+    await pool.query(`CREATE EXTENSION IF NOT EXISTS pg_trgm`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_sheet_rows_text_trgm ON network_asset_sheet_rows USING gin ((row_data::text) gin_trgm_ops)`);
+  } catch (e) {
+    console.warn('[network-assets] pg_trgm search index unavailable, search will stay a sequential scan:', e.message);
+  }
 }
 
 router.use(async (_q, _s, next) => {
   try {
-    await init();
+    await ensureInit();
     next();
   } catch (e) {
     next(e);

@@ -47,6 +47,8 @@ const ADMIN_SYSTEM_PATHS = [
   '/settings/design-configuration',
   '/project-request/admin/units',
   '/audit-logs',
+  '/performance-reports/periods',
+  '/performance-reports/analytics',
 ];
 
 /** Every signed-in staff member keeps these, including Admin. */

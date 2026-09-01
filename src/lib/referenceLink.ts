@@ -35,7 +35,7 @@ export function normalizeLinkedReference(row?: {
     type === 'ticket'
       ? `/staff/cx/tickets/${id}`
       : type === 'project'
-        ? `/project-request/project/${id}`
+        ? `/project-request/${id}`
         : `/request-forms/${id}`;
   return {
     type,

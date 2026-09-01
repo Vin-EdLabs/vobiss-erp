@@ -177,6 +177,18 @@ export const IP_TICKET_ROLES: string[] = [
   'cx',
 ];
 
+// IP Unit (circuit inventory) is deliberately narrower than IP_TICKET_ROLES above — that one
+// also includes noc/noc_manager/cx for cross-unit ticket escalation visibility, but the IP
+// Unit module itself has no general-staff or cross-unit entry point by design.
+export const IP_UNIT_ROLES: string[] = [
+  'ip',
+  'ip_manager',
+  'ip_supervisor',
+  'director',
+  'cto',
+  'superadmin',
+];
+
 export const FIELD_TICKET_ROLES: string[] = [
   'field_engineer',
   'field_engineer_admin',
@@ -362,12 +374,15 @@ export const SERVICE_REQUEST_REPORT_ROLES: string[] = [
   'director',
   'cto',
   'project',
+  'sales',
   'ts_manager',
   'ts_supervisor',
   'ip_manager',
   'ip_supervisor',
   'noc_manager',
   'noc_supervisor',
+  'design_manager',
+  'design_supervisor',
 ];
 
 /** Report System hub — union of report types */
@@ -716,7 +731,7 @@ export function getRoleWorkspaceTip(role: string): string {
     ip: 'IP integration work appears in your ticket queue when NOC escalates.',
     ip_manager: 'Coordinate IP engineers on integration tickets from the queue.',
     ip_supervisor: 'Review IP queue depth and unblock stuck integrations.',
-    ts_manager: 'TS reviews service requests — align tickets with active projects.',
+    ts_manager: 'TX reviews service requests — align tickets with active projects.',
     ts_supervisor: 'Help TX track service-linked tickets and site work.',
     field_engineer: 'Log field activities and close assigned tickets when work is done.',
     field_engineer_admin: 'Oversee field logs and engineer ticket assignments.',

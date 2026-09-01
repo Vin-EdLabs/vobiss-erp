@@ -9,7 +9,7 @@ import {
   Headphones, Ticket, MessagesSquare, Users2, User, FilePlus, Headset,
   Globe, CircleAlert, AlertCircle, Search, Network, LayoutDashboard,
   Briefcase, CalendarDays, CalendarCheck, CalendarOff, Wallet, ClipboardCheck, FolderOpen, PanelLeftClose, PanelLeft, Landmark, ShieldCheck,
-  Truck, Fuel, FileSignature, Award
+  Truck, Fuel, FileSignature, Award, Archive as ArchiveIcon, Cable, Eye, Inbox, Gauge
 } from 'lucide-react';
 import { getRequests, getLowStockItems, getNotifications, getWorkspace, cxApi } from '../api';
 import { formatPersonName } from '@/lib/displayName';
@@ -135,9 +135,9 @@ const serviceRequestSlugsForUnits = (
 
 const SIDEBAR_SECTION_IDS = [
   'transport', 'inventory', 'finance', 'approveRequest', 'settings', 'fieldActivities',
-  'assetsManager', 'cx', 'relationshipOffice', 'noc', 'ip', 'fieldEngineering',
+  'assetsManager', 'cx', 'relationshipOffice', 'noc', 'ip', 'ipUnit', 'fieldEngineering',
   'customerPortal', 'reports', 'serviceRequests', 'projectUnit', 'networkAssets',
-  'hr', 'myHr', 'nocManager', 'directors', 'tickets',
+  'hr', 'myHr', 'nocManager', 'directors', 'tickets', 'performanceReports',
 ] as const;
 type SidebarSectionId = (typeof SIDEBAR_SECTION_IDS)[number];
 type SidebarSectionState = Record<SidebarSectionId, boolean>;
@@ -480,6 +480,8 @@ const Sidebar = ({
     const isSystemOperator = !isAdminSuper && (roleIsAdmin || roleIsSuperadmin || role === 'system_admin');
     const isGlobalPosition = hasPosition('director');
     const isManagerOrSupervisor = position.includes('manager') || position.includes('supervisor') || isGlobalPosition;
+    const isTransportSupervisor =
+      userHasAnyRole(user, ['transport_supervisor']) || hasPosition('transport supervisor', 'transport manager') || hasUnit('transport');
     const isProcurement = hasUnit('procurement') || hasPosition('procurement');
     const isFinance = hasUnit('finance') || hasPosition('finance');
     const isFinanceApprover = hasUnit('finance') && (hasPosition('finance', 'finance officer', 'finance manager') || position.includes('finance'));
@@ -494,6 +496,12 @@ const Sidebar = ({
       hasUnit('tx', 'ts') ||
       hasPosition('tx manager', 'tx supervisor', 'ts manager', 'ts supervisor') ||
       (hasPosition('engineer') && hasUnit('tx', 'ts'));
+    // Mirrors backend isFieldWorkSupervisor() in backend/services/fieldWork.js — only these users can call /field-work/supervisor-view.
+    const isFieldWorkSupervisor =
+      isAdminSuper ||
+      isSystemOperator ||
+      userHasAnyRole(user, ['director', 'cto', 'ts_supervisor', 'ts_manager', 'field_engineer_admin']) ||
+      hasPosition('tx manager', 'tx supervisor', 'ts manager', 'ts supervisor');
     const isProjectUser =
       hasUnit('project') ||
       units.some((unit) => unit === 'project unit' || unit.startsWith('project')) ||
@@ -521,7 +529,7 @@ const Sidebar = ({
     const canViewServiceRequestReports =
       hasSystemWideMode ||
       isGlobalPosition ||
-      (isManagerOrSupervisor && hasUnit('project', 'tx', 'ts', 'ip', 'noc') && !isProjectDeptOnly);
+      (isManagerOrSupervisor && hasUnit('project', 'tx', 'ts', 'ip', 'noc', 'sales', 'design') && !isProjectDeptOnly);
     const canViewInventoryReports =
       hasSystemWideMode ||
       isGlobalPosition ||
@@ -701,6 +709,8 @@ const Sidebar = ({
         { icon: MapPin,     label: 'Map View',       path: '/field/map' },
         { icon: Activity,   label: 'All Activities', path: '/field/activities' },
         { icon: PlusCircle, label: 'Add Activity',   path: '/field/add' },
+        ...(isFieldWorkSupervisor ? [{ icon: Wrench, label: 'Field Work', path: '/staff/field/field-work' }] : []),
+        { icon: UserCheck,  label: 'My Field Work',  path: '/staff/field/my-field-work' },
       ]
     };
 
@@ -840,7 +850,6 @@ const Sidebar = ({
       subItems: [
         { icon: Home,        label: 'Dashboard',             path: '/staff/noc/dashboard' },
         { icon: Ticket,      label: 'NOC Ticket Queue',      path: '/staff/noc/tickets', notificationCount: ticketAttention.noc },
-        { icon: Ticket,      label: 'Master Tickets',        path: '/staff/cx/tickets' },
         { icon: ClipboardList, label: 'Incident Notes',       path: '/noc/incident-notes' },
         { icon: Clock,         label: 'Shift Schedule',       path: '/noc/shift-schedule' },
         { icon: FilePlus,    label: 'Create Ticket',         path: '/staff/cx/create-ticket' },
@@ -866,10 +875,27 @@ const Sidebar = ({
       ]
     };
 
+    // IP Unit — circuit inventory (source of truth) + circuit request workflow. A first-class
+    // module distinct from IP Ticketing above: never built inside Ticketing, IP-Unit-only.
+    const ipUnitSection = {
+      icon: Cable,
+      label: 'IP Unit',
+      isCollapsible: true,
+      isOpen: sectionOpen('ipUnit'),
+      onToggle: () => toggleSection('ipUnit'),
+      subItems: [
+        { icon: Home,          label: 'Dashboard',          path: '/ip-unit/dashboard' },
+        { icon: Network,       label: 'Circuit Inventory',  path: '/ip-unit/circuits' },
+        { icon: PlusCircle,    label: 'Add Circuit',        path: '/ip-unit/circuits/new' },
+        { icon: ClipboardList, label: 'Circuit Requests',   path: '/ip-unit/requests' },
+        { icon: BarChart3,     label: 'Reports',            path: '/ip-unit/reports' },
+      ]
+    };
+
     // TX Ticketing
     const fieldEngSection = {
       icon: Wrench,
-      label: 'TS Ticketing',
+      label: 'TX Ticketing',
       isCollapsible: true,
       isOpen: sectionOpen('fieldEngineering'),
       onToggle: () => toggleSection('fieldEngineering'),
@@ -878,9 +904,9 @@ const Sidebar = ({
       notificationCount: ticketAttention.tx,
       subItems: [
         { icon: Home,        label: 'Dashboard',             path: '/staff/field/dashboard' },
-        { icon: Ticket,      label: 'TS Ticket Queue',       path: '/staff/field/tickets', notificationCount: ticketAttention.tx },
+        { icon: Ticket,      label: 'TX Ticket Queue',       path: '/staff/field/tickets', notificationCount: ticketAttention.tx },
         { icon: FilePlus,    label: 'Create Ticket',         path: '/staff/cx/create-ticket' },
-        { icon: CircleAlert, label: 'TS Escalation',         path: '/staff/cx/escalate', notificationCount: ticketAttention.escalate },
+        { icon: CircleAlert, label: 'TX Escalation',         path: '/staff/cx/escalate', notificationCount: ticketAttention.escalate },
       ]
     };
 
@@ -914,6 +940,32 @@ const Sidebar = ({
     const profileItem = { icon: Settings, label: 'Profile & Security', path: '/profile' };
     const myAssessmentItem = { icon: Award, label: 'My Assessment', path: '/my-assessment' };
     const showMyAssessment = role !== 'customer';
+
+    // Performance & Report Assessment System — everyone gets My Dashboard/My Reports (they
+    // submit their own reports); reviewer/exec/HR sub-items are gated by the same
+    // isManagerOrSupervisor/isGlobalPosition/isHrUser checks already computed above.
+    const performanceReportsSubItems = [
+      { icon: LayoutDashboard, label: 'My Dashboard', path: '/performance-reports/dashboard' },
+      { icon: FileText, label: 'My Reports', path: '/performance-reports/my-reports' },
+      ...(isManagerOrSupervisor && !isGlobalPosition ? [{ icon: Inbox, label: 'Team Reports', path: '/performance-reports/team' }] : []),
+      ...(isManagerOrSupervisor && !isGlobalPosition ? [{ icon: Users, label: 'Unit Reviews', path: '/performance-reports/unit-reviews' }] : []),
+      ...(isGlobalPosition ? [{ icon: Eye, label: 'Executive Review', path: '/performance-reports/executive' }] : []),
+      ...(isHrUser ? [{ icon: Briefcase, label: 'HR Access', path: '/performance-reports/hr' }] : []),
+      ...(isGlobalPosition || isAdminSuper || isSystemOperator ? [{ icon: CalendarDays, label: 'Assessment Periods', path: '/performance-reports/periods' }] : []),
+      // Company-wide analytics — HR, CTO/Director, and system admin only, not regular unit staff.
+      ...(isHrUser || isGlobalPosition || isAdminSuper || isSystemOperator ? [{ icon: BarChart2, label: 'Analytics', path: '/performance-reports/analytics' }] : []),
+    ];
+    const performanceReportsSection = {
+      icon: Gauge,
+      label: 'Performance & Reports',
+      isCollapsible: true,
+      isOpen: sectionOpen('performanceReports'),
+      onToggle: () => toggleSection('performanceReports'),
+      subItems: performanceReportsSubItems,
+    };
+    const showPerformanceReports = role !== 'customer';
+    const archiveItem = { icon: ArchiveIcon, label: 'Archive', path: '/archive' };
+    const showArchive = role !== 'customer';
 
     const hrPendingLeave = Number(hrStatsQ.data?.pendingLeaveRequests || 0);
     const hrPendingForms = Number(hrStatsQ.data?.pendingFormRequests || 0);
@@ -989,7 +1041,7 @@ const Sidebar = ({
       design: 'Design Unit',
       sales: 'Sales Unit',
       project: 'Project Unit',
-      ts: 'TS — Transmission',
+      ts: 'TX — Transmission',
       ip: 'IP',
       noc: 'NOC',
     };
@@ -1072,7 +1124,7 @@ const Sidebar = ({
         financeSection,
         cashRequest,
         assetsManager, fieldActivities,
-        cxSection, ...(reportSystemSection ? [reportSystemSection] : []), nocSection, ipSection, fieldEngSection,
+        cxSection, ...(reportSystemSection ? [reportSystemSection] : []), nocSection, ipSection, ipUnitSection, fieldEngSection,
         customerPortal,
         directorEscalationSection,
         directorTicketsSection,
@@ -1089,7 +1141,7 @@ const Sidebar = ({
         financeSection,
         cashRequest,
         assetsManager, fieldActivities,
-        cxSection, ...(reportSystemSection ? [reportSystemSection] : []), nocSection, ipSection, fieldEngSection, customerPortal,
+        cxSection, ...(reportSystemSection ? [reportSystemSection] : []), nocSection, ipSection, ipUnitSection, fieldEngSection, customerPortal,
         { icon: AuditIcon, label: 'Audit Logs',      path: '/audit-logs' },
         { icon: Users,     label: 'User Management', path: '/users' },
         { icon: Settings,  label: 'Settings',        path: '/settings' }
@@ -1147,20 +1199,25 @@ const Sidebar = ({
           hasUnit('operations', 'project');
 
         if (!isSystemOperator) {
-          unitItems.push(cashRequest, transportRequest);
-          if (!isHrUser) inventoryItems.push(requestForms, itemReturns, transportRequest);
+          unitItems.push(cashRequest);
+          if (!isHrUser) inventoryItems.push(requestForms, itemReturns);
         } else if (unitNeedsStaffRequests && !isHrUser) {
-          unitItems.push(cashRequest, transportRequest);
-          inventoryItems.push(requestForms, itemReturns, transportRequest);
+          unitItems.push(cashRequest);
+          inventoryItems.push(requestForms, itemReturns);
         }
+        // Every staff member can raise a Transport Request — no role required, and never
+        // duplicated into Inventory. Transport Supervisors / admins get the full Transport
+        // section (with the request page already inside it) instead of this standalone link.
+        const showsFullTransportSection = isTransportSupervisor || isSystemOperator;
+        if (!showsFullTransportSection) unitItems.push(transportRequest);
 
         if (approvalSubItems.length) unitItems.push(requestApprovalsSection);
-        unitItems.push(transportSection);
+        if (showsFullTransportSection) unitItems.push(transportSection);
         if (isManagerOrSupervisor && reportSystemSection) unitItems.push(reportSystemSection);
 
         if (isNocUser) unitItems.push(nocSection);
         if (hasPosition('noc manager')) unitItems.push(nocManagerSection);
-        if (isIpUser) unitItems.push(ipSection);
+        if (isIpUser) unitItems.push(ipSection, ipUnitSection);
         if (isTxUser) unitItems.push(fieldEngSection, fieldActivities);
         if (isCxUser) unitItems.push(cxSection, customerPortal);
         if (hasPosition('relationship officer')) unitItems.push(roSection);
@@ -1195,7 +1252,7 @@ const Sidebar = ({
       baseItems = [requestApprovalsSection, ...baseItems];
     }
 
-    return [myWorkspace, ...(showMyAssessment ? [myAssessmentItem] : []), chatItem, ...baseItems, profileItem];
+    return [myWorkspace, ...(showArchive ? [archiveItem] : []), chatItem, ...baseItems, ...(showPerformanceReports ? [performanceReportsSection] : []), ...(showMyAssessment ? [myAssessmentItem] : []), profileItem];
   };
 
   const menuItems = getMenuItems();

@@ -48,8 +48,17 @@ function pathMatches(currentPath: string, menuPath: string) {
   return false;
 }
 
+// /project-request/:id (the unified 360° Service Request Flow profile page) carries no unit
+// segment, unlike its old /project-request/:unitSlug/:id shape — so a numeric-id detail path
+// can't be matched to one specific unit's hub link by prefix alone. Every unit's own
+// /project-request/<slug> link stays highlighted while viewing any SR, since any of them could
+// legitimately have navigated there; a real single-unit account only ever sees its own link
+// anyway, so this doesn't light up menu items a viewer wouldn't otherwise see.
+const PROJECT_REQUEST_DETAIL_PATH = /^\/project-request\/\d+$/;
+
 export function isMenuPathActive(currentPath: string, menuPath: string) {
   if (pathMatches(currentPath, menuPath)) return true;
+  if (menuPath.startsWith('/project-request/') && PROJECT_REQUEST_DETAIL_PATH.test(currentPath)) return true;
   const aliases = MENU_ALIASES[menuPath] || [];
   return aliases.some((alias) => pathMatches(currentPath, alias));
 }

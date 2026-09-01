@@ -2,8 +2,13 @@
  * Service Request workflow — database layer
  */
 import pool from '../db.js';
+import { syncProjectRequestToWip } from '../services/wipSync.js';
 
 const PIPELINE_STAGES = ['ts', 'ip', 'noc'];
+
+function syncWip(requestId) {
+  return syncProjectRequestToWip(requestId).catch((e) => console.error('[wipSync] sync failed', requestId, e.message));
+}
 
 /** Rename legacy production_* tables if they exist (one-time on existing DBs). */
 async function migrateRenameLegacyProductionTables() {
@@ -26,7 +31,26 @@ async function migrateRenameLegacyProductionTables() {
   }
 }
 
-export async function initProjectRequestTables() {
+// Called from many places — a router-level "run once" middleware in project.routes.js, plus
+// several individual WIP route handlers that call it directly and were never covered by that
+// middleware (they're registered earlier in the file, before the middleware's router.use()).
+// Without a guard at the source, concurrent requests each trigger their own full run, and the
+// DROP CONSTRAINT IF EXISTS + ADD CONSTRAINT calls inside race and fail with "constraint already
+// exists" (confirmed with a live concurrency test — this is what a burst of requests right after
+// a restart looks like). Caching the in-flight/completed promise here means every caller, no
+// matter where it's called from, safely shares the exact same single run.
+let initPromise = null;
+export function initProjectRequestTables() {
+  if (!initPromise) {
+    initPromise = runInitProjectRequestTables().catch((e) => {
+      initPromise = null;
+      throw e;
+    });
+  }
+  return initPromise;
+}
+
+async function runInitProjectRequestTables() {
   await migrateRenameLegacyProductionTables();
   await pool.query(`
     CREATE TABLE IF NOT EXISTS project_units (
@@ -90,6 +114,27 @@ export async function initProjectRequestTables() {
   await pool.query(`ALTER TABLE project_requests ADD COLUMN IF NOT EXISTS is_design_request BOOLEAN NOT NULL DEFAULT false;`);
   await pool.query(`ALTER TABLE project_requests ADD COLUMN IF NOT EXISTS adss TEXT;`);
   await pool.query(`ALTER TABLE project_requests ADD COLUMN IF NOT EXISTS drop_cable TEXT;`);
+  // 360° Service Request Flow — real links to the same customers/customer_sites tables
+  // Tickets/Field Work/IP Unit already use (customer_name/site_name text columns above stay
+  // untouched for legacy rows), and the "Design confirmed → SR-XXXX is real" moment.
+  await pool.query(`ALTER TABLE project_requests ADD COLUMN IF NOT EXISTS customer_id INTEGER REFERENCES customers(id) ON DELETE SET NULL;`);
+  await pool.query(`ALTER TABLE project_requests ADD COLUMN IF NOT EXISTS site_id INTEGER REFERENCES customer_sites(id) ON DELETE SET NULL;`);
+  await pool.query(`ALTER TABLE project_requests ADD COLUMN IF NOT EXISTS design_confirmed_at TIMESTAMP;`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_proj_req_customer ON project_requests(customer_id);`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_proj_req_site ON project_requests(site_id);`);
+
+  // 360° Service Request Flow v2 — Sales's Feasibility Request Form fields (not covered by any
+  // existing column) and TX/NOC's own notes field (Design and IP already had a place to leave
+  // stage-specific detail; TX and NOC only had the shared comment thread until now).
+  await pool.query(`ALTER TABLE project_requests ADD COLUMN IF NOT EXISTS account_manager VARCHAR(255);`);
+  await pool.query(`ALTER TABLE project_requests ADD COLUMN IF NOT EXISTS feasibility_type VARCHAR(60);`);
+  await pool.query(`ALTER TABLE project_requests ADD COLUMN IF NOT EXISTS request_type VARCHAR(60);`);
+  await pool.query(`ALTER TABLE project_requests ADD COLUMN IF NOT EXISTS technical_contact_name VARCHAR(255);`);
+  await pool.query(`ALTER TABLE project_requests ADD COLUMN IF NOT EXISTS technical_contact_email VARCHAR(255);`);
+  await pool.query(`ALTER TABLE project_requests ADD COLUMN IF NOT EXISTS technical_contact_phone VARCHAR(60);`);
+  await pool.query(`ALTER TABLE project_requests ADD COLUMN IF NOT EXISTS site_coordinates VARCHAR(120);`);
+  await pool.query(`ALTER TABLE project_requests ADD COLUMN IF NOT EXISTS ts_notes TEXT;`);
+  await pool.query(`ALTER TABLE project_requests ADD COLUMN IF NOT EXISTS noc_notes TEXT;`);
 
   await pool.query(`CREATE TABLE IF NOT EXISTS project_wip_entries (
     id SERIAL PRIMARY KEY, deleted_at TIMESTAMP, customer_name TEXT, site_name TEXT, location TEXT, region TEXT,
@@ -98,6 +143,15 @@ export async function initProjectRequestTables() {
     mrc TEXT, sale_price TEXT, through_value TEXT, existing_poles TEXT, remarks TEXT,
     created_by INTEGER REFERENCES users(id), created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
   )`);
+  // Service Request -> WIP auto-sync — each confirmed SR keeps a mirrored WIP row (see
+  // services/wipSync.js) and, once linked, shares its real chat channel with the WIP row too.
+  await pool.query(`ALTER TABLE project_wip_entries ADD COLUMN IF NOT EXISTS project_request_id INTEGER UNIQUE REFERENCES project_requests(id) ON DELETE SET NULL;`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_wip_project_request ON project_wip_entries(project_request_id);`);
+  // chat_channels is created later in boot by initChat() (server.js), so on a first-ever boot
+  // this FK can't be added yet — harmless, it succeeds on the next restart once that table exists.
+  await pool.query(`ALTER TABLE project_wip_entries ADD COLUMN IF NOT EXISTS chat_channel_id UUID REFERENCES chat_channels(id) ON DELETE SET NULL;`).catch((e) => {
+    console.warn('project_wip_entries.chat_channel_id column pending (chat_channels not ready yet):', e.message);
+  });
   await pool.query(`CREATE TABLE IF NOT EXISTS project_wip_history (
     id SERIAL PRIMARY KEY, entry_id INTEGER NOT NULL, field_name TEXT NOT NULL, old_value TEXT, new_value TEXT,
     changed_by INTEGER REFERENCES users(id), changed_by_name TEXT NOT NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -220,26 +274,23 @@ async function dropProjectRequestCheckConstraints() {
 
 async function migrateProjectRequestConstraints() {
   try {
-    const existingStatus = await pool.query(
-      `SELECT 1 FROM pg_constraint WHERE conrelid = 'project_requests'::regclass AND conname = 'project_requests_status_check'`
-    );
-    const existingStage = await pool.query(
-      `SELECT 1 FROM pg_constraint WHERE conrelid = 'project_requests'::regclass AND conname = 'project_requests_current_stage_check'`
-    );
+    // Drop + recreate every time (idempotent, cheap) rather than "add only if the constraint
+    // name doesn't exist yet" — that check-then-add pattern is what let 'sales' silently stay
+    // OFF the allowed current_stage list for a long time even though submitDesignRequest()
+    // has always written current_stage='sales': the constraint got created once, early, before
+    // 'sales' was added to the source list here, and never got refreshed. Unconditional
+    // drop+add means every deploy actually reflects the current allowed-values list below.
+    await pool.query(`ALTER TABLE project_requests DROP CONSTRAINT IF EXISTS project_requests_status_check`);
+    await pool.query(`
+      ALTER TABLE project_requests ADD CONSTRAINT project_requests_status_check
+      CHECK (status IN ('pending','ongoing','integrated','rejected','completed','noc_approved','submitted_to_sales'));
+    `);
 
-    if (!existingStatus.rowCount) {
-      await pool.query(`
-        ALTER TABLE project_requests ADD CONSTRAINT project_requests_status_check
-        CHECK (status IN ('pending','ongoing','integrated','rejected','completed','noc_approved','submitted_to_sales'));
-      `);
-    }
-
-    if (!existingStage.rowCount) {
-      await pool.query(`
-        ALTER TABLE project_requests ADD CONSTRAINT project_requests_current_stage_check
-        CHECK (current_stage IN ('ts','ip','noc','done','rejected','project','design'));
-      `);
-    }
+    await pool.query(`ALTER TABLE project_requests DROP CONSTRAINT IF EXISTS project_requests_current_stage_check`);
+    await pool.query(`
+      ALTER TABLE project_requests ADD CONSTRAINT project_requests_current_stage_check
+      CHECK (current_stage IN ('ts','ip','noc','done','rejected','project','design','sales'));
+    `);
 
     await pool.query(`
       UPDATE project_requests
@@ -464,8 +515,8 @@ export async function createProjectRequest(data, user) {
       customer_name, site_name, location, region, capacity, bandwidth,
       cable_displacement, adss, drop_cable, service_type, cpe, start_date, completion_date, confirmation_date,
       status, current_stage, mrc, nrc, initial_remarks,
-      project_unit_id, project_unit_name, created_by_user_id, created_by_name
-    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23)
+      project_unit_id, project_unit_name, created_by_user_id, created_by_name, customer_id, site_id
+    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25)
     RETURNING *`,
     [
       data.customer_name,
@@ -483,6 +534,7 @@ export async function createProjectRequest(data, user) {
       data.completion_date || null,
       data.confirmation_date || null,
       initialStatus, initialStage, data.mrc ?? null, data.nrc ?? null, data.initial_remarks || null, unit?.id || null, unit?.name || 'Project Unit', user.id, authorName,
+      data.customer_id || null, data.site_id || null,
     ]
   );
   const created = mapRequestRow(rows[0]);
@@ -584,10 +636,14 @@ export async function createSalesRequest(data, user) {
   const authorName = `${user.first_name || ''} ${user.last_name || ''}`.trim() || user.username;
   const { rows } = await pool.query(
     `INSERT INTO project_requests (customer_name, site_name, location, region, isp, initial_remarks, status, current_stage,
-      project_unit_name, created_by_user_id, created_by_name, is_design_request)
-     VALUES ($1,$2,$3,$4,$5,$6,'pending','design','Design Unit',$7,$8,true) RETURNING *`,
+      project_unit_name, created_by_user_id, created_by_name, is_design_request, customer_id, site_id,
+      capacity, service_type, account_manager, feasibility_type, request_type,
+      technical_contact_name, technical_contact_email, technical_contact_phone, site_coordinates)
+     VALUES ($1,$2,$3,$4,$5,$6,'pending','design','Design Unit',$7,$8,true,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19) RETURNING *`,
     [data.customer_name || siteName, siteName, data.location || null, data.region || null, data.isp || null,
-      data.initial_remarks || null, user.id, authorName]
+      data.initial_remarks || null, user.id, authorName, data.customer_id || null, data.site_id || null,
+      data.capacity || null, data.service_type || null, data.account_manager || null, data.feasibility_type || null, data.request_type || null,
+      data.technical_contact_name || null, data.technical_contact_email || null, data.technical_contact_phone || null, data.site_coordinates || null]
   );
   return getProjectRequestById(rows[0].id);
 }
@@ -597,10 +653,12 @@ export async function submitDesignRequest(id, data, user) {
   if (!siteName) throw new Error('Site name is required');
   const { rows } = await pool.query(
     `UPDATE project_requests SET site_name=$2, location=$3, region=$4, isp=$5, survey_date=$6, design_specification=$7,
-      design_reference=$8, status='submitted_to_sales', current_stage='sales', project_unit_name='Sales', updated_at=CURRENT_TIMESTAMP
+      design_reference=$8, cable_displacement=$9, adss=$10, drop_cable=$11,
+      status='submitted_to_sales', current_stage='sales', project_unit_name='Sales', updated_at=CURRENT_TIMESTAMP
      WHERE id=$1 AND is_design_request=true AND current_stage='design' RETURNING *`,
     [id, siteName, data.location || null, data.region || null, data.isp || null, data.survey_date || null,
-      data.design_specification || null, data.design_reference || null]
+      data.design_specification || null, data.design_reference || null,
+      data.cable_displacement || null, data.adss || null, data.drop_cable || null]
   );
   if (!rows[0]) throw new Error('Request is not awaiting Design Unit work');
   await pool.query('DELETE FROM project_request_design_materials WHERE request_id = $1', [id]);
@@ -614,22 +672,78 @@ export async function submitDesignRequest(id, data, user) {
     );
   }
   if (data.design_specification?.trim()) await addProjectRequestRemark(id, { comment_text: 'Design survey submitted to Sales.', stage: 'design' }, user);
+  await syncWip(id);
   return getProjectRequestById(id);
 }
 
-export async function forwardWorkflowRequest(id, fromStage, toStage) {
+/**
+ * "Confirm & Forward to Project" — the 360° flow's core moment, lives with Sales's review of
+ * Design's completed survey (current_stage='sales', set by submitDesignRequest() above once
+ * Design sends the survey back). Sets design_confirmed_at, which is what the SR profile uses to
+ * decide whether to show "Draft" or the real SR-XXXX banner — see referenceRegistry.js's
+ * computeRefNumber() for where SR-XXXX itself is (and always was) computed from the row id.
+ */
+export async function confirmDesignRequest(id, user) {
+  const { rows } = await pool.query(
+    `UPDATE project_requests
+     SET current_stage='project', status='pending', design_confirmed_at=CURRENT_TIMESTAMP, project_unit_name='Project Unit', updated_at=CURRENT_TIMESTAMP
+     WHERE id=$1 AND current_stage='sales' RETURNING *`,
+    [id]
+  );
+  if (!rows[0]) throw new Error('Request is not awaiting Sales review');
+  const authorName = `${user.first_name || ''} ${user.last_name || ''}`.trim() || user.username;
+  await addProjectRequestRemark(id, { comment_text: `${authorName} confirmed the design — ready for Project Unit.`, stage: 'sales' }, user);
+  await syncWip(id);
+  return getProjectRequestById(id);
+}
+
+/** Sales rejects Design's survey and bounces it back — the first real "send it back" path in
+ *  the flow. Comment is required so Design knows what to fix. */
+export async function rejectSalesReview(id, comment, user) {
+  const text = String(comment || '').trim();
+  if (!text) throw new Error('A comment is required when rejecting back to Design');
+  const { rows } = await pool.query(
+    `UPDATE project_requests
+     SET current_stage='design', status='pending', updated_at=CURRENT_TIMESTAMP
+     WHERE id=$1 AND current_stage='sales' RETURNING *`,
+    [id]
+  );
+  if (!rows[0]) throw new Error('Request is not awaiting Sales review');
+  await addProjectRequestRemark(id, { comment_text: text, stage: 'sales' }, user);
+  return getProjectRequestById(id);
+}
+
+// Project's technical/commercial fields — fillable inline at the routing step (project -> ts/ip),
+// same "save fields and advance stage in one call" shape IP's own forward already uses.
+const PROJECT_STAGE_FIELDS = [
+  'capacity', 'bandwidth', 'cpe', 'cable_displacement', 'adss', 'drop_cable',
+  'start_date', 'completion_date', 'confirmation_date', 'mrc', 'nrc',
+];
+
+export async function forwardWorkflowRequest(id, fromStage, toStage, fields) {
   const transitions = {
     sales: { project: { status: 'pending', stage: 'project' } },
     project: { ts: { status: 'pending', stage: 'ts' }, ip: { status: 'ongoing', stage: 'ip' }, noc: { status: 'integrated', stage: 'noc' } },
   };
   const next = transitions[fromStage]?.[toStage];
   if (!next) throw new Error('Invalid workflow route');
+
+  const setClauses = ['status=$3', 'current_stage=$4', 'project_unit_name=$5', 'updated_at=CURRENT_TIMESTAMP'];
+  const params = [id, fromStage, next.status, next.stage, toStage === 'ts' ? 'TS — Transmission' : toStage === 'ip' ? 'IP' : toStage === 'noc' ? 'NOC' : 'Project Unit'];
+  if (fromStage === 'project' && fields && typeof fields === 'object') {
+    for (const key of PROJECT_STAGE_FIELDS) {
+      if (fields[key] === undefined) continue;
+      params.push(fields[key] === '' ? null : fields[key]);
+      setClauses.push(`${key}=$${params.length}`);
+    }
+  }
+
   const { rows } = await pool.query(
-    `UPDATE project_requests SET status=$3, current_stage=$4, project_unit_name=$5, updated_at=CURRENT_TIMESTAMP
-     WHERE id=$1 AND current_stage=$2 RETURNING *`,
-    [id, fromStage, next.status, next.stage, toStage === 'ts' ? 'TS — Transmission' : toStage === 'ip' ? 'IP' : toStage === 'noc' ? 'NOC' : 'Project Unit']
+    `UPDATE project_requests SET ${setClauses.join(', ')} WHERE id=$1 AND current_stage=$2 RETURNING *`,
+    params
   );
   if (!rows[0]) throw new Error(`Request is no longer awaiting ${fromStage} action`);
+  await syncWip(id);
   return getProjectRequestById(id);
 }
 
@@ -701,7 +815,10 @@ export function canViewRequestV2(request, user, userUnits) {
     if (status === 'integrated' && stage === 'project') return true;
     if (status === 'noc_approved' && stage === 'project') return true;
   }
-  if (userUnits.includes('sales') && request.is_design_request && status === 'submitted_to_sales') return true;
+  // Sales originates every 360° Service Request Flow SR (is_design_request is set on both the
+  // Sales and Design creation paths) — same "visible for the life of the request" treatment as
+  // Design above, not just while it's sitting in their own submitted_to_sales queue.
+  if (userUnits.includes('sales') && request.is_design_request) return true;
   return false;
 }
 
@@ -730,18 +847,20 @@ export async function addProjectRequestAttachment(requestId, file, stage, user) 
   return rows[0];
 }
 
-/** TX accept -> route to IP or back to Project Unit */
-export async function tsAcceptRequest(requestId, user, routeToStage = 'ip') {
+/** TX accept -> route to IP or back to Project Unit. notes (optional) is TX's own stage-specific
+ *  field, same shape as ip_forward saving its integration fields in the same call. */
+export async function tsAcceptRequest(requestId, user, routeToStage = 'ip', notes) {
   const nextStage = routeToStage === 'project' ? 'project' : 'ip';
   const nextStatus = nextStage === 'project' ? 'integrated' : 'ongoing';
   const { rows } = await pool.query(
     `UPDATE project_requests SET
-      status = $2, current_stage = $3, updated_at = CURRENT_TIMESTAMP
+      status = $2, current_stage = $3, ts_notes = COALESCE($4, ts_notes), updated_at = CURRENT_TIMESTAMP
      WHERE id = $1 AND current_stage = 'ts' AND status = 'pending'
      RETURNING *`,
-    [requestId, nextStatus, nextStage]
+    [requestId, nextStatus, nextStage, notes?.trim() || null]
   );
   if (!rows[0]) throw new Error('Request not found or not awaiting TX action');
+  await syncWip(requestId);
   return mapRequestRow(rows[0]);
 }
 
@@ -754,6 +873,7 @@ export async function tsRejectRequest(requestId, user) {
     [requestId]
   );
   if (!rows[0]) throw new Error('Request not found or not awaiting TX action');
+  await syncWip(requestId);
   return mapRequestRow(rows[0]);
 }
 
@@ -804,6 +924,7 @@ export async function ipForwardRequest(requestId, data, user) {
   if (user && comment_text) {
     await addProjectRequestRemark(requestId, { comment_text, stage: 'ip' }, user);
   }
+  await syncWip(requestId);
   return getProjectRequestById(requestId);
 }
 
@@ -835,14 +956,15 @@ export async function ipUpdateRequest(requestId, data, user) {
 }
 
 /** NOC accepts â€” returns to Project Unit for final sign-off */
-export async function nocApproveRequest(requestId) {
+export async function nocApproveRequest(requestId, notes) {
+  const notesValue = notes?.trim() || null;
   try {
     const { rows } = await pool.query(
       `UPDATE project_requests SET
-        status = 'noc_approved', current_stage = 'project', updated_at = CURRENT_TIMESTAMP
+        status = 'noc_approved', current_stage = 'project', noc_notes = COALESCE($2, noc_notes), updated_at = CURRENT_TIMESTAMP
        WHERE id = $1 AND current_stage = 'noc' AND status = 'integrated'
        RETURNING *`,
-      [requestId]
+      [requestId, notesValue]
     );
     if (!rows[0]) {
       const { rows: cur } = await pool.query(
@@ -858,18 +980,20 @@ export async function nocApproveRequest(requestId) {
         `Request is not awaiting NOC approval (stage: ${current_stage}, status: ${status})`
       );
     }
+    await syncWip(requestId);
     return mapRequestRow(rows[0]);
   } catch (e) {
     if (e.code === '23514') {
       await migrateProjectRequestConstraints();
       const { rows } = await pool.query(
         `UPDATE project_requests SET
-          status = 'noc_approved', current_stage = 'project', updated_at = CURRENT_TIMESTAMP
+          status = 'noc_approved', current_stage = 'project', noc_notes = COALESCE($2, noc_notes), updated_at = CURRENT_TIMESTAMP
          WHERE id = $1 AND current_stage = 'noc' AND status = 'integrated'
          RETURNING *`,
-        [requestId]
+        [requestId, notesValue]
       );
       if (!rows[0]) throw new Error('Request not found or not awaiting NOC approval');
+      await syncWip(requestId);
       return mapRequestRow(rows[0]);
     }
     throw e;
@@ -902,6 +1026,7 @@ export async function projectCompleteRequest(requestId, user) {
     [requestId]
   );
   if (!rows[0]) throw new Error('Request is not awaiting Project Unit completion');
+  await syncWip(requestId);
   return mapRequestRow(rows[0]);
 }
 

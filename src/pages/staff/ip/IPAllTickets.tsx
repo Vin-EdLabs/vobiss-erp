@@ -142,7 +142,7 @@ const IPAllTickets: React.FC = () => {
       const processed = ticketList
         .filter((t: any) => {
           const assignee = t.assignee_name || t.assigned_to?.name || '';
-          return assignee && ipMemberNames.has(assignee);
+          return (assignee && ipMemberNames.has(assignee)) || t.escalation_stage === 'ip';
         })
         .map((t: any) => ({
           ...t,

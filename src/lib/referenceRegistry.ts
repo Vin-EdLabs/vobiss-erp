@@ -13,6 +13,8 @@ export const REFERENCE_TYPES = [
   'wip_entry',
   'incident_note',
   'signoff_form',
+  'field_work',
+  'ip_circuit',
 ] as const;
 
 export type ReferenceRecordType = (typeof REFERENCE_TYPES)[number];
@@ -29,6 +31,8 @@ export const REFERENCE_TYPE_LABELS: Record<string, string> = {
   wip_entry: 'WIP Entry',
   incident_note: 'Incident Note',
   signoff_form: 'Sign-Off Form',
+  field_work: 'Field Work',
+  ip_circuit: 'IP Circuit',
 };
 
 export function referenceTypeLabel(type: string): string {
@@ -45,6 +49,7 @@ const REFERENCE_TYPE_PREFIXES: Record<string, string> = {
   service_request: 'SR',
   wip_entry: 'WIP',
   incident_note: 'INC',
+  field_work: 'FW',
 };
 
 /**

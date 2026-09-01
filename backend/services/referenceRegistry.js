@@ -99,7 +99,7 @@ export const REFERENCE_REGISTRY = {
     searchCols: ['customer_name', 'site_name', 'region'],
     statusCol: 'status',
     where: null,
-    path: (id, row) => `/project-request/${row?.current_stage || 'project'}/${id}`,
+    path: (id) => `/project-request/${id}`,
   },
   wip_entry: {
     prefix: 'WIP',
@@ -133,6 +133,28 @@ export const REFERENCE_REGISTRY = {
     statusCol: 'status',
     where: null,
     path: (id) => `/project-unit/signoff/${id}`,
+  },
+  field_work: {
+    prefix: 'FW',
+    label: 'Field Work',
+    table: 'field_work',
+    idCol: 'id',
+    refCol: null,
+    titleCol: 'title',
+    statusCol: 'status',
+    where: null,
+    path: (id) => `/staff/field/field-work/${id}`,
+  },
+  ip_circuit: {
+    prefix: 'CKT',
+    label: 'IP Circuit',
+    table: 'ip_circuits',
+    idCol: 'id',
+    refCol: 'circuit_id',
+    titleFn: (row) => [row.circuit_id, row.service_type].filter(Boolean).join(' — ') || 'IP Circuit',
+    statusCol: 'status',
+    where: 'deleted_at IS NULL',
+    path: (id) => `/ip-unit/circuits/${id}`,
   },
 };
 

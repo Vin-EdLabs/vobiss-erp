@@ -3,18 +3,26 @@ import { MessageSquare } from 'lucide-react';
 import type { ProjectRequest, ProjectRequestRemark } from '@/api/project';
 
 export const STAGE_LABELS: Record<string, string> = {
+  sales: 'Sales',
+  design: 'Design',
   project: 'Project Unit',
-  ts: 'TS — Transmission',
+  ts: 'TX',
   ip: 'IP',
   noc: 'NOC',
+  done: 'Active',
+  rejected: 'Rejected',
   general: 'General',
 };
 
 const STAGE_COLORS: Record<string, string> = {
+  sales: 'bg-[var(--accent-purple-light)] text-[var(--purple-text)] border-transparent',
+  design: 'bg-[var(--accent-amber-light)] text-[var(--warning-text)] border-transparent',
   project: 'bg-[var(--accent-blue-light)] text-[var(--info-text)] border-transparent',
   ts: 'bg-[var(--accent-amber-light)] text-[var(--warning-text)] border-transparent',
   ip: 'bg-[var(--accent-purple-light)] text-[var(--purple-text)] border-transparent',
   noc: 'bg-[var(--accent-green-light)] text-[var(--success-text)] border-transparent',
+  done: 'bg-[var(--accent-green-light)] text-[var(--success-text)] border-transparent',
+  rejected: 'bg-red-100 text-red-700 border-transparent',
   general: 'bg-[var(--surface-secondary)] text-[var(--text-body)] border-[var(--border)]',
 };
 

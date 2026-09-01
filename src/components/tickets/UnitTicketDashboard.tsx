@@ -71,7 +71,7 @@ const UNIT_THEME: Record<
     iconClass: 'text-[var(--primary)]',
   },
   tx: {
-    label: 'TS',
+    label: 'TX',
     queuePath: '/staff/field/tickets',
     detailBase: '/staff/field/tickets',
     projectPath: '/project-request/tx',

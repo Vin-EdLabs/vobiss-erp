@@ -22,7 +22,7 @@ const UNIT_OPTIONS = [
   { value: '', label: 'No unit / Global' },
   { value: 'noc', label: 'NOC (Network Operations Center)' },
   { value: 'ip', label: 'IP (Infrastructure & Provisioning)' },
-  { value: 'ts', label: 'TS (Transmission Unit)' },
+  { value: 'ts', label: 'TX (Transmission Unit)' },
   { value: 'project', label: 'Project Unit' },
   { value: 'cx', label: 'CX (Customer Experience)' },
   { value: 'finance', label: 'Finance' },
@@ -38,11 +38,11 @@ const POSITION_OPTIONS = [
   { value: 'Director', label: 'Director' },
   { value: 'NOC Manager', label: 'NOC Manager' },
   { value: 'IP Manager', label: 'IP Manager' },
-  { value: 'TX Manager', label: 'TS Manager' },
+  { value: 'TX Manager', label: 'TX Manager' },
   { value: 'Project Manager', label: 'Project Manager' },
   { value: 'IP Supervisor', label: 'IP Supervisor' },
   { value: 'NOC Supervisor', label: 'NOC Supervisor' },
-  { value: 'TX Supervisor', label: 'TS Supervisor' },
+  { value: 'TX Supervisor', label: 'TX Supervisor' },
   { value: 'Project Supervisor', label: 'Project Supervisor' },
   { value: 'Procurement', label: 'Procurement' },
   { value: 'Finance', label: 'Finance' },
@@ -75,7 +75,7 @@ function resolveSystemAccessRole(user: {
 const formatUnitLabel = (unit?: string | null) => {
   const value = String(unit || '').trim().toLowerCase();
   if (!value) return 'No unit';
-  if (value === 'tx' || value === 'ts') return 'TS (Transmission Unit)';
+  if (value === 'tx' || value === 'ts') return 'TX (Transmission Unit)';
   return UNIT_OPTIONS.find((opt) => opt.value === value)?.label || value.toUpperCase();
 };
 
