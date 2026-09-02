@@ -1,0 +1,280 @@
+VOBISS ERP - COMPLETE MODULE INVENTORY
+======================================
+
+Note: Modules and pages are role-restricted. Users only see pages allowed for their role or department.
+
+1. VOBISS WORKSPACE
+- My Workspace: /workspace
+- Vobiss Workspace / Chat: /chat
+- My Activity: /my-activity
+- My Shared Links: /my-shared-links
+- Profile and Security: /profile
+- System Guide: /system-guide
+- Archive: /archive
+- My Assessment: /my-assessment
+
+2. MAIN DASHBOARDS
+- Inventory Dashboard: /dashboard
+- CTO / Directors Dashboard: /director/dashboard
+- Global Search: /director/search
+- Finance Dashboard: /finance/dashboard
+- Transport Supervisor Dashboard: /transport-supervisor-dashboard
+- CX Dashboard: /staff/cx/dashboard
+- NOC Dashboard: /staff/noc/dashboard
+- IP Dashboard: /staff/ip/dashboard
+- TX Dashboard: /staff/field/dashboard
+- Field Operations Dashboard: /field/dashboard
+- IP Unit Dashboard: /ip-unit/dashboard
+- HR Dashboard: /hr/dashboard
+- Performance Dashboard: /performance-reports/dashboard
+- Customer Portal Dashboard: /customer/dashboard
+
+3. INVENTORY MANAGEMENT
+- Inventory: /inventory
+- Items
+- Categories: /categories
+- Low Stock Alerts: /low-stock
+- Request History / Items Out: /items-out
+- Approved Forms / Issue Items: /approved-forms
+- Inventory Report: /reports
+- Material Requests: /request-forms
+- Request Details: /request-forms/:id
+- Item Returns: /item-returns
+- Return Details: /item-returns/:id
+- AI Assistant: /ai-assistant
+
+4. APPROVALS
+- Material Approvals: /material-approvals
+- Cash Approvals: /cash-approvals
+- Transport Approvals: /transport-approvals
+- Rental Approvals: /transport/rental-approvals
+- Fuel Approvals: /transport/fuel-approvals
+- Approval History: /finance/approval-history
+- Legacy Approval Redirect: /pending-approvals
+
+5. FINANCE AND CASH ADVANCES
+- Request Cash Advance: /cash-request
+- Finance Approvals: /finance-approvals
+- Finance Dashboard: /finance/dashboard
+- Vehicle Cash Issuance: /transport/finance-queue
+- Fuel Cash and Receipts: /finance/fuel-requests
+- Cash Request Details: /cash-details/:id
+- Fuel Request Details: /finance/fuel-requests/:id
+- Cash Report: /staff/reports/cash
+- Approval History: /finance/approval-history
+
+6. TRANSPORT
+- Transport Requests: /transport-request
+- Transport Supervisor Dashboard: /transport-supervisor-dashboard
+- Transport Approvals: /transport-approvals
+- Transport Request Details: /transport-requests/:id
+- Vehicle Request Form: /transport/vehicle-request/:transportRequestId
+- Vehicle Rental Requests: /transport/rental-vehicle-requests
+- New Rental Vehicle Request: /transport/new-rental-vehicle-request
+- Rental Request Details: /transport/vehicle-rental-requests/:id
+- Rental Approvals: /transport/rental-approvals
+- Vehicle Finance Queue: /transport/finance-queue
+- Fuel Requests: /transport/fuel-requests
+- New Fuel Request: /transport/fuel-requests/new
+- Fuel Request Details: /transport/fuel-requests/:id
+- Fuel Approvals: /transport/fuel-approvals
+- Legacy Rental Route: /transport/vehicle-rental-requests
+
+7. ASSETS MANAGER
+- All Assets: /assets
+- Add New Asset: /assets/new
+- Asset Details: /assets/:id
+- Asset Categories: /assets/categories
+- Locations: /assets/locations
+- Assignments: /assets/assignments
+- New Assignment: /assets/assignments/new
+- Assignment Details: /assets/assignments/:id
+- Maintenance: /assets/maintenance
+- New Maintenance Record: /assets/maintenance/new
+- Maintenance Details: /assets/maintenance/:id
+- Vendors: /assets/vendors
+- New Vendor: /assets/vendors/new
+- Vendor Details: /assets/vendors/:id
+- Asset Reports: /assets/reports
+
+8. SERVICE REQUESTS AND PROJECT UNITS
+- Design Unit Service Requests: /project-request/design
+- Sales Unit Service Requests: /project-request/sales
+- Project Unit Service Requests: /project-request/project
+- TX / Transmission Service Requests: /project-request/ts
+- IP Unit Service Requests: /project-request/ip
+- NOC Unit Service Requests: /project-request/noc
+- Units Configuration: /project-request/admin/units
+- Project Unit Dashboard: /project-request/project
+- Project Unit Service Requests: /project-request/project
+- WIP: /project-unit/wip
+- Sign-Off Forms: /project-unit/signoff
+- Sign-Off Form Details: /project-unit/signoff/:id
+- Production Hub
+- Project Unit Hub
+- Production Details
+- Design Unit
+- Sales Unit
+- Design Configuration: /settings/design-configuration
+- Service Request Report: /staff/reports/service-requests
+
+9. NETWORK ASSETS
+- Network Assets Dashboard: /network-assets
+- PoP Register: /network-assets/pops
+- Equipment Inventory: /network-assets/equipment
+- Passive Infrastructure: /network-assets/passive
+- ECG Metro: /network-assets/metro
+- NEDCO Metro: /network-assets/nedcoMetro
+- Master Backhaul: /network-assets/backhaul
+- NEDCO Backhaul: /network-assets/nedcoBackhaul
+- Backhaul Accessories: /network-assets/backhaulAccessories
+- Metro Accessories: /network-assets/metroAccessories
+- Poles Register: /network-assets/poles
+- Equipment Catalogue: /network-assets/catalogue
+- Reports and Exports: /network-assets/reports
+
+10. CX AND SUPPORT TICKETING
+- CX Dashboard: /staff/cx/dashboard
+- Projects: /staff/cx/projects
+- Sites: /staff/cx/sites
+- Clients: /staff/cx/clients
+- Client Details: /staff/cx/clients/:id
+- Master Ticket Queue: /staff/cx/tickets
+- Ticket Details: /staff/cx/tickets/:id
+- Create Staff Ticket: /staff/cx/create-ticket
+- Ticket Escalation: /staff/cx/escalate
+- Ticket Escalation Details: /staff/cx/escalate/:ticketId
+- Assign Support: /staff/cx/assign
+- User Work History: /staff/cx/user-work-history
+- Ticket Search: /staff/cx/ticket-search
+- Ticket Tags: /staff/cx/tags
+- Legacy Clients Route: /staff/cx/customers
+
+11. NOC TICKETING
+- NOC Dashboard: /staff/noc/dashboard
+- NOC Ticket Queue: /staff/noc/tickets
+- NOC Ticket Details: /staff/noc/tickets/:id
+- Incident Notes: /noc/incident-notes
+- Incident Note Details: /noc/incident-notes/:id
+- Shift Schedule: /noc/shift-schedule
+- NOC Escalation: /staff/cx/escalate
+- NOC Manager Escalations: /staff/noc-manager/escalations
+- NOC Manager Ticket Details: /staff/noc-manager/tickets/:id
+
+12. IP TICKETING
+- IP Dashboard: /staff/ip/dashboard
+- IP Ticket Queue: /staff/ip/tickets
+- IP Ticket Details: /staff/ip/tickets/:id
+- Create Ticket: /staff/cx/create-ticket
+- IP Escalation: /staff/cx/escalate
+
+13. IP UNIT AND CIRCUIT MANAGEMENT
+- IP Unit Dashboard: /ip-unit/dashboard
+- Circuit Inventory: /ip-unit/circuits
+- Add Circuit: /ip-unit/circuits/new
+- Circuit Profile: /ip-unit/circuits/:id
+- Circuit Requests: /ip-unit/requests
+- Circuit Request Details: /ip-unit/requests/:id
+- IP Unit Reports: /ip-unit/reports
+
+14. TX TICKETING AND FIELD ENGINEERING
+- TX Dashboard: /staff/field/dashboard
+- TX Ticket Queue: /staff/field/tickets
+- TX Ticket Details: /staff/field/tickets/:id
+- Create Ticket: /staff/cx/create-ticket
+- TX Escalation: /staff/cx/escalate
+- Field Work: /staff/field/field-work
+- Field Work Details: /staff/field/field-work/:id
+- My Field Work: /staff/field/my-field-work
+
+15. FIELD ACTIVITIES
+- Field Dashboard: /field/dashboard
+- Map View: /field/map
+- All Activities: /field/activities
+- Add Activity: /field/add
+- Field Engineer Map: /field/map
+
+16. RELATIONSHIP OFFICER
+- R.O Ticket Queue: /staff/ro/escalations
+- R.O Ticket Details: /staff/ro/tickets/:id
+- Create Ticket: /staff/cx/create-ticket
+
+17. CTO AND DIRECTORS
+- CTO / Directors Dashboard: /director/dashboard
+- Global Search: /director/search
+- Executive Escalations: /staff/director/escalations
+- Executive Ticket Details: /staff/director/tickets/:id
+- All Tickets: /staff/cx/tickets
+- Search for Tickets: /staff/cx/ticket-search
+- User Work History: /staff/cx/user-work-history
+- Field Engineer Map: /field/map
+
+18. HUMAN RESOURCES
+- HR Dashboard: /hr/dashboard
+- Employees: /hr/employees
+- Employee Profile: /hr/employees/:id
+- Leave Management: /hr/leave
+- Payroll: /hr/payroll
+- Salary Advances: /hr/payroll/advances
+- Payroll History: /hr/payroll-history
+- Payroll Audit: /hr/payroll/audit
+- Attendance: /hr/attendance
+- HR Analytics: /hr/analytics
+- HR Reports: /hr/reports
+- HR Documents: /hr/documents
+- Form Requests: /hr/forms
+
+19. MY HR
+- My Attendance: /hr-self/attendance
+- My Payslips: /hr-self/payslips
+- Leave Request: /hr-self/leave
+- My Forms: /hr-self/forms
+- Legacy Payslips: /employee/payslips
+
+20. PERFORMANCE AND REPORTS
+- My Performance Dashboard: /performance-reports/dashboard
+- My Reports: /performance-reports/my-reports
+- Performance Report Details: /performance-reports/report/:id
+- Team Reports: /performance-reports/team
+- Unit Reviews: /performance-reports/unit-reviews
+- Review Queue: /performance-reports/queue
+- Executive Review: /performance-reports/executive
+- HR Access: /performance-reports/hr
+- Assessment Periods: /performance-reports/periods
+- Performance Analytics: /performance-reports/analytics
+- Staff Assessment: /staff-assessment/:userId
+- My Assessment: /my-assessment
+- Reports Home: /staff/reports
+- Ticket Report: /staff/reports/tickets
+- Cash Report: /staff/reports/cash
+- Service Request Report: /staff/reports/service-requests
+- Inventory Report: /reports
+
+21. CUSTOMER PORTAL
+- Customer Login: /customer/login
+- Customer Dashboard: /customer/dashboard
+- My Sites: /customer/sites
+- My Tickets: /customer/tickets
+- Customer Ticket Details: /customer/tickets/:id
+- Create Customer Ticket: /customer/create-ticket
+- Customer Profile and Settings: /customer/profile
+
+22. SYSTEM ADMINISTRATION
+- User Management: /users
+- Roles and Permissions: /users
+- Manage Clients: /admin/clients
+- Audit Logs: /audit-logs
+- Workflow Performance: /workflow-performance
+- Workflow Time Configuration: /settings/workflow-time-config
+- System Configuration: /configuration
+- Design Configuration: /settings/design-configuration
+- Realm: /realm
+- System Messages: /system-messages
+- System Settings: /settings
+- Vobi Vault: /admin/vobi-vault
+- Push Notifications
+- Real-time Chat
+- Activity Logging
+- Notifications
+- Shared Links
+- Authentication and Role-Based Access Control

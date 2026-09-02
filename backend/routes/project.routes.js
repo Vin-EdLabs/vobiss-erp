@@ -32,6 +32,10 @@ import {
   deleteDesignMaterial,
   createDesignRequest,
   listDesignRequests,
+  listDesignUnitMembers,
+  claimDesignRequest,
+  assignDesignRequest,
+  releaseDesignRequest,
   createSalesRequest,
   submitDesignRequest,
   confirmDesignRequest,
@@ -456,6 +460,45 @@ router.post('/design/requests/:id/submit', requireDesignAccess, async (req, res)
 
 router.get('/design/requests', requireDesignAccess, async (_req, res) => {
   try { res.json(await listDesignRequests()); } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.get('/design/members', requireDesignAccess, async (_req, res) => {
+  try { res.json(await listDesignUnitMembers()); } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.post('/design/requests/:id/claim', requireDesignAccess, async (req, res) => {
+  try {
+    const user = await loadFullUser(req);
+    const id = parseInt(req.params.id, 10);
+    const updated = await claimDesignRequest(id, user);
+    res.json(updated);
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+router.post('/design/requests/:id/assign', requireDesignAccess, async (req, res) => {
+  try {
+    const user = await loadFullUser(req);
+    const id = parseInt(req.params.id, 10);
+    const targetUserId = parseInt(req.body?.user_id, 10);
+    if (!targetUserId) return res.status(400).json({ error: 'user_id is required' });
+    const updated = await assignDesignRequest(id, targetUserId, user);
+    if (updated?.design_assigned_to) {
+      notifyMany([updated.design_assigned_to], 'Design Request Assigned to You',
+        `SR-${String(updated.id).padStart(3, '0')} (${updated.customer_name || updated.site_name || ''}) was assigned to you.`,
+        req.user.id, { linkUrl: recordViewPath('service_request', updated.id), notificationType: 'design_request_assigned' }
+      ).catch(() => {});
+    }
+    res.json(updated);
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+router.post('/design/requests/:id/release', requireDesignAccess, async (req, res) => {
+  try {
+    const user = await loadFullUser(req);
+    const id = parseInt(req.params.id, 10);
+    const updated = await releaseDesignRequest(id, user);
+    res.json(updated);
+  } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
 router.get('/sales/requests', requireSalesAccess, async (_req, res) => {

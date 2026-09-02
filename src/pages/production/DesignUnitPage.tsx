@@ -1,28 +1,46 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Eye, FileText, Loader2, Search } from 'lucide-react';
+import { Eye, FileText, Loader2, Search, UserCheck } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useToast } from '@/hooks/use-toast';
-import { listDesignRequests, type ProjectRequest } from '@/api/project';
+import { useAuth } from '@/context/AuthContext';
+import { listDesignRequests, claimDesignRequest, type ProjectRequest } from '@/api/project';
 
 /** Design's queue — filling the survey and material request now happens inline on the SR's own
  *  profile page (/project-request/:id), not here. This page is just search + "Open". */
 export default function DesignUnitPage() {
   const navigate = useNavigate();
   const { toast } = useToast();
+  const { user } = useAuth();
   const [requests, setRequests] = useState<ProjectRequest[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
+  const [claimingId, setClaimingId] = useState<number | null>(null);
+
+  const load = async () => {
+    try { setRequests(await listDesignRequests()); }
+    catch (e: unknown) { toast({ title: 'Could not load Design Unit', description: e instanceof Error ? e.message : 'Try again', variant: 'destructive' }); }
+    finally { setLoading(false); }
+  };
 
   useEffect(() => {
-    (async () => {
-      try { setRequests(await listDesignRequests()); }
-      catch (e: unknown) { toast({ title: 'Could not load Design Unit', description: e instanceof Error ? e.message : 'Try again', variant: 'destructive' }); }
-      finally { setLoading(false); }
-    })();
+    load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const takeIt = async (id: number) => {
+    setClaimingId(id);
+    try {
+      await claimDesignRequest(id);
+      toast({ title: 'Assigned to you' });
+      await load();
+    } catch (e: unknown) {
+      toast({ title: 'Could not claim this request', description: e instanceof Error ? e.message : 'Try again', variant: 'destructive' });
+    } finally {
+      setClaimingId(null);
+    }
+  };
 
   const visible = requests.filter((r) => [r.customer_name, r.site_name, r.region, r.created_by_name].some((v) => String(v || '').toLowerCase().includes(search.toLowerCase())));
 
@@ -49,20 +67,38 @@ export default function DesignUnitPage() {
           {loading ? (
             <div className="p-10 text-center"><Loader2 className="mx-auto h-6 w-6 animate-spin text-[var(--primary)]" /></div>
           ) : visible.length ? (
-            visible.map((r) => (
-              <div key={r.id} className="flex flex-wrap items-center justify-between gap-3 p-4">
-                <div>
-                  <p className="font-medium">{r.customer_name} — {r.site_name}</p>
-                  <p className="text-xs text-[var(--text-muted)]">{r.region || 'No region'} · {r.created_by_name || 'Sales Unit'}</p>
+            visible.map((r) => {
+              const isDesignStage = r.current_stage === 'design';
+              const isMine = isDesignStage && r.design_assigned_to === user?.id;
+              return (
+                <div key={r.id} className="flex flex-wrap items-center justify-between gap-3 p-4">
+                  <div>
+                    <p className="font-medium">{r.customer_name} — {r.site_name}</p>
+                    <p className="text-xs text-[var(--text-muted)]">{r.region || 'No region'} · {r.created_by_name || 'Sales Unit'}</p>
+                    {isDesignStage && (
+                      <p className="mt-1 flex items-center gap-1 text-xs">
+                        <UserCheck className="h-3 w-3" />
+                        {r.design_assigned_name
+                          ? <span className={isMine ? 'font-semibold text-[var(--primary)]' : 'text-[var(--text-secondary)]'}>{isMine ? 'Assigned to you' : `Assigned to ${r.design_assigned_name}`}</span>
+                          : <span className="text-amber-700">Unassigned</span>}
+                      </p>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <span className="rounded-full bg-blue-100 px-2.5 py-1 text-xs font-semibold text-blue-800">
+                      {r.current_stage === 'design' ? 'Awaiting Design' : r.current_stage === 'sales' ? 'With Sales' : r.current_stage}
+                    </span>
+                    {isDesignStage && !r.design_assigned_to && (
+                      <Button size="sm" disabled={claimingId === r.id} onClick={() => void takeIt(r.id)}>
+                        {claimingId === r.id ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <UserCheck className="mr-1 h-4 w-4" />}
+                        Take it
+                      </Button>
+                    )}
+                    <Button size="sm" variant="outline" onClick={() => navigate(`/project-request/${r.id}`)}><Eye className="mr-1 h-4 w-4" />Open</Button>
+                  </div>
                 </div>
-                <div className="flex items-center gap-3">
-                  <span className="rounded-full bg-blue-100 px-2.5 py-1 text-xs font-semibold text-blue-800">
-                    {r.current_stage === 'design' ? 'Awaiting Design' : r.current_stage === 'sales' ? 'With Sales' : r.current_stage}
-                  </span>
-                  <Button size="sm" variant="outline" onClick={() => navigate(`/project-request/${r.id}`)}><Eye className="mr-1 h-4 w-4" />Open</Button>
-                </div>
-              </div>
-            ))
+              );
+            })
           ) : (
             <p className="p-6 text-sm text-[var(--text-muted)]">No Design requests yet.</p>
           )}

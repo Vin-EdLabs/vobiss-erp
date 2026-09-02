@@ -32,6 +32,7 @@ For platform setup (inventory, tickets, auth, deployment), see [README.md](./REA
 22. [Troubleshooting](#troubleshooting)
 23. [File index](#related-files-index)
 24. [Mental model](#mental-model-quick-reference)
+25. {Assest res=gister added"}
 
 ---
 

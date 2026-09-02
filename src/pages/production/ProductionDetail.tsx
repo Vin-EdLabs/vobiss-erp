@@ -7,6 +7,7 @@ import { RemarksThread } from '@/components/production/RemarksThread';
 import { PipelineHistory } from '@/components/production/PipelineHistory';
 import { ProjectRequestDetailHeader } from '@/components/production/ProjectRequestDetailHeader';
 import { CollapsibleStageSection, type StageSectionStatus } from '@/components/production/CollapsibleStageSection';
+import { DesignAssignmentBar } from '@/components/production/DesignAssignmentBar';
 import { SalesStageSection } from '@/components/production/stages/SalesStageSection';
 import { DesignStageSection } from '@/components/production/stages/DesignStageSection';
 import { SalesReviewStageSection } from '@/components/production/stages/SalesReviewStageSection';
@@ -122,7 +123,10 @@ export default function ProductionDetail({ id: idProp }: { id?: string; unitSlug
   const ipStatus = statusFor(5);
   const nocStatus = currentRank === 6 ? 'active' : currentRank > 6 || (request.current_stage === 'project' && request.status === 'noc_approved') ? 'done' : 'upcoming';
 
-  const canDesignAct = !isSharedView && isDesign && request.current_stage === 'design';
+  // An unclaimed request isn't editable by anyone until a Design Unit member claims it (self or
+  // a named colleague) — see DesignAssignmentBar below. Once claimed, only that person can act.
+  const canDesignAct = !isSharedView && isDesign && request.current_stage === 'design' && request.design_assigned_to === user?.id;
+  const isDesignManagerOrAdmin = isAdmin || String(user?.main_role || user?.role || '').toLowerCase() === 'design_manager';
   const canSalesReview = !isSharedView && isSales && request.current_stage === 'sales';
   const canProjectRoute = !isSharedView && isProject && request.current_stage === 'project' && request.status === 'pending';
   const canProjectSendNoc = !isSharedView && isProject && request.current_stage === 'project' && request.status === 'integrated';
@@ -155,6 +159,15 @@ export default function ProductionDetail({ id: idProp }: { id?: string; unitSlug
           </CollapsibleStageSection>
 
           <CollapsibleStageSection title="Design — Survey & Materials" icon={PenLine} status={designStatus} summary={designStatus === 'done' ? request.design_reference || 'Submitted' : undefined}>
+            {!isSharedView && request.current_stage === 'design' && (
+              <DesignAssignmentBar
+                request={request}
+                isDesignMember={isDesign}
+                currentUserId={user?.id}
+                canManage={isDesignManagerOrAdmin}
+                onUpdated={refresh}
+              />
+            )}
             <DesignStageSection request={request} canEdit={canDesignAct} canUpload={canUploadAttachment} onUpdated={refresh} />
           </CollapsibleStageSection>
 

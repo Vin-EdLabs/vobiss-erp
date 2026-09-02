@@ -3,6 +3,7 @@
  */
 import pool from '../db.js';
 import { syncProjectRequestToWip } from '../services/wipSync.js';
+import { isSystemAdminAccount } from '../roles.js';
 
 const PIPELINE_STAGES = ['ts', 'ip', 'noc'];
 
@@ -143,6 +144,14 @@ async function runInitProjectRequestTables() {
     mrc TEXT, sale_price TEXT, through_value TEXT, existing_poles TEXT, remarks TEXT,
     created_by INTEGER REFERENCES users(id), created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
   )`);
+  // Design Unit claim/assignment — a request sitting at current_stage='design' isn't editable
+  // by anyone until a Design Unit member claims it (self or a named colleague); see
+  // claimDesignRequest/assignDesignRequest/releaseDesignRequest below and the matching lock
+  // added to submitDesignRequest's WHERE clause.
+  await pool.query(`ALTER TABLE project_requests ADD COLUMN IF NOT EXISTS design_assigned_to INTEGER REFERENCES users(id) ON DELETE SET NULL;`);
+  await pool.query(`ALTER TABLE project_requests ADD COLUMN IF NOT EXISTS design_assigned_name VARCHAR(255);`);
+  await pool.query(`ALTER TABLE project_requests ADD COLUMN IF NOT EXISTS design_assigned_at TIMESTAMP;`);
+
   // Service Request -> WIP auto-sync — each confirmed SR keeps a mirrored WIP row (see
   // services/wipSync.js) and, once linked, shares its real chat channel with the WIP row too.
   await pool.query(`ALTER TABLE project_wip_entries ADD COLUMN IF NOT EXISTS project_request_id INTEGER UNIQUE REFERENCES project_requests(id) ON DELETE SET NULL;`);
@@ -654,13 +663,22 @@ export async function submitDesignRequest(id, data, user) {
   const { rows } = await pool.query(
     `UPDATE project_requests SET site_name=$2, location=$3, region=$4, isp=$5, survey_date=$6, design_specification=$7,
       design_reference=$8, cable_displacement=$9, adss=$10, drop_cable=$11,
-      status='submitted_to_sales', current_stage='sales', project_unit_name='Sales', updated_at=CURRENT_TIMESTAMP
-     WHERE id=$1 AND is_design_request=true AND current_stage='design' RETURNING *`,
+      status='submitted_to_sales', current_stage='sales', project_unit_name='Sales',
+      design_assigned_to=NULL, design_assigned_name=NULL, design_assigned_at=NULL, updated_at=CURRENT_TIMESTAMP
+     WHERE id=$1 AND is_design_request=true AND current_stage='design' AND design_assigned_to=$12 RETURNING *`,
     [id, siteName, data.location || null, data.region || null, data.isp || null, data.survey_date || null,
       data.design_specification || null, data.design_reference || null,
-      data.cable_displacement || null, data.adss || null, data.drop_cable || null]
+      data.cable_displacement || null, data.adss || null, data.drop_cable || null, user.id]
   );
-  if (!rows[0]) throw new Error('Request is not awaiting Design Unit work');
+  if (!rows[0]) {
+    // Give an accurate reason — the request may simply not exist / already be past Design, or
+    // it may exist but be assigned to someone else (the real lock this is enforcing).
+    const check = await pool.query(`SELECT current_stage, design_assigned_to FROM project_requests WHERE id=$1 AND is_design_request=true`, [id]);
+    if (check.rows[0]?.current_stage === 'design' && check.rows[0]?.design_assigned_to && check.rows[0].design_assigned_to !== user.id) {
+      throw new Error('This request is assigned to someone else in the Design Unit');
+    }
+    throw new Error('Request is not awaiting Design Unit work');
+  }
   await pool.query('DELETE FROM project_request_design_materials WHERE request_id = $1', [id]);
   for (const item of Array.isArray(data.materials) ? data.materials : []) {
     const quantity = Number(item.quantity) || 0;
@@ -749,10 +767,99 @@ export async function forwardWorkflowRequest(id, fromStage, toStage, fields) {
 
 export async function listDesignRequests() {
   const { rows } = await pool.query(
-    `SELECT id, customer_name, site_name, location, region, isp, survey_date, status, current_stage, created_by_name, created_at, updated_at
+    `SELECT id, customer_name, site_name, location, region, isp, survey_date, status, current_stage, created_by_name, created_at, updated_at,
+       design_assigned_to, design_assigned_name, design_assigned_at
      FROM project_requests WHERE is_design_request = true ORDER BY updated_at DESC`
   );
   return rows;
+}
+
+/** Everyone with Design Unit access — same rule as hasDesignUnitAccess() in roles.js, run
+ *  server-side so the assign-to-colleague picker only ever offers real Design Unit members. */
+export async function listDesignUnitMembers() {
+  const { rows } = await pool.query(
+    `SELECT id, first_name, last_name, username, position
+       FROM users
+      WHERE deleted_at IS NULL
+        AND (
+          LOWER(COALESCE(role,'')) IN ('design_manager','design_supervisor')
+          OR LOWER(COALESCE(main_role,'')) IN ('design_manager','design_supervisor')
+          OR LOWER(COALESCE(unit,'')) = 'design'
+          OR units ?| ARRAY['design']
+        )
+      ORDER BY first_name, last_name`
+  );
+  return rows.map((r) => ({
+    id: r.id,
+    name: `${r.first_name || ''} ${r.last_name || ''}`.trim() || r.username,
+    position: r.position || null,
+  }));
+}
+
+function isDesignManagerOrAdmin(user) {
+  if (isSystemAdminAccount(user)) return true;
+  const role = String(user?.main_role || user?.role || '').toLowerCase();
+  return role === 'design_manager';
+}
+
+/** Self-claim — the WHERE's `design_assigned_to IS NULL` is the concurrency guard: if two
+ *  people click "Take it" on the same request at once, only one UPDATE matches a row. */
+export async function claimDesignRequest(id, user) {
+  const name = `${user.first_name || ''} ${user.last_name || ''}`.trim() || user.username;
+  const { rows } = await pool.query(
+    `UPDATE project_requests SET design_assigned_to=$2, design_assigned_name=$3, design_assigned_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP
+     WHERE id=$1 AND is_design_request=true AND current_stage='design' AND design_assigned_to IS NULL RETURNING *`,
+    [id, user.id, name]
+  );
+  if (!rows[0]) {
+    const check = await pool.query(`SELECT current_stage, design_assigned_name FROM project_requests WHERE id=$1 AND is_design_request=true`, [id]);
+    if (!check.rows[0]) throw new Error('Request not found');
+    if (check.rows[0].current_stage !== 'design') throw new Error('Request is not awaiting Design Unit work');
+    throw new Error(`Already assigned to ${check.rows[0].design_assigned_name || 'someone else'}`);
+  }
+  return getProjectRequestById(id);
+}
+
+/** Assign to a named Design Unit colleague — allowed when unassigned, or when the acting user
+ *  is the current assignee (handing off) or a design_manager/admin (reassigning someone stuck). */
+export async function assignDesignRequest(id, targetUserId, actingUser) {
+  const members = await listDesignUnitMembers();
+  const target = members.find((m) => m.id === Number(targetUserId));
+  if (!target) throw new Error('That person is not a member of the Design Unit');
+
+  const current = await pool.query(`SELECT current_stage, design_assigned_to FROM project_requests WHERE id=$1 AND is_design_request=true`, [id]);
+  if (!current.rows[0]) throw new Error('Request not found');
+  if (current.rows[0].current_stage !== 'design') throw new Error('Request is not awaiting Design Unit work');
+  const existingAssignee = current.rows[0].design_assigned_to;
+  const allowed = existingAssignee == null || existingAssignee === actingUser.id || isDesignManagerOrAdmin(actingUser);
+  if (!allowed) throw new Error('Only the current assignee or a Design Manager can reassign this request');
+
+  const { rows } = await pool.query(
+    `UPDATE project_requests SET design_assigned_to=$2, design_assigned_name=$3, design_assigned_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP
+     WHERE id=$1 AND is_design_request=true AND current_stage='design' RETURNING *`,
+    [id, target.id, target.name]
+  );
+  if (!rows[0]) throw new Error('Request is not awaiting Design Unit work');
+  return getProjectRequestById(id);
+}
+
+/** Clears the assignment so anyone in the unit can claim it again — allowed for the current
+ *  assignee or a design_manager/admin, so nothing gets permanently stuck if someone's away. */
+export async function releaseDesignRequest(id, actingUser) {
+  const current = await pool.query(`SELECT current_stage, design_assigned_to FROM project_requests WHERE id=$1 AND is_design_request=true`, [id]);
+  if (!current.rows[0]) throw new Error('Request not found');
+  if (current.rows[0].current_stage !== 'design') throw new Error('Request is not awaiting Design Unit work');
+  const existingAssignee = current.rows[0].design_assigned_to;
+  if (existingAssignee != null && existingAssignee !== actingUser.id && !isDesignManagerOrAdmin(actingUser)) {
+    throw new Error('Only the current assignee or a Design Manager can release this request');
+  }
+  const { rows } = await pool.query(
+    `UPDATE project_requests SET design_assigned_to=NULL, design_assigned_name=NULL, design_assigned_at=NULL, updated_at=CURRENT_TIMESTAMP
+     WHERE id=$1 AND is_design_request=true AND current_stage='design' RETURNING *`,
+    [id]
+  );
+  if (!rows[0]) throw new Error('Request is not awaiting Design Unit work');
+  return getProjectRequestById(id);
 }
 
 /** Can user view this request? */

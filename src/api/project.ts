@@ -166,6 +166,9 @@ export type ProjectRequest = {
   design_reference?: string;
   is_design_request?: boolean;
   design_materials?: DesignRequestMaterial[];
+  design_assigned_to?: number | null;
+  design_assigned_name?: string | null;
+  design_assigned_at?: string | null;
   customer_id?: number | null;
   site_id?: number | null;
   design_confirmed_at?: string | null;
@@ -265,6 +268,32 @@ export async function createSalesRequest(data: Record<string, unknown>): Promise
 
 export async function submitDesignRequest(id: number, data: Record<string, unknown>): Promise<ProjectRequest> {
   const res = await prjFetch(projectRequestUrl('design', 'requests', String(id), 'submit'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+  return res.json();
+}
+
+export interface DesignUnitMember {
+  id: number;
+  name: string;
+  position: string | null;
+}
+
+export async function listDesignUnitMembers(): Promise<DesignUnitMember[]> {
+  const res = await prjFetch(projectRequestUrl('design', 'members'));
+  return res.json();
+}
+
+export async function claimDesignRequest(id: number): Promise<ProjectRequest> {
+  const res = await prjFetch(projectRequestUrl('design', 'requests', String(id), 'claim'), { method: 'POST' });
+  return res.json();
+}
+
+export async function assignDesignRequest(id: number, userId: number): Promise<ProjectRequest> {
+  const res = await prjFetch(projectRequestUrl('design', 'requests', String(id), 'assign'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ user_id: userId }) });
+  return res.json();
+}
+
+export async function releaseDesignRequest(id: number): Promise<ProjectRequest> {
+  const res = await prjFetch(projectRequestUrl('design', 'requests', String(id), 'release'), { method: 'POST' });
   return res.json();
 }
 

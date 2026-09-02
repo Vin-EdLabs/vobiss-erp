@@ -122,6 +122,7 @@ const serviceRequestSlugsForUnits = (
     .map((value) => String(value || '').trim().toLowerCase())
     .filter(Boolean)
     .forEach((unit) => {
+      if (unit === 'design') slugs.add('design');
       if (unit === 'project' || unit === 'project unit' || unit.startsWith('project')) slugs.add('project');
       if (unit === 'sales') slugs.add('sales');
       if (unit === 'tx' || unit === 'ts') slugs.add('ts');
@@ -130,6 +131,7 @@ const serviceRequestSlugsForUnits = (
     });
   const pos = String(position || '').trim().toLowerCase();
   if (pos === 'project manager' || pos === 'project supervisor') slugs.add('project');
+  if (pos === 'design manager' || pos === 'design supervisor') slugs.add('design');
   return slugs;
 };
 

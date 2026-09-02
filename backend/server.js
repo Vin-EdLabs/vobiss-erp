@@ -245,6 +245,10 @@ const UPLOAD_MIME = {
   '.json': 'application/json',
   '.mp4': 'video/mp4',
   '.webm': 'video/webm',
+  '.mov': 'video/quicktime',
+  '.avi': 'video/x-msvideo',
+  '.mkv': 'video/x-matroska',
+  '.m4v': 'video/mp4',
   '.mp3': 'audio/mpeg',
   '.wav': 'audio/wav',
   '.doc': 'application/msword',
@@ -270,6 +274,10 @@ function sniffUploadMime(filePath) {
 }
 
 app.use('/uploads', express.static(uploadsStaticPath, {
+  // express.static/send already defaults acceptRanges to true — stated explicitly so video
+  // seeking (range requests, required by <video> playback in every browser) is guaranteed
+  // rather than left to an implicit library default.
+  acceptRanges: true,
   setHeaders: (res, filePath) => {
     const ext = path.extname(filePath).toLowerCase();
     const sniffed = sniffUploadMime(filePath);
