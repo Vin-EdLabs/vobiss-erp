@@ -6,6 +6,8 @@ import { fileURLToPath } from 'url';
 import { dirname } from 'path';
 import pool from '../db.js';
 import { authenticateToken, requireHR } from '../middleware/auth.js';
+import { attachTenant } from '../middleware/tenant.js';
+import { isSystemAdminAccount } from '../roles.js';
 import { invalidateOnMutation } from '../services/vobiCache.js';
 import {
   LEAVE_TYPES,
@@ -107,6 +109,7 @@ const upload = multer({
 
 router.use(authenticateToken);
 router.use(requireHR);
+router.use(attachTenant);
 router.use(invalidateOnMutation);
 
 const actorId = (req) => req.user?.id || null;
@@ -331,48 +334,76 @@ const employeeSelect = `
   LEFT JOIN hr_employees m ON m.full_name = e.line_manager
 `;
 
-async function getEmployeeOr404(id, res) {
+async function getEmployeeOr404(id, res, req) {
   const result = await pool.query('SELECT * FROM hr_employees WHERE id = $1', [id]);
   if (result.rowCount === 0) {
     res.status(404).json({ error: 'Employee not found' });
     return null;
   }
-  return result.rows[0];
+  const emp = result.rows[0];
+  // Company scope: an HR admin only manages their own company's staff — this single helper
+  // backs nearly every "act on employee :id" route in this file, so gating it here closes the
+  // cross-tenant gap everywhere at once instead of route-by-route.
+  if (req && !isSystemAdminAccount(req.user) && (req.user?.company || 'CW') !== emp.company) {
+    res.status(404).json({ error: 'Employee not found' });
+    return null;
+  }
+  return emp;
+}
+
+/** Same company gate as getEmployeeOr404, for the many sub-resource routes (allowances,
+ *  reliefs, deductions, salary advances, leave, form requests, documents...) that reference an
+ *  employee by id but don't fetch the full employee row themselves. Returns true when the
+ *  caller may act on this employee (true System Admin, or same company); false otherwise —
+ *  callers should respond 404 (not 403) to avoid confirming the id exists in another tenant. */
+async function employeeBelongsToCallerCompany(employeeId, req) {
+  if (!req || isSystemAdminAccount(req.user)) return true;
+  if (!employeeId) return false;
+  const r = await pool.query('SELECT company FROM hr_employees WHERE id = $1', [employeeId]);
+  if (r.rowCount === 0) return false;
+  return (req.user?.company || 'CW') === r.rows[0].company;
 }
 
 // â”€â”€ Dashboard â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-router.get('/dashboard/stats', async (_req, res) => {
+router.get('/dashboard/stats', async (req, res) => {
   try {
     const year = new Date().getFullYear();
     const month = new Date().getMonth() + 1;
     const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Africa/Accra' });
+    const company = req.company;
+    const empClause = company ? 'AND company = $1' : '';
+    const empParams = company ? [company] : [];
     const [total, onLeave, newThisMonth, payrollDue, byDept, byType, renewals, pendingLeave, pendingForms, activity, onLeavePeople] = await Promise.all([
-      pool.query(`SELECT COUNT(*)::int AS n FROM hr_employees WHERE status = 'active'`),
+      pool.query(`SELECT COUNT(*)::int AS n FROM hr_employees WHERE status = 'active' ${empClause}`, empParams),
       safeQuery(
-        `SELECT COUNT(DISTINCT employee_id)::int AS n FROM (
+        `SELECT COUNT(DISTINCT x.employee_id)::int AS n FROM (
            SELECT employee_id FROM hr_leave_applications
            WHERE status = 'Approved' AND start_date <= $1 AND end_date >= $1
            UNION
            SELECT employee_id FROM hr_leave_requests
            WHERE status = 'approved' AND start_date <= $1 AND end_date >= $1
-         ) x`,
-        [today],
+         ) x
+         JOIN hr_employees e ON e.id = x.employee_id
+         ${company ? 'WHERE e.company = $2' : ''}`,
+        company ? [today, company] : [today],
         { rows: [{ n: 0 }], rowCount: 1 }
       ),
       pool.query(
         `SELECT COUNT(*)::int AS n FROM hr_employees
-         WHERE EXTRACT(YEAR FROM start_date) = $1 AND EXTRACT(MONTH FROM start_date) = $2`,
-        [year, month]
+         WHERE EXTRACT(YEAR FROM start_date) = $1 AND EXTRACT(MONTH FROM start_date) = $2 ${company ? 'AND company = $3' : ''}`,
+        company ? [year, month, company] : [year, month]
       ),
-      pool.query(`SELECT id, status, generated_at, approved_at, paid_at FROM hr_payroll WHERE month = $1 AND year = $2`, [month, year]),
+      pool.query(`SELECT id, status, generated_at, approved_at, paid_at FROM hr_payroll WHERE month = $1 AND year = $2 ${company ? 'AND company = $3' : ''}`, company ? [month, year, company] : [month, year]),
       pool.query(
         `SELECT COALESCE(department, 'Unassigned') AS department, COUNT(*)::int AS count
-         FROM hr_employees WHERE status = 'active' GROUP BY department ORDER BY count DESC`
+         FROM hr_employees WHERE status = 'active' ${empClause} GROUP BY department ORDER BY count DESC`,
+        empParams
       ),
       pool.query(
         `SELECT employment_type, COUNT(*)::int AS count
-         FROM hr_employees WHERE status = 'active' GROUP BY employment_type`
+         FROM hr_employees WHERE status = 'active' ${empClause} GROUP BY employment_type`,
+        empParams
       ),
       pool.query(
         `SELECT id, full_name, department, position, employment_type, contract_end_date, photo_url, status
@@ -380,30 +411,42 @@ router.get('/dashboard/stats', async (_req, res) => {
          WHERE contract_end_date IS NOT NULL
            AND contract_end_date <= CURRENT_DATE + INTERVAL '60 days'
            AND status = 'active'
-         ORDER BY contract_end_date ASC`
+           ${empClause}
+         ORDER BY contract_end_date ASC`,
+        empParams
       ),
-      safeQuery(`SELECT COUNT(*)::int AS n FROM hr_leave_requests WHERE status = 'pending'`, [], { rows: [{ n: 0 }], rowCount: 1 }),
-      safeQuery(`SELECT COUNT(*)::int AS n FROM hr_form_requests WHERE status = 'pending'`, [], { rows: [{ n: 0 }], rowCount: 1 }),
+      safeQuery(
+        `SELECT COUNT(*)::int AS n FROM hr_leave_requests lr JOIN hr_employees e ON e.id = lr.employee_id WHERE lr.status = 'pending' ${company ? 'AND e.company = $1' : ''}`,
+        empParams,
+        { rows: [{ n: 0 }], rowCount: 1 }
+      ),
+      safeQuery(
+        `SELECT COUNT(*)::int AS n FROM hr_form_requests fr JOIN hr_employees e ON e.id = fr.employee_id WHERE fr.status = 'pending' ${company ? 'AND e.company = $1' : ''}`,
+        empParams,
+        { rows: [{ n: 0 }], rowCount: 1 }
+      ),
       pool.query(
         `SELECT a.*, e.full_name AS employee_name
          FROM hr_activity a
          LEFT JOIN hr_employees e ON e.id = a.employee_id
+         ${company ? 'WHERE e.id IS NULL OR e.company = $1' : ''}
          ORDER BY a.created_at DESC
-         LIMIT 12`
+         LIMIT 12`,
+        empParams
       ),
       safeQuery(
         `SELECT * FROM (
            SELECT l.id, l.leave_type, l.start_date, l.end_date, e.full_name, e.photo_url
            FROM hr_leave_applications l
            JOIN hr_employees e ON e.id = l.employee_id
-           WHERE l.status = 'Approved' AND l.start_date <= $1 AND l.end_date >= $1
+           WHERE l.status = 'Approved' AND l.start_date <= $1 AND l.end_date >= $1 ${company ? 'AND e.company = $2' : ''}
            UNION ALL
            SELECT r.id, r.leave_type, r.start_date, r.end_date, e.full_name, e.photo_url
            FROM hr_leave_requests r
            JOIN hr_employees e ON e.id = r.employee_id
-           WHERE r.status = 'approved' AND r.start_date <= $1 AND r.end_date >= $1
+           WHERE r.status = 'approved' AND r.start_date <= $1 AND r.end_date >= $1 ${company ? 'AND e.company = $2' : ''}
          ) x`,
-        [today],
+        company ? [today, company] : [today],
         { rows: [], rowCount: 0 }
       ),
     ]);
@@ -430,14 +473,17 @@ router.get('/dashboard/stats', async (_req, res) => {
   }
 });
 
-router.get('/dashboard/activity', async (_req, res) => {
+router.get('/dashboard/activity', async (req, res) => {
   try {
+    const company = req.company;
     const result = await pool.query(
       `SELECT a.*, e.full_name AS employee_name
        FROM hr_activity a
        LEFT JOIN hr_employees e ON e.id = a.employee_id
+       ${company ? 'WHERE e.id IS NULL OR e.company = $1' : ''}
        ORDER BY a.created_at DESC
-       LIMIT 25`
+       LIMIT 25`,
+      company ? [company] : []
     );
     res.json(result.rows);
   } catch (err) {
@@ -451,6 +497,10 @@ router.get('/leave-requests', async (req, res) => {
     const { status, department, from, to } = req.query;
     const clauses = [];
     const params = [];
+    if (req.company) {
+      params.push(req.company);
+      clauses.push(`e.company = $${params.length}`);
+    }
     if (status && status !== 'all') {
       params.push(String(status).toLowerCase());
       clauses.push(`r.status = $${params.length}`);
@@ -491,6 +541,10 @@ router.get('/employees', async (req, res) => {
     const { department, employment_type, status, q } = req.query;
     const clauses = [`COALESCE(hr_review_status, 'accepted') = 'accepted'`];
     const params = [];
+    if (req.company) {
+      params.push(req.company);
+      clauses.push(`company = $${params.length}`);
+    }
     if (department) {
       params.push(department);
       clauses.push(`department = $${params.length}`);
@@ -519,15 +573,18 @@ router.get('/employees', async (req, res) => {
   }
 });
 
-router.get('/employees/pending', async (_req, res) => {
+router.get('/employees/pending', async (req, res) => {
   try {
     await syncPendingEmployeesFromUsers();
+    const companyClause = req.company ? 'AND e.company = $1' : '';
+    const companyParams = req.company ? [req.company] : [];
     const result = await pool.query(
       `SELECT e.*, u.username, u.role AS system_role, u.unit
          FROM hr_employees e
          LEFT JOIN users u ON u.id = e.user_id
-        WHERE COALESCE(e.hr_review_status, '') = 'pending'
-        ORDER BY e.created_at DESC, e.full_name ASC`
+        WHERE COALESCE(e.hr_review_status, '') = 'pending' ${companyClause}
+        ORDER BY e.created_at DESC, e.full_name ASC`,
+      companyParams
     );
     res.json(result.rows);
   } catch (err) {
@@ -538,7 +595,7 @@ router.get('/employees/pending', async (_req, res) => {
 
 router.post('/employees/:id/accept', async (req, res) => {
   try {
-    const emp = await getEmployeeOr404(req.params.id, res);
+    const emp = await getEmployeeOr404(req.params.id, res, req);
     if (!emp) return;
     if (String(emp.hr_review_status || '') !== 'pending') {
       return res.status(400).json({ error: 'This person is not waiting for HR review' });
@@ -566,7 +623,7 @@ router.post('/employees/:id/accept', async (req, res) => {
 
 router.post('/employees/:id/ignore', async (req, res) => {
   try {
-    const emp = await getEmployeeOr404(req.params.id, res);
+    const emp = await getEmployeeOr404(req.params.id, res, req);
     if (!emp) return;
     if (String(emp.hr_review_status || '') !== 'pending') {
       return res.status(400).json({ error: 'This person is not waiting for HR review' });
@@ -599,13 +656,31 @@ router.post('/employees', upload.single('photo'), async (req, res) => {
     if (startDate && endDate && String(endDate) < String(startDate)) {
       return res.status(400).json({ error: 'End date cannot be before start date' });
     }
+
+    // No unique constraint backs this table, so a double-click or a request retried by the
+    // browser silently created two identical rows for the same person (same email, same
+    // linked user_id, timestamps a fraction of a second apart) — block that here instead.
+    const dedupeEmail = String(b.email || '').trim().toLowerCase();
+    if (b.user_id || dedupeEmail) {
+      const existing = await pool.query(
+        `SELECT id, full_name FROM hr_employees
+         WHERE ($1::int IS NOT NULL AND user_id = $1::int)
+            OR ($2::text <> '' AND LOWER(email) = $2::text)
+         LIMIT 1`,
+        [b.user_id || null, dedupeEmail]
+      );
+      if (existing.rowCount > 0) {
+        return res.status(409).json({ error: `An employee record already exists for this person (${existing.rows[0].full_name}).` });
+      }
+    }
+
     const photoUrl = req.file ? publicFileUrl(req.file.filename) : b.photo_url || null;
     const result = await pool.query(
       `INSERT INTO hr_employees (
         user_id, full_name, email, phone, gender, photo_url, department, position, location, employment_type,
         start_date, contract_end_date, basic_salary, allowances, emergency_contact_name,
-        emergency_contact_phone, line_manager, status, hr_review_status
-      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,'accepted')
+        emergency_contact_phone, line_manager, status, hr_review_status, company
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,'accepted',$19)
       RETURNING *`,
       [
         b.user_id || null,
@@ -626,6 +701,7 @@ router.post('/employees', upload.single('photo'), async (req, res) => {
         b.emergency_contact_phone || null,
         b.line_manager || null,
         b.status || 'active',
+        req.user.company || 'CW',
       ]
     );
     let emp = result.rows[0];
@@ -664,7 +740,7 @@ router.post('/employees', upload.single('photo'), async (req, res) => {
 
 router.get('/employees/:id/leave', async (req, res) => {
   try {
-    const emp = await getEmployeeOr404(req.params.id, res);
+    const emp = await getEmployeeOr404(req.params.id, res, req);
     if (!emp) return;
     const year = toNum(req.query.year, new Date().getFullYear());
     const [history, requests, balances] = await Promise.all([
@@ -694,7 +770,7 @@ router.get('/employees/:id/leave', async (req, res) => {
 
 router.get('/employees/:id/payroll', async (req, res) => {
   try {
-    const emp = await getEmployeeOr404(req.params.id, res);
+    const emp = await getEmployeeOr404(req.params.id, res, req);
     if (!emp) return;
     const result = await pool.query(
       `SELECT i.*, p.month, p.year, p.status AS payroll_status, p.generated_at
@@ -713,7 +789,7 @@ router.get('/employees/:id/payroll', async (req, res) => {
 
 router.get('/employees/:id/attendance', async (req, res) => {
   try {
-    const emp = await getEmployeeOr404(req.params.id, res);
+    const emp = await getEmployeeOr404(req.params.id, res, req);
     if (!emp) return;
     const year = toNum(req.query.year, new Date().getFullYear());
     const month = toNum(req.query.month, new Date().getMonth() + 1);
@@ -736,7 +812,7 @@ router.get('/employees/:id/attendance', async (req, res) => {
 
 router.get('/employees/:id/documents', async (req, res) => {
   try {
-    const emp = await getEmployeeOr404(req.params.id, res);
+    const emp = await getEmployeeOr404(req.params.id, res, req);
     if (!emp) return;
     const result = await pool.query(
       `SELECT d.*, u.username AS uploaded_by_name
@@ -754,6 +830,9 @@ router.get('/employees/:id/documents', async (req, res) => {
 
 router.get('/employee-allowances/:employeeId', async (req, res) => {
   try {
+    if (!(await employeeBelongsToCallerCompany(req.params.employeeId, req))) {
+      return res.status(404).json({ error: 'Employee not found' });
+    }
     res.json(await allowancesForEmployee(req.params.employeeId));
   } catch (err) {
     console.error('HR employee allowances:', err);
@@ -766,6 +845,9 @@ router.post('/employee-allowances', async (req, res) => {
     const b = req.body || {};
     if (!b.employee_id || !b.allowance_name) {
       return res.status(400).json({ error: 'employee and allowance name are required' });
+    }
+    if (!(await employeeBelongsToCallerCompany(b.employee_id, req))) {
+      return res.status(404).json({ error: 'Employee not found' });
     }
     const result = await pool.query(
       `INSERT INTO hr_employee_allowances (employee_id, allowance_name, allowance_type, value, taxable, effective_from, effective_to)
@@ -801,6 +883,9 @@ router.put('/employee-allowances/:id', async (req, res) => {
     const b = req.body || {};
     const existing = await pool.query(`SELECT * FROM hr_employee_allowances WHERE id = $1`, [req.params.id]);
     if (existing.rowCount === 0) return res.status(404).json({ error: 'Allowance not found' });
+    if (!(await employeeBelongsToCallerCompany(existing.rows[0].employee_id, req))) {
+      return res.status(404).json({ error: 'Allowance not found' });
+    }
     const before = existing.rows[0];
     const result = await pool.query(
       `UPDATE hr_employee_allowances SET
@@ -834,6 +919,9 @@ router.delete('/employee-allowances/:id', async (req, res) => {
   try {
     const existing = await pool.query(`SELECT * FROM hr_employee_allowances WHERE id = $1`, [req.params.id]);
     if (existing.rowCount === 0) return res.status(404).json({ error: 'Allowance not found' });
+    if (!(await employeeBelongsToCallerCompany(existing.rows[0].employee_id, req))) {
+      return res.status(404).json({ error: 'Allowance not found' });
+    }
     const before = existing.rows[0];
     await pool.query(`DELETE FROM hr_employee_allowances WHERE id = $1`, [req.params.id]);
     const emp = await employeeBrief(before.employee_id);
@@ -853,6 +941,9 @@ router.delete('/employee-allowances/:id', async (req, res) => {
 
 router.get('/employee-reliefs/:employeeId', async (req, res) => {
   try {
+    if (!(await employeeBelongsToCallerCompany(req.params.employeeId, req))) {
+      return res.status(404).json({ error: 'Employee not found' });
+    }
     const result = await pool.query(
       `SELECT * FROM hr_employee_reliefs WHERE employee_id = $1 ORDER BY id`,
       [req.params.employeeId]
@@ -869,6 +960,9 @@ router.post('/employee-reliefs', async (req, res) => {
     const b = req.body || {};
     if (!b.employee_id || !b.relief_name) {
       return res.status(400).json({ error: 'employee and relief name are required' });
+    }
+    if (!(await employeeBelongsToCallerCompany(b.employee_id, req))) {
+      return res.status(404).json({ error: 'Employee not found' });
     }
     const annual = toNum(b.annual_amount);
     const monthly = b.monthly_amount != null ? toNum(b.monthly_amount) : roundMoney(annual / 12);
@@ -890,6 +984,9 @@ router.put('/employee-reliefs/:id', async (req, res) => {
     const b = req.body || {};
     const existing = await pool.query(`SELECT * FROM hr_employee_reliefs WHERE id = $1`, [req.params.id]);
     if (existing.rowCount === 0) return res.status(404).json({ error: 'Relief not found' });
+    if (!(await employeeBelongsToCallerCompany(existing.rows[0].employee_id, req))) {
+      return res.status(404).json({ error: 'Relief not found' });
+    }
     const cur = existing.rows[0];
     const annual = b.annual_amount != null ? toNum(b.annual_amount) : Number(cur.annual_amount);
     const monthly = b.monthly_amount != null ? toNum(b.monthly_amount) : roundMoney(annual / 12);
@@ -913,6 +1010,11 @@ router.put('/employee-reliefs/:id', async (req, res) => {
 
 router.delete('/employee-reliefs/:id', async (req, res) => {
   try {
+    const existing = await pool.query(`SELECT employee_id FROM hr_employee_reliefs WHERE id = $1`, [req.params.id]);
+    if (existing.rowCount === 0) return res.status(404).json({ error: 'Relief not found' });
+    if (!(await employeeBelongsToCallerCompany(existing.rows[0].employee_id, req))) {
+      return res.status(404).json({ error: 'Relief not found' });
+    }
     const result = await pool.query(`DELETE FROM hr_employee_reliefs WHERE id = $1 RETURNING id`, [req.params.id]);
     if (result.rowCount === 0) return res.status(404).json({ error: 'Relief not found' });
     res.status(204).end();
@@ -924,6 +1026,9 @@ router.delete('/employee-reliefs/:id', async (req, res) => {
 
 router.get('/employee-deductions/:employeeId', async (req, res) => {
   try {
+    if (!(await employeeBelongsToCallerCompany(req.params.employeeId, req))) {
+      return res.status(404).json({ error: 'Employee not found' });
+    }
     const result = await pool.query(
       `SELECT * FROM hr_employee_deductions WHERE employee_id = $1 ORDER BY id`,
       [req.params.employeeId]
@@ -940,6 +1045,9 @@ router.post('/employee-deductions', async (req, res) => {
     const b = req.body || {};
     if (!b.employee_id || !b.deduction_name) {
       return res.status(400).json({ error: 'employee and deduction name are required' });
+    }
+    if (!(await employeeBelongsToCallerCompany(b.employee_id, req))) {
+      return res.status(404).json({ error: 'Employee not found' });
     }
     const isLoan = !!b.is_loan;
     const totalLoan = isLoan ? toNum(b.total_loan_amount) : null;
@@ -998,6 +1106,9 @@ router.put('/employee-deductions/:id', async (req, res) => {
     const b = req.body || {};
     const existing = await pool.query(`SELECT * FROM hr_employee_deductions WHERE id = $1`, [req.params.id]);
     if (existing.rowCount === 0) return res.status(404).json({ error: 'Deduction not found' });
+    if (!(await employeeBelongsToCallerCompany(existing.rows[0].employee_id, req))) {
+      return res.status(404).json({ error: 'Deduction not found' });
+    }
     const cur = existing.rows[0];
     const result = await pool.query(
       `UPDATE hr_employee_deductions SET
@@ -1061,6 +1172,9 @@ router.delete('/employee-deductions/:id', async (req, res) => {
   try {
     const existing = await pool.query(`SELECT * FROM hr_employee_deductions WHERE id = $1`, [req.params.id]);
     if (existing.rowCount === 0) return res.status(404).json({ error: 'Deduction not found' });
+    if (!(await employeeBelongsToCallerCompany(existing.rows[0].employee_id, req))) {
+      return res.status(404).json({ error: 'Deduction not found' });
+    }
     const before = existing.rows[0];
     await pool.query(`DELETE FROM hr_employee_deductions WHERE id = $1`, [req.params.id]);
     const emp = await employeeBrief(before.employee_id);
@@ -1080,23 +1194,29 @@ router.delete('/employee-deductions/:id', async (req, res) => {
 
 // ── Salary Advances / Staff Loans ────────────────────────────────────────────
 
-router.get('/salary-advances/summary', async (_req, res) => {
+router.get('/salary-advances/summary', async (req, res) => {
   try {
     const now = new Date();
     const month = now.getMonth() + 1;
     const year = now.getFullYear();
+    const company = req.company;
     const [counts, recovered] = await Promise.all([
       pool.query(`
         SELECT
-          COUNT(*) FILTER (WHERE status = 'active')::int AS active_loans,
-          COALESCE(SUM(remaining_balance) FILTER (WHERE status = 'active'), 0)::float AS outstanding,
-          COUNT(*) FILTER (WHERE status = 'settled')::int AS fully_repaid
-        FROM hr_salary_advances
-      `),
+          COUNT(*) FILTER (WHERE a.status = 'active')::int AS active_loans,
+          COALESCE(SUM(a.remaining_balance) FILTER (WHERE a.status = 'active'), 0)::float AS outstanding,
+          COUNT(*) FILTER (WHERE a.status = 'settled')::int AS fully_repaid
+        FROM hr_salary_advances a
+        JOIN hr_employees e ON e.id = a.employee_id
+        ${company ? 'WHERE e.company = $1' : ''}
+      `, company ? [company] : []),
       pool.query(
-        `SELECT COALESCE(SUM(amount_deducted), 0)::float AS recovered
-         FROM hr_salary_advance_repayments WHERE month = $1 AND year = $2`,
-        [month, year]
+        `SELECT COALESCE(SUM(r.amount_deducted), 0)::float AS recovered
+         FROM hr_salary_advance_repayments r
+         JOIN hr_salary_advances a ON a.id = r.advance_id
+         JOIN hr_employees e ON e.id = a.employee_id
+         WHERE r.month = $1 AND r.year = $2 ${company ? 'AND e.company = $3' : ''}`,
+        company ? [month, year, company] : [month, year]
       ),
     ]);
     const c = counts.rows[0] || {};
@@ -1118,6 +1238,10 @@ router.get('/salary-advances', async (req, res) => {
     const employeeId = req.query.employee_id ? Number(req.query.employee_id) : null;
     const clauses = [];
     const params = [];
+    if (req.company) {
+      params.push(req.company);
+      clauses.push(`e.company = $${params.length}`);
+    }
     if (status) {
       params.push(status);
       clauses.push(`a.status = $${params.length}`);
@@ -1147,13 +1271,16 @@ router.get('/salary-advances', async (req, res) => {
 router.get('/salary-advances/:id', async (req, res) => {
   try {
     const adv = await pool.query(
-      `SELECT a.*, e.full_name, e.department, e.position, e.photo_url, e.basic_salary, e.email
+      `SELECT a.*, e.full_name, e.department, e.position, e.photo_url, e.basic_salary, e.email, e.company
        FROM hr_salary_advances a
        JOIN hr_employees e ON e.id = a.employee_id
        WHERE a.id = $1`,
       [req.params.id]
     );
     if (adv.rowCount === 0) return res.status(404).json({ error: 'Advance not found' });
+    if (!isSystemAdminAccount(req.user) && (req.user.company || 'CW') !== adv.rows[0].company) {
+      return res.status(404).json({ error: 'Advance not found' });
+    }
     const repayments = await pool.query(
       `SELECT r.*, p.status AS payroll_status
        FROM hr_salary_advance_repayments r
@@ -1184,6 +1311,9 @@ router.post('/salary-advances', async (req, res) => {
     const b = req.body || {};
     if (!b.employee_id || !b.loan_amount || !b.monthly_deduction) {
       return res.status(400).json({ error: 'employee, loan amount, and monthly deduction are required' });
+    }
+    if (!(await employeeBelongsToCallerCompany(b.employee_id, req))) {
+      return res.status(404).json({ error: 'Employee not found' });
     }
     const loanAmount = toNum(b.loan_amount);
     const monthly = toNum(b.monthly_deduction);
@@ -1235,6 +1365,9 @@ router.patch('/salary-advances/:id/status', async (req, res) => {
     }
     const existing = await pool.query(`SELECT * FROM hr_salary_advances WHERE id = $1`, [req.params.id]);
     if (existing.rowCount === 0) return res.status(404).json({ error: 'Advance not found' });
+    if (!(await employeeBelongsToCallerCompany(existing.rows[0].employee_id, req))) {
+      return res.status(404).json({ error: 'Advance not found' });
+    }
     const before = existing.rows[0];
     const result = await pool.query(
       `UPDATE hr_salary_advances SET
@@ -1291,6 +1424,9 @@ router.get('/employees/:id', async (req, res) => {
     ]);
     if (result.rowCount === 0) return res.status(404).json({ error: 'Employee not found' });
     const emp = result.rows[0];
+    if (!isSystemAdminAccount(req.user) && (req.user.company || 'CW') !== emp.company) {
+      return res.status(404).json({ error: 'Employee not found' });
+    }
     const blob = docs.rows.map((d) => `${d.category} ${d.document_name}`).join(' ');
     res.json({
       ...emp,
@@ -1310,7 +1446,7 @@ router.get('/employees/:id', async (req, res) => {
 
 router.put('/employees/:id', upload.single('photo'), async (req, res) => {
   try {
-    const emp = await getEmployeeOr404(req.params.id, res);
+    const emp = await getEmployeeOr404(req.params.id, res, req);
     if (!emp) return;
     const b = req.body || {};
     if (b.start_date !== undefined && !String(b.start_date || '').trim()) {
@@ -1405,7 +1541,7 @@ router.put('/employees/:id', upload.single('photo'), async (req, res) => {
 
 router.delete('/employees/:id', async (req, res) => {
   try {
-    const emp = await getEmployeeOr404(req.params.id, res);
+    const emp = await getEmployeeOr404(req.params.id, res, req);
     if (!emp) return;
     await pool.query(`UPDATE hr_employees SET status = 'inactive' WHERE id = $1`, [emp.id]);
     await syncEmployeeUserStatus({ ...emp, status: 'inactive' });
@@ -1418,7 +1554,7 @@ router.delete('/employees/:id', async (req, res) => {
 
 router.post('/employees/:id/suspend', async (req, res) => {
   try {
-    const emp = await getEmployeeOr404(req.params.id, res);
+    const emp = await getEmployeeOr404(req.params.id, res, req);
     if (!emp) return;
     const reason = String(req.body?.reason || '').trim();
     if (reason.length < 3) return res.status(400).json({ error: 'A suspend reason is required' });
@@ -1442,7 +1578,7 @@ router.post('/employees/:id/suspend', async (req, res) => {
 
 router.post('/employees/:id/unsuspend', async (req, res) => {
   try {
-    const emp = await getEmployeeOr404(req.params.id, res);
+    const emp = await getEmployeeOr404(req.params.id, res, req);
     if (!emp) return;
     const reason = String(req.body?.reason || '').trim();
     if (reason.length < 3) return res.status(400).json({ error: 'An unsuspend reason is required' });
@@ -1469,15 +1605,16 @@ router.post('/employees/:id/unsuspend', async (req, res) => {
 router.get('/leave/balances', async (req, res) => {
   try {
     const year = toNum(req.query.year, new Date().getFullYear());
+    const company = req.company;
     const result = await pool.query(
       `SELECT e.id AS employee_id, e.full_name, e.department, e.photo_url, e.status,
               b.leave_type, b.year, b.total_days, b.used_days,
               GREATEST(b.total_days - b.used_days, 0) AS remaining_days
        FROM hr_employees e
        JOIN hr_leave_balances b ON b.employee_id = e.id AND b.year = $1
-       WHERE e.status = 'active'
+       WHERE e.status = 'active' ${company ? 'AND e.company = $2' : ''}
        ORDER BY e.full_name, b.leave_type`,
-      [year]
+      company ? [year, company] : [year]
     );
     res.json(result.rows);
   } catch (err) {
@@ -1492,22 +1629,23 @@ router.get('/leave/calendar', async (req, res) => {
     const month = toNum(req.query.month, new Date().getMonth() + 1);
     const start = `${year}-${String(month).padStart(2, '0')}-01`;
     const endDate = new Date(year, month, 0).toISOString().slice(0, 10);
+    const company = req.company;
     const result = await safeQuery(
       `SELECT * FROM (
          SELECT l.id, l.employee_id, l.leave_type, l.start_date, l.end_date, l.days, l.status,
                 e.full_name, e.department, e.photo_url
          FROM hr_leave_applications l
          JOIN hr_employees e ON e.id = l.employee_id
-         WHERE l.status = 'Approved' AND l.start_date <= $2 AND l.end_date >= $1
+         WHERE l.status = 'Approved' AND l.start_date <= $2 AND l.end_date >= $1 ${company ? 'AND e.company = $3' : ''}
          UNION ALL
          SELECT r.id, r.employee_id, r.leave_type, r.start_date, r.end_date, r.days, r.status,
                 e.full_name, e.department, e.photo_url
          FROM hr_leave_requests r
          JOIN hr_employees e ON e.id = r.employee_id
-         WHERE r.status = 'approved' AND r.start_date <= $2 AND r.end_date >= $1
+         WHERE r.status = 'approved' AND r.start_date <= $2 AND r.end_date >= $1 ${company ? 'AND e.company = $3' : ''}
        ) x
        ORDER BY start_date`,
-      [start, endDate]
+      company ? [start, endDate, company] : [start, endDate]
     );
     res.json({ year, month, leaves: result.rows });
   } catch (err) {
@@ -1521,6 +1659,10 @@ router.get('/leave', async (req, res) => {
     const { employee_id, leave_type, status, from, to } = req.query;
     const clauses = [];
     const params = [];
+    if (req.company) {
+      params.push(req.company);
+      clauses.push(`e.company = $${params.length}`);
+    }
     if (employee_id) {
       params.push(employee_id);
       clauses.push(`l.employee_id = $${params.length}`);
@@ -1567,6 +1709,9 @@ router.post('/leave', async (req, res) => {
     if (!LEAVE_TYPES.includes(b.leave_type)) {
       return res.status(400).json({ error: `Invalid leave type. Use: ${LEAVE_TYPES.join(', ')}` });
     }
+    if (!(await employeeBelongsToCallerCompany(b.employee_id, req))) {
+      return res.status(404).json({ error: 'Employee not found' });
+    }
     const days = b.days != null ? toNum(b.days) : countWeekdays(b.start_date, b.end_date);
     const status = b.status || 'Pending';
     const result = await pool.query(
@@ -1600,6 +1745,9 @@ router.put('/leave/:id', async (req, res) => {
   try {
     const existing = await pool.query('SELECT * FROM hr_leave_applications WHERE id = $1', [req.params.id]);
     if (existing.rowCount === 0) return res.status(404).json({ error: 'Leave record not found' });
+    if (!(await employeeBelongsToCallerCompany(existing.rows[0].employee_id, req))) {
+      return res.status(404).json({ error: 'Leave record not found' });
+    }
     const prev = existing.rows[0];
     const b = req.body || {};
     const start = b.start_date || prev.start_date;
@@ -1651,11 +1799,15 @@ const generatePayroll = async (req, res) => {
     const overrideMap = new Map(overrides.map((o) => [Number(o.employee_id), o]));
     const asOf = `${year}-${String(month).padStart(2, '0')}-01`;
     const settings = await getPayrollSettings();
+    // Payroll runs are per-company — without this, PTEL's HR generating payroll for a month
+    // would find/reuse C&W's payroll row for the same month/year and mix both companies'
+    // employees into one run. Real gap found and closed while wiring HR company filtering.
+    const runCompany = req.user.company || 'CW';
 
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
-      const existing = await client.query(`SELECT id FROM hr_payroll WHERE month = $1 AND year = $2`, [month, year]);
+      const existing = await client.query(`SELECT id FROM hr_payroll WHERE month = $1 AND year = $2 AND company = $3`, [month, year, runCompany]);
       let payrollId;
       const wasRegenerate = existing.rowCount > 0;
       if (existing.rowCount > 0) {
@@ -1709,13 +1861,13 @@ const generatePayroll = async (req, res) => {
         );
       } else {
         const created = await client.query(
-          `INSERT INTO hr_payroll (month, year, status, generated_by) VALUES ($1,$2,'Draft',$3) RETURNING id`,
-          [month, year, actorId(req)]
+          `INSERT INTO hr_payroll (month, year, status, generated_by, company) VALUES ($1,$2,'Draft',$3,$4) RETURNING id`,
+          [month, year, actorId(req), runCompany]
         );
         payrollId = created.rows[0].id;
       }
 
-      const employees = await client.query(`SELECT * FROM hr_employees WHERE status = 'active'`);
+      const employees = await client.query(`SELECT * FROM hr_employees WHERE status = 'active' AND company = $1`, [runCompany]);
       const empIds = employees.rows.map((e) => e.id);
       const [allowMap, reliefMap, deductionMap, advanceMap] = await Promise.all([
         allowancesByEmployeeIds(empIds, asOf),
@@ -2046,6 +2198,9 @@ router.get('/payroll/:id/items', async (req, res) => {
   try {
     const payroll = await pool.query('SELECT * FROM hr_payroll WHERE id = $1', [req.params.id]);
     if (payroll.rowCount === 0) return res.status(404).json({ error: 'Payroll not found' });
+    if (!isSystemAdminAccount(req.user) && (req.user.company || 'CW') !== payroll.rows[0].company) {
+      return res.status(404).json({ error: 'Payroll not found' });
+    }
     const items = await pool.query(
       `SELECT i.*, e.full_name, e.department, e.position, e.photo_url, e.status AS employee_status
        FROM hr_payroll_items i
@@ -2065,7 +2220,9 @@ router.get('/payroll', async (req, res) => {
   try {
     const month = req.query.month ? toNum(req.query.month) : null;
     const year = req.query.year ? toNum(req.query.year) : null;
+    const companyClause = req.company ? 'AND p.company = $3' : '';
     if (month && year) {
+      const params = req.company ? [month, year, req.company] : [month, year];
       const payroll = await pool.query(
         `SELECT p.*,
                 TRIM(CONCAT(COALESCE(gb.first_name,''), ' ', COALESCE(gb.last_name,''))) AS generated_by_name,
@@ -2073,8 +2230,8 @@ router.get('/payroll', async (req, res) => {
          FROM hr_payroll p
          LEFT JOIN users gb ON gb.id = p.generated_by
          LEFT JOIN users ab ON ab.id = p.approved_by
-         WHERE p.month = $1 AND p.year = $2`,
-        [month, year]
+         WHERE p.month = $1 AND p.year = $2 ${companyClause}`,
+        params
       );
       if (payroll.rowCount === 0) return res.json({ payroll: null, items: [] });
       const items = await pool.query(
@@ -2086,12 +2243,16 @@ router.get('/payroll', async (req, res) => {
       );
       return res.json({ payroll: payroll.rows[0], items: items.rows.map(normalizePayrollItem) });
     }
+    const historyCompanyClause = req.company ? 'WHERE p.company = $1' : '';
+    const historyParams = req.company ? [req.company] : [];
     const history = await pool.query(
       `SELECT p.*, COUNT(i.id)::int AS item_count, COALESCE(SUM(i.net_pay),0)::numeric AS total_net
        FROM hr_payroll p
        LEFT JOIN hr_payroll_items i ON i.payroll_id = p.id
+       ${historyCompanyClause}
        GROUP BY p.id
-       ORDER BY p.year DESC, p.month DESC`
+       ORDER BY p.year DESC, p.month DESC`,
+      historyParams
     );
     res.json(history.rows);
   } catch (err) {
@@ -2105,6 +2266,9 @@ router.put('/payroll/:id', async (req, res) => {
     const beforeQ = await pool.query(`SELECT * FROM hr_payroll WHERE id = $1`, [req.params.id]);
     if (beforeQ.rowCount === 0) return res.status(404).json({ error: 'Payroll not found' });
     const before = beforeQ.rows[0];
+    if (!isSystemAdminAccount(req.user) && (req.user.company || 'CW') !== before.company) {
+      return res.status(404).json({ error: 'Payroll not found' });
+    }
     const newStatus = String(req.body?.status || '');
     const row = await setPayrollStatus(req.params.id, newStatus, actorId(req));
     if (!row) return res.status(404).json({ error: 'Payroll not found' });
@@ -2142,6 +2306,9 @@ router.patch('/payroll/:id/approve', async (req, res) => {
     const beforeQ = await pool.query(`SELECT * FROM hr_payroll WHERE id = $1`, [req.params.id]);
     if (beforeQ.rowCount === 0) return res.status(404).json({ error: 'Payroll not found' });
     const before = beforeQ.rows[0];
+    if (!isSystemAdminAccount(req.user) && (req.user.company || 'CW') !== before.company) {
+      return res.status(404).json({ error: 'Payroll not found' });
+    }
     const row = await setPayrollStatus(req.params.id, 'Approved', actorId(req));
     if (!row) return res.status(404).json({ error: 'Payroll not found' });
     const totals = await pool.query(
@@ -2169,6 +2336,9 @@ router.patch('/payroll/:id/mark-paid', async (req, res) => {
     const beforeQ = await pool.query(`SELECT * FROM hr_payroll WHERE id = $1`, [req.params.id]);
     if (beforeQ.rowCount === 0) return res.status(404).json({ error: 'Payroll not found' });
     const before = beforeQ.rows[0];
+    if (!isSystemAdminAccount(req.user) && (req.user.company || 'CW') !== before.company) {
+      return res.status(404).json({ error: 'Payroll not found' });
+    }
     const row = await setPayrollStatus(req.params.id, 'Paid', actorId(req));
     if (!row) return res.status(404).json({ error: 'Payroll not found' });
     await auditFromReq(req, {
@@ -2386,7 +2556,8 @@ router.get('/attendance/summary', async (req, res) => {
     const start = `${year}-${String(month).padStart(2, '0')}-01`;
     const end = `${year}-${String(month).padStart(2, '0')}-${String(new Date(year, month, 0).getDate()).padStart(2, '0')}`;
     const employees = await pool.query(
-      `SELECT id, full_name, department, position, photo_url, status FROM hr_employees WHERE status = 'active' ORDER BY full_name`
+      `SELECT id, full_name, department, position, photo_url, status FROM hr_employees WHERE status = 'active' ${req.company ? 'AND company = $1' : ''} ORDER BY full_name`,
+      req.company ? [req.company] : []
     );
     const [records, leaveMap] = await Promise.all([
       pool.query(
@@ -2467,6 +2638,10 @@ router.get('/attendance', async (req, res) => {
     const { employee_id, from, to, month, year } = req.query;
     const clauses = [];
     const params = [];
+    if (req.company) {
+      params.push(req.company);
+      clauses.push(`e.company = $${params.length}`);
+    }
     if (employee_id) {
       params.push(employee_id);
       clauses.push(`a.employee_id = $${params.length}`);
@@ -2509,6 +2684,9 @@ router.post('/attendance', async (req, res) => {
     if (!ATTENDANCE_STATUSES.includes(b.status)) {
       return res.status(400).json({ error: `Status must be one of: ${ATTENDANCE_STATUSES.join(', ')}` });
     }
+    if (!(await employeeBelongsToCallerCompany(b.employee_id, req))) {
+      return res.status(404).json({ error: 'Employee not found' });
+    }
     const result = await pool.query(
       `INSERT INTO hr_attendance (employee_id, date, status, clock_in, clock_out, overtime_hours, notes, recorded_by)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
@@ -2541,6 +2719,11 @@ router.post('/attendance', async (req, res) => {
 router.put('/attendance/:id', async (req, res) => {
   try {
     const b = req.body || {};
+    const existing = await pool.query('SELECT employee_id FROM hr_attendance WHERE id = $1', [req.params.id]);
+    if (existing.rowCount === 0) return res.status(404).json({ error: 'Attendance record not found' });
+    if (!(await employeeBelongsToCallerCompany(existing.rows[0].employee_id, req))) {
+      return res.status(404).json({ error: 'Attendance record not found' });
+    }
     const result = await pool.query(
       `UPDATE hr_attendance SET
         status = COALESCE($1, status),
@@ -2638,6 +2821,10 @@ router.get('/form-requests', async (req, res) => {
     const { status, department } = req.query;
     const clauses = [];
     const params = [];
+    if (req.company) {
+      params.push(req.company);
+      clauses.push(`e.company = $${params.length}`);
+    }
     if (status && status !== 'all') {
       params.push(String(status).toLowerCase());
       clauses.push(`r.status = $${params.length}`);
@@ -2670,6 +2857,9 @@ router.put('/form-requests/:id', async (req, res) => {
     }
     const existing = await pool.query(`SELECT * FROM hr_form_requests WHERE id = $1`, [req.params.id]);
     if (existing.rowCount === 0) return res.status(404).json({ error: 'Form request not found' });
+    if (!(await employeeBelongsToCallerCompany(existing.rows[0].employee_id, req))) {
+      return res.status(404).json({ error: 'Form request not found' });
+    }
     const row = existing.rows[0];
     if (row.status !== 'pending') return res.status(400).json({ error: 'Request has already been reviewed' });
 
@@ -2733,6 +2923,10 @@ router.get('/documents', async (req, res) => {
     const { employee_id, category } = req.query;
     const clauses = [];
     const params = [];
+    if (req.company) {
+      params.push(req.company);
+      clauses.push(`e.company = $${params.length}`);
+    }
     if (employee_id) {
       params.push(employee_id);
       clauses.push(`d.employee_id = $${params.length}`);
@@ -2764,6 +2958,9 @@ router.post('/documents', upload.single('file'), async (req, res) => {
     if (!b.employee_id || !b.document_name) {
       return res.status(400).json({ error: 'employee and document name are required' });
     }
+    if (!(await employeeBelongsToCallerCompany(b.employee_id, req))) {
+      return res.status(404).json({ error: 'Employee not found' });
+    }
     const category = DOCUMENT_CATEGORIES.includes(b.category) ? b.category : 'Other';
     const fileUrl = req.file ? publicFileUrl(req.file.filename) : b.file_url || null;
     const result = await pool.query(
@@ -2782,6 +2979,9 @@ router.delete('/documents/:id', async (req, res) => {
   try {
     const existing = await pool.query('SELECT * FROM hr_documents WHERE id = $1', [req.params.id]);
     if (existing.rowCount === 0) return res.status(404).json({ error: 'Document not found' });
+    if (!(await employeeBelongsToCallerCompany(existing.rows[0].employee_id, req))) {
+      return res.status(404).json({ error: 'Document not found' });
+    }
     const doc = existing.rows[0];
     if (doc.file_url) {
       const filePath = path.join(uploadsDir, path.basename(doc.file_url));
@@ -2797,10 +2997,10 @@ router.delete('/documents/:id', async (req, res) => {
 
 // â”€â”€ GPS attendance, settings, analytics, reports â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-router.get('/settings', async (_req, res) => {
+router.get('/settings', async (req, res) => {
   try {
     const { getHrSettings } = await import('../utils/hrGps.js');
-    const settings = await getHrSettings();
+    const settings = await getHrSettings(req.company || 'CW');
     res.json(settings || {});
   } catch (err) {
     console.error('HR settings:', err);
@@ -2811,7 +3011,8 @@ router.get('/settings', async (_req, res) => {
 router.put('/settings', async (req, res) => {
   try {
     const b = req.body || {};
-    const existing = await pool.query(`SELECT id FROM hr_settings ORDER BY id ASC LIMIT 1`);
+    const company = req.company || 'CW';
+    const existing = await pool.query(`SELECT id FROM hr_settings WHERE company = $1 ORDER BY id ASC LIMIT 1`, [company]);
     const fields = {
       office_latitude: b.office_latitude === '' || b.office_latitude == null ? null : Number(b.office_latitude),
       office_longitude: b.office_longitude === '' || b.office_longitude == null ? null : Number(b.office_longitude),
@@ -2824,9 +3025,9 @@ router.put('/settings', async (req, res) => {
     if (existing.rowCount === 0) {
       row = (
         await pool.query(
-          `INSERT INTO hr_settings (office_latitude, office_longitude, office_radius_meters, office_name, expected_clock_in, expected_clock_out, updated_by, updated_at)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,NOW()) RETURNING *`,
-          [fields.office_latitude, fields.office_longitude, fields.office_radius_meters, fields.office_name, fields.expected_clock_in, fields.expected_clock_out, actorId(req)]
+          `INSERT INTO hr_settings (office_latitude, office_longitude, office_radius_meters, office_name, expected_clock_in, expected_clock_out, updated_by, updated_at, company)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,NOW(),$8) RETURNING *`,
+          [fields.office_latitude, fields.office_longitude, fields.office_radius_meters, fields.office_name, fields.expected_clock_in, fields.expected_clock_out, actorId(req), company]
         )
       ).rows[0];
     } else {
@@ -2848,13 +3049,14 @@ router.put('/settings', async (req, res) => {
   }
 });
 
-router.get('/attendance/live', async (_req, res) => {
+router.get('/attendance/live', async (req, res) => {
   try {
     const { ghanaToday } = await import('../utils/hrShared.js');
     const today = ghanaToday();
     const [employees, records] = await Promise.all([
       pool.query(
-        `SELECT id, full_name, department, position, photo_url, status FROM hr_employees WHERE status = 'active' ORDER BY full_name`
+        `SELECT id, full_name, department, position, photo_url, status FROM hr_employees WHERE status = 'active' ${req.company ? 'AND company = $1' : ''} ORDER BY full_name`,
+        req.company ? [req.company] : []
       ),
       pool.query(`SELECT * FROM hr_attendance WHERE date = $1`, [today]),
     ]);
@@ -2888,18 +3090,23 @@ router.get('/attendance/live', async (_req, res) => {
   }
 });
 
-router.get('/attendance/today-summary', async (_req, res) => {
+router.get('/attendance/today-summary', async (req, res) => {
   try {
     const { ghanaToday } = await import('../utils/hrShared.js');
     const today = ghanaToday();
-    const [empRes, recRes] = await Promise.all([
-      pool.query(`SELECT COUNT(*)::int AS n FROM hr_employees WHERE status = 'active'`),
+    const company = req.company;
+    const [empRes, empIdsRes, recRes] = await Promise.all([
+      pool.query(`SELECT COUNT(*)::int AS n FROM hr_employees WHERE status = 'active' ${company ? 'AND company = $1' : ''}`, company ? [company] : []),
+      pool.query(`SELECT id FROM hr_employees WHERE status = 'active' ${company ? 'AND company = $1' : ''}`, company ? [company] : []),
       pool.query(`SELECT * FROM hr_attendance WHERE date = $1`, [today]),
     ]);
     const total = empRes.rows[0].n;
-    const clockedIn = recRes.rows.filter((r) => r.clock_in_time || r.clock_in).length;
-    const late = recRes.rows.filter((r) => r.is_late || String(r.status).toLowerCase() === 'late').length;
-    const onLeave = (await leaveEmployeeIdsOn(today)).size;
+    const companyEmpIds = new Set(empIdsRes.rows.map((r) => Number(r.id)));
+    const scopedRecords = company ? recRes.rows.filter((r) => companyEmpIds.has(Number(r.employee_id))) : recRes.rows;
+    const clockedIn = scopedRecords.filter((r) => r.clock_in_time || r.clock_in).length;
+    const late = scopedRecords.filter((r) => r.is_late || String(r.status).toLowerCase() === 'late').length;
+    const onLeaveIds = await leaveEmployeeIdsOn(today);
+    const onLeave = company ? [...onLeaveIds].filter((id) => companyEmpIds.has(Number(id))).length : onLeaveIds.size;
     res.json({
       total_employees: total,
       clocked_in_count: clockedIn,
@@ -2922,7 +3129,8 @@ router.get('/attendance/heatmap', async (req, res) => {
     const end = `${year}-${String(month).padStart(2, '0')}-${String(endDate).padStart(2, '0')}`;
     const [employees, records, leaveByEmp] = await Promise.all([
       pool.query(
-        `SELECT id, full_name, department, photo_url FROM hr_employees WHERE status = 'active' ORDER BY full_name`
+        `SELECT id, full_name, department, photo_url FROM hr_employees WHERE status = 'active' ${req.company ? 'AND company = $1' : ''} ORDER BY full_name`,
+        req.company ? [req.company] : []
       ),
       pool.query(
         `SELECT * FROM hr_attendance WHERE date >= $1 AND date <= $2`,
@@ -2957,8 +3165,9 @@ router.get('/attendance/heatmap', async (req, res) => {
   }
 });
 
-router.get('/analytics/headcount-trend', async (_req, res) => {
+router.get('/analytics/headcount-trend', async (req, res) => {
   try {
+    const company = req.company;
     const now = new Date();
     const months = [];
     for (let i = 11; i >= 0; i--) {
@@ -2968,8 +3177,8 @@ router.get('/analytics/headcount-trend', async (_req, res) => {
       const end = new Date(year, month, 0).toLocaleDateString('en-CA');
       const count = await pool.query(
         `SELECT COUNT(*)::int AS n FROM hr_employees
-         WHERE status = 'active' AND (start_date IS NULL OR start_date <= $1)`,
-        [end]
+         WHERE status = 'active' AND (start_date IS NULL OR start_date <= $1) ${company ? 'AND company = $2' : ''}`,
+        company ? [end, company] : [end]
       );
       months.push({
         year,
@@ -2988,11 +3197,12 @@ router.get('/analytics/headcount-trend', async (_req, res) => {
   }
 });
 
-router.get('/analytics/by-department', async (_req, res) => {
+router.get('/analytics/by-department', async (req, res) => {
   try {
     const result = await pool.query(
       `SELECT COALESCE(NULLIF(TRIM(department), ''), 'Unassigned') AS department, COUNT(*)::int AS count
-       FROM hr_employees WHERE status = 'active' GROUP BY 1 ORDER BY count DESC`
+       FROM hr_employees WHERE status = 'active' ${req.company ? 'AND company = $1' : ''} GROUP BY 1 ORDER BY count DESC`,
+      req.company ? [req.company] : []
     );
     res.json(result.rows);
   } catch (err) {
@@ -3001,11 +3211,12 @@ router.get('/analytics/by-department', async (_req, res) => {
   }
 });
 
-router.get('/analytics/employment-types', async (_req, res) => {
+router.get('/analytics/employment-types', async (req, res) => {
   try {
     const result = await pool.query(
       `SELECT COALESCE(employment_type, 'unspecified') AS employment_type, COUNT(*)::int AS count
-       FROM hr_employees WHERE status = 'active' GROUP BY 1`
+       FROM hr_employees WHERE status = 'active' ${req.company ? 'AND company = $1' : ''} GROUP BY 1`,
+      req.company ? [req.company] : []
     );
     res.json(result.rows);
   } catch (err) {
@@ -3014,7 +3225,7 @@ router.get('/analytics/employment-types', async (_req, res) => {
   }
 });
 
-router.get('/analytics/salary-distribution', async (_req, res) => {
+router.get('/analytics/salary-distribution', async (req, res) => {
   try {
     const result = await pool.query(
       `SELECT
@@ -3026,8 +3237,9 @@ router.get('/analytics/salary-distribution', async (_req, res) => {
            ELSE 'Above GHS 8,000'
          END AS band,
          COUNT(*)::int AS count
-       FROM hr_employees WHERE status = 'active'
-       GROUP BY 1`
+       FROM hr_employees WHERE status = 'active' ${req.company ? 'AND company = $1' : ''}
+       GROUP BY 1`,
+      req.company ? [req.company] : []
     );
     const order = ['Below GHS 2,000', 'GHS 2,000-4,000', 'GHS 4,000-6,000', 'GHS 6,000-8,000', 'Above GHS 8,000'];
     const map = new Map(result.rows.map((r) => [r.band, r.count]));
@@ -3042,6 +3254,7 @@ router.get('/analytics/attendance-trend', async (req, res) => {
   try {
     const { workingDaysInMonth } = await import('../utils/hrGps.js');
     const n = Math.min(12, Math.max(1, toNum(req.query.months, 6)));
+    const company = req.company;
     const now = new Date();
     const months = [];
     for (let i = n - 1; i >= 0; i--) {
@@ -3050,12 +3263,13 @@ router.get('/analytics/attendance-trend', async (req, res) => {
       const month = d.getMonth() + 1;
       const working = workingDaysInMonth(year, month);
       const [emp, present] = await Promise.all([
-        pool.query(`SELECT COUNT(*)::int AS n FROM hr_employees WHERE status = 'active'`),
+        pool.query(`SELECT COUNT(*)::int AS n FROM hr_employees WHERE status = 'active' ${company ? 'AND company = $1' : ''}`, company ? [company] : []),
         pool.query(
-          `SELECT COUNT(*)::int AS n FROM hr_attendance
-           WHERE EXTRACT(YEAR FROM date) = $1 AND EXTRACT(MONTH FROM date) = $2
-             AND LOWER(status) IN ('present','late','half-day')`,
-          [year, month]
+          `SELECT COUNT(*)::int AS n FROM hr_attendance a
+           JOIN hr_employees e ON e.id = a.employee_id
+           WHERE EXTRACT(YEAR FROM a.date) = $1 AND EXTRACT(MONTH FROM a.date) = $2
+             AND LOWER(a.status) IN ('present','late','half-day') ${company ? 'AND e.company = $3' : ''}`,
+          company ? [year, month, company] : [year, month]
         ),
       ]);
       const possible = emp.rows[0].n * working;
@@ -3082,9 +3296,9 @@ router.get('/analytics/attendance-by-department', async (req, res) => {
        FROM hr_employees e
        LEFT JOIN hr_attendance a ON a.employee_id = e.id
          AND EXTRACT(YEAR FROM a.date) = $1 AND EXTRACT(MONTH FROM a.date) = $2
-       WHERE e.status = 'active'
+       WHERE e.status = 'active' ${req.company ? 'AND e.company = $3' : ''}
        GROUP BY 1 ORDER BY 1`,
-      [year, month]
+      req.company ? [year, month, req.company] : [year, month]
     );
     res.json(
       result.rows.map((r) => {
@@ -3106,12 +3320,13 @@ router.get('/analytics/late-by-weekday', async (req, res) => {
     const year = toNum(req.query.year, new Date().getFullYear());
     const month = toNum(req.query.month, new Date().getMonth() + 1);
     const result = await pool.query(
-      `SELECT EXTRACT(DOW FROM date)::int AS dow, COUNT(*)::int AS count
-       FROM hr_attendance
-       WHERE EXTRACT(YEAR FROM date) = $1 AND EXTRACT(MONTH FROM date) = $2
-         AND (is_late = true OR LOWER(status) = 'late')
+      `SELECT EXTRACT(DOW FROM a.date)::int AS dow, COUNT(*)::int AS count
+       FROM hr_attendance a
+       JOIN hr_employees e ON e.id = a.employee_id
+       WHERE EXTRACT(YEAR FROM a.date) = $1 AND EXTRACT(MONTH FROM a.date) = $2
+         AND (a.is_late = true OR LOWER(a.status) = 'late') ${req.company ? 'AND e.company = $3' : ''}
        GROUP BY 1`,
-      [year, month]
+      req.company ? [year, month, req.company] : [year, month]
     );
     const labels = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
     const map = new Map(result.rows.map((r) => [Number(r.dow), r.count]));
@@ -3128,15 +3343,18 @@ router.get('/analytics/late-by-weekday', async (req, res) => {
 router.get('/analytics/leave-by-type', async (req, res) => {
   try {
     const year = toNum(req.query.year, new Date().getFullYear());
+    const company = req.company;
     const result = await pool.query(
       `SELECT leave_type, SUM(days)::int AS days FROM (
-         SELECT leave_type, days FROM hr_leave_applications
-         WHERE status = 'Approved' AND EXTRACT(YEAR FROM start_date) = $1
+         SELECT l.leave_type, l.days FROM hr_leave_applications l
+         JOIN hr_employees e ON e.id = l.employee_id
+         WHERE l.status = 'Approved' AND EXTRACT(YEAR FROM l.start_date) = $1 ${company ? 'AND e.company = $2' : ''}
          UNION ALL
-         SELECT leave_type, days FROM hr_leave_requests
-         WHERE status = 'approved' AND EXTRACT(YEAR FROM start_date) = $1
+         SELECT r.leave_type, r.days FROM hr_leave_requests r
+         JOIN hr_employees e ON e.id = r.employee_id
+         WHERE r.status = 'approved' AND EXTRACT(YEAR FROM r.start_date) = $1 ${company ? 'AND e.company = $2' : ''}
        ) x GROUP BY leave_type ORDER BY days DESC`,
-      [year]
+      company ? [year, company] : [year]
     );
     res.json(result.rows);
   } catch (err) {
@@ -3148,15 +3366,18 @@ router.get('/analytics/leave-by-type', async (req, res) => {
 router.get('/analytics/leave-trend', async (req, res) => {
   try {
     const year = toNum(req.query.year, new Date().getFullYear());
+    const company = req.company;
     const result = await pool.query(
       `SELECT EXTRACT(MONTH FROM start_date)::int AS month, SUM(days)::int AS days FROM (
-         SELECT start_date, days FROM hr_leave_applications
-         WHERE status = 'Approved' AND EXTRACT(YEAR FROM start_date) = $1
+         SELECT l.start_date, l.days FROM hr_leave_applications l
+         JOIN hr_employees e ON e.id = l.employee_id
+         WHERE l.status = 'Approved' AND EXTRACT(YEAR FROM l.start_date) = $1 ${company ? 'AND e.company = $2' : ''}
          UNION ALL
-         SELECT start_date, days FROM hr_leave_requests
-         WHERE status = 'approved' AND EXTRACT(YEAR FROM start_date) = $1
+         SELECT r.start_date, r.days FROM hr_leave_requests r
+         JOIN hr_employees e ON e.id = r.employee_id
+         WHERE r.status = 'approved' AND EXTRACT(YEAR FROM r.start_date) = $1 ${company ? 'AND e.company = $2' : ''}
        ) x GROUP BY 1`,
-      [year]
+      company ? [year, company] : [year]
     );
     const map = new Map(result.rows.map((r) => [Number(r.month), r.days]));
     res.json(
@@ -3175,15 +3396,16 @@ router.get('/analytics/leave-trend', async (req, res) => {
 router.get('/analytics/payroll-trend', async (req, res) => {
   try {
     const n = Math.min(12, Math.max(1, toNum(req.query.months, 12)));
+    const company = req.company;
     const result = await pool.query(
       `SELECT p.year, p.month, COALESCE(SUM(i.gross),0)::numeric AS gross, COALESCE(SUM(i.net_pay),0)::numeric AS net
        FROM hr_payroll p
        JOIN hr_payroll_items i ON i.payroll_id = p.id
-       WHERE LOWER(p.status) = 'paid'
+       WHERE LOWER(p.status) = 'paid' ${company ? 'AND p.company = $2' : ''}
        GROUP BY p.year, p.month
        ORDER BY p.year DESC, p.month DESC
        LIMIT $1`,
-      [n]
+      company ? [n, company] : [n]
     );
     const rows = [...result.rows].reverse().map((r) => ({
       year: r.year,
@@ -3210,9 +3432,9 @@ router.get('/analytics/payroll-by-department', async (req, res) => {
        FROM hr_payroll p
        JOIN hr_payroll_items i ON i.payroll_id = p.id
        JOIN hr_employees e ON e.id = i.employee_id
-       WHERE p.year = $1 AND p.month = $2
+       WHERE p.year = $1 AND p.month = $2 ${req.company ? 'AND p.company = $3' : ''}
        GROUP BY 1 ORDER BY gross DESC`,
-      [year, month]
+      req.company ? [year, month, req.company] : [year, month]
     );
     res.json(result.rows.map((r) => ({ department: r.department, gross: Number(r.gross || 0) })));
   } catch (err) {
@@ -3225,7 +3447,7 @@ router.get('/analytics/people-snapshot', async (req, res) => {
   try {
     const year = toNum(req.query.year, new Date().getFullYear());
     const month = toNum(req.query.month, new Date().getMonth() + 1);
-    res.json(await peopleSnapshot(year, month));
+    res.json(await peopleSnapshot(year, month, req.company));
   } catch (err) {
     console.error('HR people snapshot:', err);
     res.status(500).json({ error: 'Failed to load people snapshot' });
@@ -3236,7 +3458,7 @@ router.get('/analytics/attendance-health', async (req, res) => {
   try {
     const year = toNum(req.query.year, new Date().getFullYear());
     const month = toNum(req.query.month, new Date().getMonth() + 1);
-    res.json(await attendanceHealth(year, month));
+    res.json(await attendanceHealth(year, month, req.company));
   } catch (err) {
     console.error('HR attendance health:', err);
     res.status(500).json({ error: 'Failed to load attendance health' });
@@ -3246,7 +3468,7 @@ router.get('/analytics/attendance-health', async (req, res) => {
 router.get('/analytics/leave-overview', async (req, res) => {
   try {
     const year = toNum(req.query.year, new Date().getFullYear());
-    res.json(await leaveOverview(year));
+    res.json(await leaveOverview(year, req.company));
   } catch (err) {
     console.error('HR leave overview:', err);
     res.status(500).json({ error: 'Failed to load leave overview' });
@@ -3257,45 +3479,48 @@ router.get('/analytics/payroll-intelligence', async (req, res) => {
   try {
     const year = toNum(req.query.year, new Date().getFullYear());
     const month = toNum(req.query.month, new Date().getMonth() + 1);
-    res.json(await payrollIntelligence(year, month));
+    res.json(await payrollIntelligence(year, month, req.company));
   } catch (err) {
     console.error('HR payroll intelligence:', err);
     res.status(500).json({ error: 'Failed to load payroll intelligence' });
   }
 });
 
-router.get('/analytics/dashboard-extras', async (_req, res) => {
+router.get('/analytics/dashboard-extras', async (req, res) => {
   try {
     const { workingDaysInMonth } = await import('../utils/hrGps.js');
+    const company = req.company;
     const now = new Date();
     const year = now.getFullYear();
     const month = now.getMonth() + 1;
     const prev = new Date(year, month - 2, 1);
     const working = workingDaysInMonth(year, month);
     const [emp, present, payrollThis, payrollLast, spark] = await Promise.all([
-      pool.query(`SELECT COUNT(*)::int AS n FROM hr_employees WHERE status = 'active'`),
+      pool.query(`SELECT COUNT(*)::int AS n FROM hr_employees WHERE status = 'active' ${company ? 'AND company = $1' : ''}`, company ? [company] : []),
       pool.query(
-        `SELECT COUNT(*)::int AS n FROM hr_attendance
-         WHERE EXTRACT(YEAR FROM date) = $1 AND EXTRACT(MONTH FROM date) = $2
-           AND LOWER(status) IN ('present','late','half-day')`,
-        [year, month]
+        `SELECT COUNT(*)::int AS n FROM hr_attendance a
+         JOIN hr_employees e ON e.id = a.employee_id
+         WHERE EXTRACT(YEAR FROM a.date) = $1 AND EXTRACT(MONTH FROM a.date) = $2
+           AND LOWER(a.status) IN ('present','late','half-day') ${company ? 'AND e.company = $3' : ''}`,
+        company ? [year, month, company] : [year, month]
       ),
       pool.query(
         `SELECT COALESCE(SUM(i.gross),0)::numeric AS gross
          FROM hr_payroll p JOIN hr_payroll_items i ON i.payroll_id = p.id
-         WHERE p.year = $1 AND p.month = $2`,
-        [year, month]
+         WHERE p.year = $1 AND p.month = $2 ${company ? 'AND p.company = $3' : ''}`,
+        company ? [year, month, company] : [year, month]
       ),
       pool.query(
         `SELECT COALESCE(SUM(i.gross),0)::numeric AS gross
          FROM hr_payroll p JOIN hr_payroll_items i ON i.payroll_id = p.id
-         WHERE p.year = $1 AND p.month = $2`,
-        [prev.getFullYear(), prev.getMonth() + 1]
+         WHERE p.year = $1 AND p.month = $2 ${company ? 'AND p.company = $3' : ''}`,
+        company ? [prev.getFullYear(), prev.getMonth() + 1, company] : [prev.getFullYear(), prev.getMonth() + 1]
       ),
       pool.query(
         `SELECT to_char(date_trunc('month', COALESCE(start_date, created_at)), 'YYYY-MM') AS ym, COUNT(*)::int AS n
-         FROM hr_employees WHERE status = 'active'
-         GROUP BY 1 ORDER BY 1 DESC LIMIT 6`
+         FROM hr_employees WHERE status = 'active' ${company ? 'AND company = $1' : ''}
+         GROUP BY 1 ORDER BY 1 DESC LIMIT 6`,
+        company ? [company] : []
       ),
     ]);
     const possible = emp.rows[0].n * working;
@@ -3319,7 +3544,7 @@ router.get('/reports/monthly-summary', async (req, res) => {
   try {
     const year = toNum(req.query.year, new Date().getFullYear());
     const month = toNum(req.query.month, new Date().getMonth() + 1);
-    const data = await monthlySummaryReport(year, month);
+    const data = await monthlySummaryReport(year, month, req.company);
     res.json({
       ...data,
       total_leave_days: data.leave.by_type.reduce((s, r) => s + Number(r.days || 0), 0),
@@ -3339,7 +3564,7 @@ router.get('/reports/attendance', async (req, res) => {
     const month = toNum(req.query.month, new Date().getMonth() + 1);
     const department = String(req.query.department || '').trim();
     const employeeId = req.query.employee_id ? Number(req.query.employee_id) : null;
-    res.json(await attendanceReport(year, month, department, employeeId));
+    res.json(await attendanceReport(year, month, department, employeeId, req.company));
   } catch (err) {
     console.error('HR attendance report:', err);
     res.status(500).json({ error: 'Failed to load attendance report' });
@@ -3350,7 +3575,7 @@ router.get('/reports/payroll', async (req, res) => {
   try {
     const year = toNum(req.query.year, new Date().getFullYear());
     const month = toNum(req.query.month, new Date().getMonth() + 1);
-    res.json(await payrollReport(year, month));
+    res.json(await payrollReport(year, month, req.company));
   } catch (err) {
     console.error('HR payroll report:', err);
     res.status(500).json({ error: 'Failed to load payroll report' });
@@ -3362,7 +3587,7 @@ router.get('/reports/leave', async (req, res) => {
     const year = toNum(req.query.year, new Date().getFullYear());
     const leaveType = String(req.query.leave_type || '').trim();
     const department = String(req.query.department || '').trim();
-    res.json(await leaveReport(year, leaveType, department));
+    res.json(await leaveReport(year, leaveType, department, req.company));
   } catch (err) {
     console.error('HR leave report:', err);
     res.status(500).json({ error: 'Failed to load leave report' });
@@ -3374,7 +3599,7 @@ router.get('/reports/employee-directory', async (req, res) => {
     const department = String(req.query.department || '').trim();
     const employmentType = String(req.query.employment_type || '').trim();
     const status = String(req.query.status || '').trim() || 'active';
-    res.json(await directoryReport(department, employmentType, status));
+    res.json(await directoryReport(department, employmentType, status, req.company));
   } catch (err) {
     console.error('HR employee-directory:', err);
     res.status(500).json({ error: 'Failed to load directory' });

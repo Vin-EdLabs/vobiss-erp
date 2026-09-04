@@ -558,6 +558,10 @@ export async function executeVobiTool(name, args = {}, userCtx = {}) {
           return deny('Employee directory is not in your role access.');
         }
         if (!q) return deny('query is required');
+        // userCtx.company is null for a true System Admin (sees every tenant) and a real slug
+        // for everyone else — same convention as middleware/tenant.js's attachTenant, so this
+        // never surfaces another company's staff into a chat answer.
+        const companyClause = userCtx.company ? 'AND e.company = $3' : '';
         const rows = await safeQuery(
           `SELECT e.id,
                   TRIM(COALESCE(e.first_name,'') || ' ' || COALESCE(e.last_name,'')) AS name,
@@ -569,9 +573,10 @@ export async function executeVobiTool(name, args = {}, userCtx = {}) {
                 OR (COALESCE(e.first_name,'') || ' ' || COALESCE(e.last_name,'')) ILIKE $1
                 OR COALESCE(e.department,'') ILIKE $1
               )
+              ${companyClause}
             ORDER BY e.first_name, e.last_name
             LIMIT $2`,
-          [`%${q}%`, limit]
+          userCtx.company ? [`%${q}%`, limit, userCtx.company] : [`%${q}%`, limit]
         );
         const payload = { ok: true, employees: rows.map((r) => ({ ...r, link: MODULE_LINKS.hr.employees })) };
         if (!canSeePayroll(ctx.access)) {

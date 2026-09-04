@@ -10,6 +10,7 @@
  */
 import pool from '../db.js';
 import { getStaffAssessment } from '../services/staffAssessment.js';
+import { isSystemAdminAccount } from '../roles.js';
 
 const TIER_ORDER = ['employee', 'supervisor', 'manager', 'cto'];
 
@@ -106,6 +107,12 @@ export async function listTierCandidates(unit, tier) {
  *  reports (or their attached documents) by guessing an id. */
 export function canAccessReport(user, report, { isHr = false } = {}) {
   if (!user || !report) return false;
+  // Company scope applies before any tier/HR bypass below — "CTO sees everything" or "HR sees
+  // every finalized report" means everything in their own company, not literally every tenant's
+  // data. Only a true System Admin (see roles.js) skips this entirely.
+  if (!isSystemAdminAccount(user) && report.company && (user.company || 'CW') !== report.company) {
+    return false;
+  }
   if (report.employee_id === user.id) return true;
   const tier = tierOfUser(user);
   if (tier === 'cto') return true;
@@ -236,6 +243,10 @@ export async function initPerformanceReportTables() {
     ALTER TABLE performance_reports ADD CONSTRAINT performance_reports_stage_check
     CHECK (current_stage IN ('employee','supervisor','manager','cto','done'));
   `);
+
+  // Multi-tenant — 'CW' default backfills every existing report as C&W's.
+  const { addCompanyColumn } = await import('./tenant.js');
+  await addCompanyColumn('performance_reports');
 }
 
 export async function getActiveWeights() {
@@ -337,9 +348,9 @@ export async function createReport(data, user) {
   if (!period) throw new Error('Assessment period not found');
   const unit = unitsOfUser(user)[0] || null;
   const { rows } = await pool.query(
-    `INSERT INTO performance_reports (period_id, employee_id, employee_name, unit, title, summary, status, current_stage)
-     VALUES ($1,$2,$3,$4,$5,$6,'draft','employee') RETURNING *`,
-    [data.period_id, user.id, authorName(user), unit, data.title, data.summary || null]
+    `INSERT INTO performance_reports (period_id, employee_id, employee_name, unit, title, summary, status, current_stage, company)
+     VALUES ($1,$2,$3,$4,$5,$6,'draft','employee',$7) RETURNING *`,
+    [data.period_id, user.id, authorName(user), unit, data.title, data.summary || null, user.company || 'CW']
   );
   return rows[0];
 }
@@ -488,6 +499,12 @@ export async function listQueueForUser(user, filters = {}) {
   }
   if (filters.status) { params.push(filters.status); where += ` AND status = $${params.length}`; }
   if (filters.period_id) { params.push(filters.period_id); where += ` AND period_id = $${params.length}`; }
+  // Company scope applies even to the CTO's "every unit" bypass above — that means every unit
+  // in their own company, not every tenant's. Only a true System Admin skips this.
+  if (!isSystemAdminAccount(user)) {
+    params.push(user.company || 'CW');
+    where += ` AND company = $${params.length}`;
+  }
   const { rows } = await pool.query(`SELECT * FROM performance_reports WHERE ${where} ORDER BY submitted_at DESC NULLS LAST`, params);
   return rows;
 }
@@ -516,13 +533,19 @@ export async function listMyReports(userId) {
   return rows;
 }
 
-/** HR gets automatic access the moment a report reaches CTO — not before. Not unit-scoped. */
-export async function listHrAccessible(filters = {}) {
+/** HR gets automatic access the moment a report reaches CTO — not before. Not unit-scoped, but
+ *  still company-scoped (unless the caller is a true System Admin) so PTEL's HR never sees
+ *  C&W's reports or vice versa. */
+export async function listHrAccessible(filters = {}, user = null) {
   const params = [];
   let where = `current_stage IN ('cto','done')`;
   if (filters.status) { params.push(filters.status); where += ` AND status = $${params.length}`; }
   if (filters.period_id) { params.push(filters.period_id); where += ` AND period_id = $${params.length}`; }
   if (filters.unit) { params.push(filters.unit.toLowerCase()); where += ` AND LOWER(unit) = $${params.length}`; }
+  if (user && !isSystemAdminAccount(user)) {
+    params.push(user.company || 'CW');
+    where += ` AND company = $${params.length}`;
+  }
   const { rows } = await pool.query(`SELECT * FROM performance_reports WHERE ${where} ORDER BY submitted_at DESC NULLS LAST`, params);
   return rows;
 }

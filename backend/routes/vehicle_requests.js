@@ -2,6 +2,7 @@ import express from 'express';
 import pool, { getWorkflowConfig, createNotification } from '../db.js';
 import { authenticateToken } from '../middleware/auth.js';
 import { authenticateOrShareToken } from '../middleware/shareAuth.js';
+import { attachTenant } from '../middleware/tenant.js';
 import { isSystemAdminAccount, isSuperAdmin, userHasAnyRole } from '../roles.js';
 import { formatPersonName } from '../utils/displayName.js';
 import { resolveReferenceInput, attachReference, isReferenceRequired, isReferenceRequiredFor } from '../services/referenceLink.js';
@@ -48,6 +49,9 @@ router.get('/:id', authenticateOrShareToken('vehicle_request', authenticateToken
       return res.status(404).json({ error: 'Rental vehicle request not found' });
     }
     const form = result.rows[0];
+    if (!req.isSharedView && !isSystemAdminAccount(req.user) && (req.user.company || 'CW') !== form.company) {
+      return res.status(404).json({ error: 'Rental vehicle request not found' });
+    }
     const transport = await transportConfig();
     const selectedApproverIds = requiredApproverIds(form, transport);
     const [selected_approvers, approvals] = await Promise.all([
@@ -290,7 +294,7 @@ async function notifySelectedApprovers(form, createdBy) {
 }
 
 // GET /api/transport/vehicle-requests
-router.get('/', async (req, res) => {
+router.get('/', attachTenant, async (req, res) => {
   try {
     const transport = await transportConfig();
     const userId = Number(req.user.id);
@@ -299,14 +303,17 @@ router.get('/', async (req, res) => {
     const finance = isFinanceUser(req.user, transport);
     const supervisor = isSupervisorUser(req.user, transport);
 
+    const companyClause = req.company ? 'AND v.company = $1' : '';
+    const companyParams = req.company ? [req.company] : [];
     const rows = await pool.query(
       `SELECT v.*, tr.purpose AS transport_purpose,
               ru.first_name AS requester_first_name, ru.last_name AS requester_last_name, ru.username AS requester_username
        FROM vehicle_request_forms v
        LEFT JOIN transport_requests tr ON tr.id = v.transport_request_id
        LEFT JOIN users ru ON ru.id = v.requester_id
-       WHERE v.deleted_at IS NULL
-       ORDER BY v.created_at DESC`
+       WHERE v.deleted_at IS NULL ${companyClause}
+       ORDER BY v.created_at DESC`,
+      companyParams
     );
 
     const forms = rows.rows.map((row) => {
@@ -421,8 +428,9 @@ router.post('/', async (req, res) => {
         transport_request_id, requester_id, supervisor_id, department, requestor_name, purpose, deliver_to,
         phone, special_instructions, order_no, invoice_terms, received_by, line_items, attachments,
         status, current_stage, date_submitted, selected_approver_ids,
-        reference_type, reference_id, reference_number, reference_title, reference_status
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::jsonb, $14::jsonb, $15, $16, COALESCE($17, CURRENT_TIMESTAMP), $18::jsonb, $19, $20, $21, $22, $23)
+        reference_type, reference_id, reference_number, reference_title, reference_status, company
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::jsonb, $14::jsonb, $15, $16, COALESCE($17, CURRENT_TIMESTAMP), $18::jsonb, $19, $20, $21, $22, $23,
+        COALESCE((SELECT company FROM users WHERE id = $2), 'CW'))
        RETURNING *`,
       [
         payload.transport_request_id ?? null,

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Check } from 'lucide-react';
+import { Radar } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { InfoField } from '@/components/production/production-ui';
@@ -8,8 +8,9 @@ import { useToast } from '@/hooks/use-toast';
 import { nocApproveProjectRequest, type ProjectRequest } from '@/api/project';
 import { IpReadOnlySummary } from './IpStageSection';
 
-/** NOC reviews IP's integration package (read-only — fields belong to IP, not NOC) and leaves
- *  its own monitoring note before approving back to Project. */
+/** NOC reviews IP's integration package (read-only — fields belong to IP, not NOC), adds it to
+ *  monitoring, and leaves its own note before sending back to Project. NOC never "approves"
+ *  anything here — they just confirm the circuit is being monitored. */
 export function NocStageSection({
   request, canAct, actionLoading, setActionLoading, onUpdated,
 }: {
@@ -23,14 +24,14 @@ export function NocStageSection({
   const [notes, setNotes] = useState(request.noc_notes || '');
   const showIpIntegration = !!(request.circuit_id || request.ip_address || request.mac_address || request.integrated_by);
 
-  const approve = async () => {
+  const confirm = async () => {
     setActionLoading(true);
     try {
       await nocApproveProjectRequest(request.id, notes);
-      toast({ title: 'Approved by NOC' });
+      toast({ title: 'Added to monitoring' });
       await onUpdated();
     } catch (e: unknown) {
-      toast({ title: 'Could not approve', description: e instanceof Error ? e.message : 'Try again', variant: 'destructive' });
+      toast({ title: 'Could not send', description: e instanceof Error ? e.message : 'Try again', variant: 'destructive' });
     } finally {
       setActionLoading(false);
     }
@@ -51,8 +52,8 @@ export function NocStageSection({
         <div className="space-y-3 border-t border-[var(--border)] pt-5">
           <label className="block text-sm font-medium text-[var(--text-secondary)]">Monitoring notes</label>
           <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Monitoring observations…" className="min-h-[100px]" />
-          <Button disabled={actionLoading} onClick={() => void approve()}>
-            <Check className="mr-2 h-4 w-4" />Approve and return to Project
+          <Button disabled={actionLoading} onClick={() => void confirm()}>
+            <Radar className="mr-2 h-4 w-4" />Add to Monitoring &amp; Return to Project
           </Button>
         </div>
       ) : request.noc_notes ? (

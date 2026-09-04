@@ -663,13 +663,6 @@ body.chat-route-active {
   color: #94a3b8;
 }
 
-.chat-summary-card-sparkle {
-  width: 0.625rem;
-  height: 0.625rem;
-  color: #a5b4fc;
-  flex-shrink: 0;
-}
-
 .chat-summary-card-kind {
   font-size: 0.5625rem;
   font-weight: 600;

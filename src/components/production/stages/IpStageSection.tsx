@@ -41,12 +41,12 @@ export function IpStageSection({
     comment: '',
   });
 
-  const send = async (routeToStage: 'project' | 'ts') => {
+  const send = async (routeToStage: 'noc' | 'ts') => {
     setActionLoading(true);
     try {
       const { comment, ...fields } = ipForm;
       await ipForwardProjectRequest(request.id, { ...fields, comment_text: comment.trim() || undefined, route_to_stage: routeToStage });
-      toast({ title: 'Submitted', description: routeToStage === 'project' ? 'Sent to Project Unit for review' : 'Sent back to TX for follow-up' });
+      toast({ title: 'Submitted', description: routeToStage === 'noc' ? 'Sent to NOC for monitoring' : 'Sent back to TX for follow-up' });
       await onUpdated();
     } catch (e: unknown) {
       toast({ title: 'Could not send', description: e instanceof Error ? e.message : 'Something went wrong', variant: 'destructive' });
@@ -81,8 +81,8 @@ export function IpStageSection({
         onUpload={async (file) => { await uploadProjectRequestAttachment(request.id, file, 'ip'); await onUpdated(); }}
       />
       <div className="flex flex-col gap-3 border-t border-[var(--border)] pt-5">
-        <Button type="button" disabled={actionLoading} className="w-full rounded-xl bg-indigo-600 py-6 text-base font-semibold hover:bg-indigo-700" onClick={() => void send('project')}>
-          <Send className="mr-2 h-5 w-5" />Submit to Project
+        <Button type="button" disabled={actionLoading} className="w-full rounded-xl bg-indigo-600 py-6 text-base font-semibold hover:bg-indigo-700" onClick={() => void send('noc')}>
+          <Send className="mr-2 h-5 w-5" />Submit to NOC
         </Button>
         <Button type="button" variant="outline" disabled={actionLoading} className="w-full rounded-xl py-6 text-base font-semibold" onClick={() => void send('ts')}>
           <Send className="mr-2 h-5 w-5" />Submit to TX

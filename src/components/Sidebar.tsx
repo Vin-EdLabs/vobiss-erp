@@ -9,7 +9,7 @@ import {
   Headphones, Ticket, MessagesSquare, Users2, User, FilePlus, Headset,
   Globe, CircleAlert, AlertCircle, Search, Network, LayoutDashboard,
   Briefcase, CalendarDays, CalendarCheck, CalendarOff, Wallet, ClipboardCheck, FolderOpen, PanelLeftClose, PanelLeft, Landmark, ShieldCheck,
-  Truck, Fuel, FileSignature, Award, Archive as ArchiveIcon, Cable, Eye, Inbox, Gauge
+  Truck, Fuel, FileSignature, Award, Cable, Eye, Inbox, Gauge
 } from 'lucide-react';
 import { getRequests, getLowStockItems, getNotifications, getWorkspace, cxApi } from '../api';
 import { formatPersonName } from '@/lib/displayName';
@@ -17,6 +17,7 @@ import { resolvePrimaryRole, normalizeMenuRole, userHasAnyRole, formatRoleLabel,
 import { getMyProjectUnits, getProjectRequestDashboard, type ProjectUnit } from '../api/project';
 import { getChatUnreadTotal } from '../api/chat';
 import { useAuth } from '../context/AuthContext';
+import { useCompany } from '@/hooks/useCompany';
 import { useIsMobile } from '@/hooks/useIsMobile';
 import { useQuery } from '@tanstack/react-query';
 import { hrSelfApi } from '@/api/hrSelf';
@@ -211,7 +212,9 @@ const Sidebar = ({
     canUseSystemMode,
     isSystemMode,
     isAdminSuper,
+    viewAsCompany,
   } = useAuth();
+  const { company, companyLabel } = useCompany();
   const isDark = theme === 'dark';
   void isDark;
   const isPhone = useIsMobile(767);
@@ -680,7 +683,8 @@ const Sidebar = ({
         { icon: Users2, label: 'Manage Clients', path: '/admin/clients' },
         { icon: Network, label: 'Units Configuration', path: '/project-request/admin/units' },
         { icon: AuditIcon, label: 'Audit Logs', path: '/audit-logs' },
-        { icon: Activity, label: 'Workflow Performance', path: '/workflow-performance' },
+        // System Admin and CTO/Director only — other company admins don't get this.
+        ...(isAdminSuper ? [{ icon: Activity, label: 'Workflow Performance', path: '/workflow-performance' }] : []),
         { icon: Sliders, label: 'Workflow Time Config', path: '/settings/workflow-time-config' },
         { icon: Sliders, label: 'System Configuration', path: '/configuration' },
         { icon: Sliders, label: 'Design Configuration', path: '/settings/design-configuration' },
@@ -753,10 +757,9 @@ const Sidebar = ({
         { icon: Ticket,      label: 'Master Ticket Queue',   path: '/staff/cx/tickets', notificationCount: ticketAttention.cx },
         { icon: FilePlus,    label: 'Create Staff Ticket',   path: '/staff/cx/create-ticket' },
         { icon: CircleAlert, label: 'Ticket Escalation',     path: '/staff/cx/escalate', notificationCount: ticketAttention.escalate },
-        { icon: Headset,     label: 'Assign Support',        path: '/staff/cx/assign', notificationCount: ticketAttention.cx },
-        { icon: User,        label: 'User Work History',     path: '/staff/cx/user-work-history' },
         { icon: Search,      label: 'Ticket Search',         path: '/staff/cx/ticket-search' },
         { icon: Tags,        label: 'Ticket Tags',           path: '/staff/cx/tags' },
+        { icon: Clock,       label: "Today's Tickets",       path: '/staff/tickets/today' },
       ]
     };
 
@@ -835,7 +838,6 @@ const Sidebar = ({
       subItems: [
         { icon: Ticket, label: 'All Tickets', path: '/staff/cx/tickets', notificationCount: ticketAttention.cx },
         { icon: Search, label: 'Search for Tickets', path: '/staff/cx/ticket-search' },
-        { icon: User, label: 'User Work History', path: '/staff/cx/user-work-history' },
       ],
     };
 
@@ -856,6 +858,7 @@ const Sidebar = ({
         { icon: Clock,         label: 'Shift Schedule',       path: '/noc/shift-schedule' },
         { icon: FilePlus,    label: 'Create Ticket',         path: '/staff/cx/create-ticket' },
         { icon: CircleAlert, label: 'NOC Escalation',        path: '/staff/cx/escalate', notificationCount: ticketAttention.escalate },
+        { icon: Clock,       label: "Today's Tickets",       path: '/staff/tickets/today' },
       ]
     };
 
@@ -966,7 +969,7 @@ const Sidebar = ({
       subItems: performanceReportsSubItems,
     };
     const showPerformanceReports = role !== 'customer';
-    const archiveItem = { icon: ArchiveIcon, label: 'Archive', path: '/archive' };
+    const archiveItem = { icon: FolderOpen, label: 'File Storage', path: '/archive' };
     const showArchive = role !== 'customer';
 
     const hrPendingLeave = Number(hrStatsQ.data?.pendingLeaveRequests || 0);
@@ -1109,7 +1112,9 @@ const Sidebar = ({
     const networkAssetsSection = { icon: Network, label: 'Network Assets', isCollapsible: true, isOpen: sectionOpen('networkAssets'), onToggle: () => toggleSection('networkAssets'), subItems: [
       { icon: LayoutDashboard, label: 'Dashboard', path: '/network-assets' }, { icon: MapPin, label: 'PoP Register', path: '/network-assets/pops' }, { icon: Package, label: 'Equipment Inventory', path: '/network-assets/equipment' }, { icon: Network, label: 'Passive Infrastructure', path: '/network-assets/passive' }, { icon: Network, label: 'ECG Metro', path: '/network-assets/metro' }, { icon: Network, label: 'NEDCO Metro', path: '/network-assets/nedcoMetro' }, { icon: Network, label: 'Master Backhaul', path: '/network-assets/backhaul' }, { icon: Network, label: 'NEDCO Backhaul', path: '/network-assets/nedcoBackhaul' }, { icon: Package, label: 'Backhaul Accessories', path: '/network-assets/backhaulAccessories' }, { icon: Package, label: 'Metro Accessories', path: '/network-assets/metroAccessories' }, { icon: MapPin, label: 'Poles Register', path: '/network-assets/poles' }, { icon: Settings, label: 'Equipment Catalogue', path: '/network-assets/catalogue' }, { icon: FileText, label: 'Reports & Exports', path: '/network-assets/reports' },
     ]};
-    const prependProjectRequest = (items: any[]) => [ networkAssetsSection, ...(projectUnitSection ? [projectUnitSection] : []), ...(projectRequestSection ? [projectRequestSection] : []), ...items ];
+    // Network Assets tracks C&W's own physical infrastructure (PoPs, backhaul, poles, etc.) —
+    // PTEL has no such module yet, so it's hidden company-wide for PTEL rather than per-user.
+    const prependProjectRequest = (items: any[]) => [ ...(company === 'PTEL' ? [] : [networkAssetsSection]), ...(projectUnitSection ? [projectUnitSection] : []), ...(projectRequestSection ? [projectRequestSection] : []), ...items ];
     const composeItems = (items: any[], inventoryItems: any[] = []) => {
       const inv = inventorySection(inventoryItems);
       return prependProjectRequest(inv ? [inv, ...items] : items);
@@ -1169,6 +1174,7 @@ const Sidebar = ({
         { icon: MapPin, label: 'Field Engineer Map', path: '/field/map' },
         { icon: Search, label: 'Global Search', path: '/director/search' },
         { icon: AuditIcon, label: 'Audit Logs', path: '/audit-logs' },
+        { icon: Activity, label: 'Workflow Performance', path: '/workflow-performance' },
       ];
     }
     else if (role === 'customer') {
@@ -1200,31 +1206,40 @@ const Sidebar = ({
           isFinance ||
           hasUnit('operations', 'project');
 
-        if (!isSystemOperator) {
-          unitItems.push(cashRequest);
-          if (!isHrUser) inventoryItems.push(requestForms, itemReturns);
-        } else if (unitNeedsStaffRequests && !isHrUser) {
-          unitItems.push(cashRequest);
-          inventoryItems.push(requestForms, itemReturns);
+        // Sales runs its own lean menu — no Inventory, Cash Advance, Approve Request, Transport,
+        // or Customer Portal clutter, regardless of what the account's role slug happens to be
+        // (a Sales demo/admin-role account should not inherit admin-only sidebar noise either).
+        if (!isSalesUser) {
+          if (!isSystemOperator) {
+            unitItems.push(cashRequest);
+            if (!isHrUser) inventoryItems.push(requestForms, itemReturns);
+          } else if (unitNeedsStaffRequests && !isHrUser) {
+            unitItems.push(cashRequest);
+            inventoryItems.push(requestForms, itemReturns);
+          }
         }
         // Every staff member can raise a Transport Request — no role required, and never
         // duplicated into Inventory. Transport Supervisors / admins get the full Transport
         // section (with the request page already inside it) instead of this standalone link.
         const showsFullTransportSection = isTransportSupervisor || isSystemOperator;
-        if (!showsFullTransportSection) unitItems.push(transportRequest);
+        if (!showsFullTransportSection && !isSalesUser) unitItems.push(transportRequest);
 
-        if (approvalSubItems.length) unitItems.push(requestApprovalsSection);
-        if (showsFullTransportSection) unitItems.push(transportSection);
+        if (approvalSubItems.length && !isSalesUser) unitItems.push(requestApprovalsSection);
+        if (showsFullTransportSection && !isSalesUser) unitItems.push(transportSection);
         if (isManagerOrSupervisor && reportSystemSection) unitItems.push(reportSystemSection);
 
         if (isNocUser) unitItems.push(nocSection);
         if (hasPosition('noc manager')) unitItems.push(nocManagerSection);
         if (isIpUser) unitItems.push(ipSection, ipUnitSection);
         if (isTxUser) unitItems.push(fieldEngSection, fieldActivities);
-        if (isCxUser) unitItems.push(cxSection, customerPortal);
+        // Sales gets the same CX Ticketing section as CX itself — view-only (backend's
+        // canViewTicket grants them read access; assign/escalate/close stay gated to CX/managers)
+        // so Sales can see what's going on with customer tickets without needing to ask CX.
+        // Customer Portal is a CX-only link — Sales doesn't need it.
+        if (isCxUser || isSalesUser) unitItems.push(cxSection);
+        if (isCxUser) unitItems.push(customerPortal);
         if (hasPosition('relationship officer')) unitItems.push(roSection);
         if (isFinance) unitItems.push(financeSection);
-        if (isSalesUser && !isCxUser) unitItems.push(customerPortal);
         if (hasUnit('operations')) unitItems.push(fieldActivities);
 
         baseItems = composeItems(unitItems, inventoryItems);
@@ -1237,7 +1252,7 @@ const Sidebar = ({
     if (showMyHr) {
       baseItems = [myHrSection, ...baseItems];
     }
-    if (isSystemOperator) {
+    if (isSystemOperator && !isSalesUser) {
       baseItems = [...baseItems, systemSettingsSection];
     }
     if (designSettingsSection) {
@@ -1250,7 +1265,7 @@ const Sidebar = ({
           item?.label === 'Approve Request' ||
           (Array.isArray(item?.subItems) && menuHasApproveRequest(item.subItems))
       );
-    if (approvalSubItems.length && !menuHasApproveRequest(baseItems)) {
+    if (approvalSubItems.length && !menuHasApproveRequest(baseItems) && !isSalesUser) {
       baseItems = [requestApprovalsSection, ...baseItems];
     }
 
@@ -1332,8 +1347,15 @@ const Sidebar = ({
             />
             {!compact && (
               <div className="min-w-0 flex-1">
-                <span className="block truncate text-[14px] font-semibold leading-tight text-[var(--sidebar-text-active)]">Vobiss ERP</span>
-                <span className="mt-0.5 block truncate text-[10px] leading-tight text-[var(--sidebar-section-label)]">Enterprise Platform</span>
+                <div className="flex items-center gap-1.5">
+                  <span className="block truncate text-[14px] font-semibold leading-tight text-[var(--sidebar-text-active)]">Vobiss ERP</span>
+                  <span className="shrink-0 rounded-full border border-[var(--sidebar-border)] bg-[var(--sidebar-hover-bg)] px-1.5 py-[1px] text-[9px] font-bold uppercase tracking-wide text-[var(--sidebar-text)]">
+                    {companyLabel}
+                  </span>
+                </div>
+                <span className="mt-0.5 block truncate text-[10px] leading-tight text-[var(--sidebar-section-label)]">
+                  {isAdminSuper && viewAsCompany ? `Viewing as ${companyLabel} — change in Profile` : 'Enterprise Platform'}
+                </span>
               </div>
             )}
             <button

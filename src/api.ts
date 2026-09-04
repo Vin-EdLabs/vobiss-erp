@@ -350,10 +350,12 @@ interface User {
   email: string;
   role: UserRole;
   main_role?: UserRole;
+  roles?: string[];
   unit?: string | null;
   position?: string | null;
   units?: string[];
   created_at: string;
+  company?: string;
 }
 
 interface Setting {
@@ -416,6 +418,7 @@ export const getMe = async (): Promise<{
   units: string[];
   unit?: string | null;
   position?: string | null;
+  company?: string | null;
   first_name?: string;
   last_name?: string;
   full_name?: string;
@@ -441,7 +444,7 @@ export const ackUnsuspend = async (): Promise<void> => {
   await apiFetch(`${API_URL}/me/ack-unsuspend`, { method: 'POST' });
 };
 
-export const loginUser = async (username: string, password: string, ip?: string): Promise<{ token: string; user: { username: string; role: string; first_name?: string; last_name?: string; full_name?: string } }> => {
+export const loginUser = async (username: string, password: string, ip?: string): Promise<{ token: string; user: { username: string; role: string; company?: string | null; first_name?: string; last_name?: string; full_name?: string } }> => {
   try {
     const effectiveIP = ip || await fetchPublicIP();
     const response = await fetch(`${API_URL}/login`, {
@@ -521,6 +524,7 @@ export const createUser = async (
     unit?: string;
     position?: string;
     units?: string[];
+    company?: string;
   }
 ): Promise<User & { password?: string; emailSent?: boolean; emailWarning?: string }> => {
   try {
@@ -538,6 +542,7 @@ export const createUser = async (
         unit: options?.unit || null,
         position: options?.position || null,
         units: Array.isArray(options?.units) ? options.units : [],
+        company: options?.company || undefined,
       }),
     });
     return await response.json();
@@ -554,6 +559,7 @@ export const updateUser = async (
     last_name?: string;
     email?: string;
     role?: string;
+    roles?: string[];
     unit?: string | null;
     position?: string | null;
     units?: string[];
@@ -1650,10 +1656,13 @@ export interface RealmApprovers {
   finance_user_ids?: number[];
   fuel_request_approver_ids?: number[];
   people?: RealmPerson[];
+  company?: string;
 }
 
-export const getRealmApprovers = async (): Promise<RealmApprovers> => {
-  const response = await apiFetch(`${API_URL}/realm`);
+/** `company` is only honored for a true System Admin — everyone else is always scoped to their
+ *  own company server-side, regardless of what's passed here. */
+export const getRealmApprovers = async (company?: string): Promise<RealmApprovers> => {
+  const response = await apiFetch(`${API_URL}/realm${company ? `?company=${encodeURIComponent(company)}` : ''}`);
   return await response.json();
 };
 
@@ -1673,8 +1682,8 @@ export const updateRealmApprovers = async (payload: {
   vehicle_request_approver_ids?: number[];
   finance_user_ids?: number[];
   fuel_request_approver_ids?: number[];
-}): Promise<RealmApprovers> => {
-  const response = await apiFetch(`${API_URL}/realm`, {
+}, company?: string): Promise<RealmApprovers> => {
+  const response = await apiFetch(`${API_URL}/realm${company ? `?company=${encodeURIComponent(company)}` : ''}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
@@ -1804,15 +1813,18 @@ export const createCashRequest = async (
     throw new Error('At least one valid expense item is required.');
   }
 
+  const { linked_references, ...restRequestData } = requestData || {};
+
   try {
     const response = await apiFetch(`${API_URL}/requests`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         requestType: 'cash_request',
-        requestData,
+        requestData: restRequestData,
         selectedApproverIds,
         lineItems: cleanedLineItems,
+        ...(linked_references?.length ? { linked_references } : {}),
       }),
     });
     return await response.json();
@@ -2256,6 +2268,13 @@ export const cxApi = {
     }
     const suffix = q.toString() ? `?${q.toString()}` : '';
     const response = await apiFetch(`${API_URL}/cx/tickets${suffix}`);
+    return await response.json();
+  },
+
+  // Tickets the current user has personally touched today — a personal filter on the same
+  // ticket flow, not a separate queue.
+  getMyDayTickets: async (): Promise<any> => {
+    const response = await apiFetch(`${API_URL}/cx/tickets/my-day`);
     return await response.json();
   },
 

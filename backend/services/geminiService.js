@@ -65,7 +65,7 @@ function markModelCooling(keyIdx, modelName, reason) {
   );
 }
 
-function extractRetryMs(error) {
+export function extractRetryMs(error) {
   const msg = String(error?.message || '');
   const m = msg.match(/retry in ([\d.]+)\s*s/i);
   if (m) return Math.min(Math.ceil(parseFloat(m[1]) * 1000) + 500, 30000);
@@ -81,7 +81,7 @@ function extractRetryMs(error) {
   return 0;
 }
 
-function isQuotaOrRateLimitError(error) {
+export function isQuotaOrRateLimitError(error) {
   const status = error?.status || error?.statusCode || error?.httpStatusCode;
   const msg = String(error?.message || error || '').toLowerCase();
   if (status === 429) return true;
@@ -89,12 +89,12 @@ function isQuotaOrRateLimitError(error) {
   return false;
 }
 
-function isModelSpecificQuota(error) {
+export function isModelSpecificQuota(error) {
   const msg = String(error?.message || '');
   return /GenerateRequestsPerDayPerProjectPerModel|quotaDimensions[\s\S]*model|limit:.*model:/i.test(msg);
 }
 
-function isSwitchableKeyError(error) {
+export function isSwitchableKeyError(error) {
   if (isQuotaOrRateLimitError(error)) return true;
   const status = error?.status || error?.statusCode || error?.httpStatusCode;
   if (status === 401 || status === 403) return true;
@@ -150,7 +150,7 @@ function isLightMessage(msg) {
   return false;
 }
 
-function withTimeout(promise, ms, label = 'vobi') {
+export function withTimeout(promise, ms, label = 'vobi') {
   let timer;
   return Promise.race([
     promise.finally(() => clearTimeout(timer)),
@@ -273,15 +273,15 @@ function fallbackFromEnrichment(msg, enrichment) {
   return null;
 }
 
-export async function askVobi(userMessage, userId, roleOrHistory, position, conversationHistory, pageContext = null) {
+export async function askVobi(userMessage, userId, roleOrHistory, position, conversationHistory, pageContext = null, company = undefined) {
   const { role, position: pos, history } = parseAskArgs(roleOrHistory, position, conversationHistory);
   try {
     const msg = String(userMessage || '').trim();
     const light = isLightMessage(msg) && !pageContext;
 
     const systemData = light
-      ? await getVobiLightSystemData(userId, role, pos)
-      : await getVobiSystemData(userId, role, pos);
+      ? await getVobiLightSystemData(userId, role, pos, company)
+      : await getVobiSystemData(userId, role, pos, company);
 
     if (pageContext) {
       systemData.current_page = pageContext.page || null;
@@ -298,6 +298,7 @@ export async function askVobi(userMessage, userId, roleOrHistory, position, conv
       full_name: systemData?.role_context?.full_name,
       first_name: systemData?.role_context?.first_name,
       last_name: systemData?.role_context?.last_name,
+      company: systemData?.role_context?.company ?? company,
     };
 
     let enrichment = null;

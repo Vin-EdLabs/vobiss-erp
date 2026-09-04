@@ -47,32 +47,37 @@ function formatTenure(parts) {
   return `${parts.years}y ${parts.months}m`;
 }
 
-export async function peopleSnapshot(year, month) {
+export async function peopleSnapshot(year, month, company = null) {
   const { start, end } = monthBounds(year, month);
+  const empClause = company ? 'AND company = $1' : '';
+  const empParams = company ? [company] : [];
   const [active, types, depts, hires, left] = await Promise.all([
     pool.query(
       `SELECT id, full_name, department, employment_type, start_date, status
-       FROM hr_employees WHERE status = 'active' ORDER BY full_name`
+       FROM hr_employees WHERE status = 'active' ${empClause} ORDER BY full_name`,
+      empParams
     ),
     pool.query(
       `SELECT COALESCE(employment_type, 'unspecified') AS employment_type, COUNT(*)::int AS count
-       FROM hr_employees WHERE status = 'active' GROUP BY 1`
+       FROM hr_employees WHERE status = 'active' ${empClause} GROUP BY 1`,
+      empParams
     ),
     pool.query(
       `SELECT COALESCE(NULLIF(TRIM(department), ''), 'Unassigned') AS department, COUNT(*)::int AS count
-       FROM hr_employees WHERE status = 'active' GROUP BY 1 ORDER BY count DESC`
+       FROM hr_employees WHERE status = 'active' ${empClause} GROUP BY 1 ORDER BY count DESC`,
+      empParams
     ),
     pool.query(
       `SELECT COUNT(*)::int AS n FROM hr_employees
-       WHERE start_date >= $1 AND start_date <= $2`,
-      [start, end]
+       WHERE start_date >= $1 AND start_date <= $2 ${company ? 'AND company = $3' : ''}`,
+      company ? [start, end, company] : [start, end]
     ),
     pool.query(
       `SELECT COUNT(*)::int AS n FROM hr_employees
        WHERE status IN ('inactive','suspended')
          AND COALESCE(suspended_at::date, created_at::date) >= $1
-         AND COALESCE(suspended_at::date, created_at::date) <= $2`,
-      [start, end]
+         AND COALESCE(suspended_at::date, created_at::date) <= $2 ${company ? 'AND company = $3' : ''}`,
+      company ? [start, end, company] : [start, end]
     ),
   ]);
   const employees = active.rows;
@@ -99,24 +104,27 @@ export async function peopleSnapshot(year, month) {
   };
 }
 
-export async function attendanceHealth(year, month) {
+export async function attendanceHealth(year, month, company = null) {
   const working = workingDaysInMonth(year, month);
   const { start, end } = monthBounds(year, month);
   const today = ghanaToday();
   const dates = workingDatesInMonth(year, month, `${year}-${String(month).padStart(2, '0')}` === today.slice(0, 7) ? today : end);
   const [emps, records, leaveMap, lateDays] = await Promise.all([
-    pool.query(`SELECT id, full_name, department FROM hr_employees WHERE status = 'active'`),
+    pool.query(`SELECT id, full_name, department FROM hr_employees WHERE status = 'active' ${company ? 'AND company = $1' : ''}`, company ? [company] : []),
     pool.query(
-      `SELECT employee_id, date, status, is_late FROM hr_attendance WHERE date >= $1 AND date <= $2`,
-      [start, end]
+      `SELECT a.employee_id, a.date, a.status, a.is_late FROM hr_attendance a
+       JOIN hr_employees e ON e.id = a.employee_id
+       WHERE a.date >= $1 AND a.date <= $2 ${company ? 'AND e.company = $3' : ''}`,
+      company ? [start, end, company] : [start, end]
     ),
     leaveDatesByEmployee(start, end),
     pool.query(
-      `SELECT EXTRACT(DOW FROM date)::int AS dow, COUNT(*)::int AS count
-       FROM hr_attendance
-       WHERE date >= $1 AND date <= $2 AND (is_late = true OR LOWER(status) = 'late')
+      `SELECT EXTRACT(DOW FROM a.date)::int AS dow, COUNT(*)::int AS count
+       FROM hr_attendance a
+       JOIN hr_employees e ON e.id = a.employee_id
+       WHERE a.date >= $1 AND a.date <= $2 AND (a.is_late = true OR LOWER(a.status) = 'late') ${company ? 'AND e.company = $3' : ''}
        GROUP BY 1`,
-      [start, end]
+      company ? [start, end, company] : [start, end]
     ),
   ]);
   const employees = emps.rows;
@@ -222,28 +230,32 @@ export async function attendanceHealth(year, month) {
   };
 }
 
-export async function leaveOverview(year) {
+export async function leaveOverview(year, company = null) {
   const today = ghanaToday();
   const [byType, trend, onLeave, pending] = await Promise.all([
     pool.query(
       `SELECT leave_type, SUM(days)::int AS days, COUNT(*)::int AS requests FROM (
-         SELECT leave_type, days FROM hr_leave_applications
-         WHERE LOWER(TRIM(status)) = 'approved' AND EXTRACT(YEAR FROM start_date) = $1
+         SELECT l.leave_type, l.days FROM hr_leave_applications l
+         JOIN hr_employees e ON e.id = l.employee_id
+         WHERE LOWER(TRIM(l.status)) = 'approved' AND EXTRACT(YEAR FROM l.start_date) = $1 ${company ? 'AND e.company = $2' : ''}
          UNION ALL
-         SELECT leave_type, days FROM hr_leave_requests
-         WHERE LOWER(TRIM(status)) = 'approved' AND EXTRACT(YEAR FROM start_date) = $1
+         SELECT r.leave_type, r.days FROM hr_leave_requests r
+         JOIN hr_employees e ON e.id = r.employee_id
+         WHERE LOWER(TRIM(r.status)) = 'approved' AND EXTRACT(YEAR FROM r.start_date) = $1 ${company ? 'AND e.company = $2' : ''}
        ) x GROUP BY leave_type ORDER BY days DESC`,
-      [year]
+      company ? [year, company] : [year]
     ),
     pool.query(
       `SELECT EXTRACT(MONTH FROM start_date)::int AS month, SUM(days)::int AS days FROM (
-         SELECT start_date, days FROM hr_leave_applications
-         WHERE LOWER(TRIM(status)) = 'approved' AND EXTRACT(YEAR FROM start_date) = $1
+         SELECT l.start_date, l.days FROM hr_leave_applications l
+         JOIN hr_employees e ON e.id = l.employee_id
+         WHERE LOWER(TRIM(l.status)) = 'approved' AND EXTRACT(YEAR FROM l.start_date) = $1 ${company ? 'AND e.company = $2' : ''}
          UNION ALL
-         SELECT start_date, days FROM hr_leave_requests
-         WHERE LOWER(TRIM(status)) = 'approved' AND EXTRACT(YEAR FROM start_date) = $1
+         SELECT r.start_date, r.days FROM hr_leave_requests r
+         JOIN hr_employees e ON e.id = r.employee_id
+         WHERE LOWER(TRIM(r.status)) = 'approved' AND EXTRACT(YEAR FROM r.start_date) = $1 ${company ? 'AND e.company = $2' : ''}
        ) x GROUP BY 1`,
-      [year]
+      company ? [year, company] : [year]
     ),
     pool.query(
       `SELECT DISTINCT e.full_name, e.department FROM (
@@ -252,10 +264,13 @@ export async function leaveOverview(year) {
          UNION
          SELECT employee_id FROM hr_leave_requests
          WHERE LOWER(TRIM(status)) = 'approved' AND start_date <= $1 AND end_date >= $1 AND employee_id IS NOT NULL
-       ) x JOIN hr_employees e ON e.id = x.employee_id ORDER BY e.full_name`,
-      [today]
+       ) x JOIN hr_employees e ON e.id = x.employee_id ${company ? 'WHERE e.company = $2' : ''} ORDER BY e.full_name`,
+      company ? [today, company] : [today]
     ),
-    pool.query(`SELECT COUNT(*)::int AS n FROM hr_leave_requests WHERE status = 'pending'`),
+    pool.query(
+      `SELECT COUNT(*)::int AS n FROM hr_leave_requests r JOIN hr_employees e ON e.id = r.employee_id WHERE r.status = 'pending' ${company ? 'AND e.company = $1' : ''}`,
+      company ? [company] : []
+    ),
   ]);
   const typeRows = byType.rows;
   const totalDays = typeRows.reduce((s, r) => s + Number(r.days || 0), 0);
@@ -278,14 +293,14 @@ export async function leaveOverview(year) {
   };
 }
 
-export async function payrollIntelligence(year, month) {
+export async function payrollIntelligence(year, month, company = null) {
   const [yearRows, dept, avg] = await Promise.all([
     pool.query(
       `SELECT p.month, COALESCE(SUM(i.gross),0)::numeric AS gross, COALESCE(SUM(i.net_pay),0)::numeric AS net
        FROM hr_payroll p JOIN hr_payroll_items i ON i.payroll_id = p.id
-       WHERE p.year = $1
+       WHERE p.year = $1 ${company ? 'AND p.company = $2' : ''}
        GROUP BY p.month`,
-      [year]
+      company ? [year, company] : [year]
     ),
     pool.query(
       `SELECT COALESCE(NULLIF(TRIM(e.department), ''), 'Unassigned') AS department,
@@ -293,13 +308,14 @@ export async function payrollIntelligence(year, month) {
        FROM hr_payroll p
        JOIN hr_payroll_items i ON i.payroll_id = p.id
        JOIN hr_employees e ON e.id = i.employee_id
-       WHERE p.year = $1 AND p.month = $2
+       WHERE p.year = $1 AND p.month = $2 ${company ? 'AND p.company = $3' : ''}
        GROUP BY 1 ORDER BY gross DESC`,
-      [year, month]
+      company ? [year, month, company] : [year, month]
     ),
     pool.query(
       `SELECT COALESCE(AVG(COALESCE(basic_salary,0) + COALESCE(allowances,0)),0)::numeric AS avg
-       FROM hr_employees WHERE status = 'active'`
+       FROM hr_employees WHERE status = 'active' ${company ? 'AND company = $1' : ''}`,
+      company ? [company] : []
     ),
   ]);
   const byMonth = new Map(yearRows.rows.map((r) => [Number(r.month), r]));

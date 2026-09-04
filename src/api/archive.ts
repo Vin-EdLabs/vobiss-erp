@@ -41,6 +41,7 @@ export interface ArchiveFile {
   uploaded_by: number | null;
   uploaded_by_name: string | null;
   created_at: string;
+  has_thumbnail?: boolean;
 }
 
 export interface Paginated<T> {
@@ -72,15 +73,31 @@ export const deleteArchiveFolder = (id: number): Promise<{ deleted: boolean; fil
 export const listArchiveFiles = (folderId: number, params?: { q?: string; page?: number; limit?: number }): Promise<Paginated<ArchiveFile> & { folder: ArchiveFolder; files: ArchiveFile[] }> =>
   archiveFetch(`/folders/${folderId}/files${qs(params || {})}`);
 
-export const uploadArchiveFiles = async (folderId: number, files: File[]): Promise<{ files: ArchiveFile[] }> => {
+/** Upload via XHR (not fetch) specifically for `upload.onprogress` — fetch has no request-body
+ * progress event, and large files (images/PDFs up to 30MB) are exactly when a bare "Uploading…"
+ * label isn't enough feedback. `onProgress` receives 0-100 for the whole multipart batch. */
+export const uploadArchiveFiles = (folderId: number, files: File[], onProgress?: (percent: number) => void): Promise<{ files: ArchiveFile[] }> => {
   const form = new FormData();
   files.forEach((f) => form.append('files', f));
-  const res = await fetch(`${API_URL}/archive/folders/${folderId}/files`, { method: 'POST', headers: getAuthHeader(), body: form });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.error || err.message || `Upload failed (${res.status})`);
-  }
-  return res.json();
+  const auth = getAuthHeader() as Record<string, string>;
+
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', `${API_URL}/archive/folders/${folderId}/files`);
+    if (auth.Authorization) xhr.setRequestHeader('Authorization', auth.Authorization);
+
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable && onProgress) onProgress(Math.round((e.loaded / e.total) * 100));
+    };
+    xhr.onload = () => {
+      let body: any = {};
+      try { body = JSON.parse(xhr.responseText); } catch { /* non-JSON error body */ }
+      if (xhr.status >= 200 && xhr.status < 300) resolve(body);
+      else reject(new Error(body.error || body.message || `Upload failed (${xhr.status})`));
+    };
+    xhr.onerror = () => reject(new Error('Upload failed — check your connection and try again.'));
+    xhr.send(form);
+  });
 };
 
 export const renameArchiveFile = (id: number, payload: { displayName?: string; folderId?: number }): Promise<ArchiveFile> =>
@@ -89,11 +106,46 @@ export const renameArchiveFile = (id: number, payload: { displayName?: string; f
 export const deleteArchiveFile = (id: number): Promise<{ deleted: boolean }> =>
   archiveFetch(`/files/${id}`, { method: 'DELETE' });
 
+export interface ShareableFolder {
+  id: number;
+  name: string;
+  scope: 'global' | 'unit';
+  unit_slug: string | null;
+}
+
+export const listShareableFolders = (): Promise<{ folders: ShareableFolder[] }> => archiveFetch('/folders/shareable');
+
+export const copyArchiveFileToFolder = (id: number, folderId: number): Promise<ArchiveFile> =>
+  archiveFetch(`/files/${id}/copy-to`, { method: 'POST', body: JSON.stringify({ folderId }) });
+
+/** Auth for the three read-only file routes: normal session, or (when visiting via a
+ * `/shared/:token` public/private link) the share token instead — see backend
+ * middleware/shareAuth.js. Never send both; the share token alone is what lets an
+ * anonymous "Public" link actually work outside the app. */
+const fileAccessHeaders = (shareToken?: string) => (shareToken ? { 'x-share-token': shareToken } : getAuthHeader());
+
+export const getArchiveFileMeta = async (id: number, shareToken?: string): Promise<ArchiveFile> => {
+  const res = await fetch(`${API_URL}/archive/files/${id}`, { headers: fileAccessHeaders(shareToken) });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || err.message || `Could not load file (${res.status})`);
+  }
+  return res.json();
+};
+
 export const archiveDownloadUrl = (id: number) => `${API_URL}/archive/files/${id}/download`;
 export const archivePreviewUrl = (id: number) => `${API_URL}/archive/files/${id}/preview`;
+export const archiveThumbnailUrl = (id: number) => `${API_URL}/archive/files/${id}/thumbnail`;
 
-export const downloadArchiveFile = async (id: number, filename: string) => {
-  const res = await fetch(archiveDownloadUrl(id), { headers: getAuthHeader() });
+export const fetchArchiveThumbnailBlob = async (id: number, shareToken?: string): Promise<string> => {
+  const res = await fetch(archiveThumbnailUrl(id), { headers: fileAccessHeaders(shareToken) });
+  if (!res.ok) throw new Error(`Thumbnail failed (${res.status})`);
+  const blob = await res.blob();
+  return URL.createObjectURL(blob);
+};
+
+export const downloadArchiveFile = async (id: number, filename: string, shareToken?: string) => {
+  const res = await fetch(archiveDownloadUrl(id), { headers: fileAccessHeaders(shareToken) });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(err.error || err.message || `Download failed (${res.status})`);
@@ -107,8 +159,8 @@ export const downloadArchiveFile = async (id: number, filename: string) => {
   URL.revokeObjectURL(url);
 };
 
-export const fetchArchivePreviewBlob = async (id: number): Promise<{ url: string; mimeType: string }> => {
-  const res = await fetch(archivePreviewUrl(id), { headers: getAuthHeader() });
+export const fetchArchivePreviewBlob = async (id: number, shareToken?: string): Promise<{ url: string; mimeType: string }> => {
+  const res = await fetch(archivePreviewUrl(id), { headers: fileAccessHeaders(shareToken) });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(err.error || err.message || `Preview failed (${res.status})`);

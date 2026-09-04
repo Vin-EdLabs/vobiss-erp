@@ -417,6 +417,10 @@ async function migrateUsersActiveUniqueConstraints() {
 
 export async function initDB() {
   try {
+    // Multi-tenant foundation — must exist before any table below adds its `company` FK column.
+    const { initCompaniesTable } = await import('./db/tenant.js');
+    await initCompaniesTable();
+
     await createTableIfNotExists(`
       CREATE TABLE IF NOT EXISTS users (
         id SERIAL PRIMARY KEY,
@@ -623,6 +627,7 @@ export async function initDB() {
     await addColumnIfNotExists('requests', 'date_needed', 'DATE');
     await addColumnIfNotExists('requests', 'total_amount', 'DECIMAL(12,2)');
     await addColumnIfNotExists('requests', 'received_at', 'TIMESTAMP');
+    await addColumnIfNotExists('requests', 'released_at', 'TIMESTAMP');
     await addColumnIfNotExists('requests', 'created_by_id', 'INTEGER REFERENCES users(id)');
     await addColumnIfNotExists('requests', 'ticket_id', 'INTEGER REFERENCES tickets(id) ON DELETE SET NULL');
     await addColumnIfNotExists('requests', 'linked_cash_request_id', 'INTEGER REFERENCES requests(id) ON DELETE SET NULL');
@@ -1200,6 +1205,17 @@ export async function initDB() {
       console.warn('Project request tables init:', e.message);
     }
 
+    // company column on every core tenant-scoped table this file itself creates — 'CW' default
+    // backfills all existing rows, so nothing already in the database changes ownership.
+    try {
+      const { addCompanyColumn } = await import('./db/tenant.js');
+      for (const table of ['users', 'requests', 'items', 'transport_requests', 'assets', 'audit_logs', 'fuel_requests', 'vehicle_request_forms']) {
+        await addCompanyColumn(table);
+      }
+    } catch (e) {
+      console.warn('Tenant company columns init:', e.message);
+    }
+
   } catch (error) {
     console.error('Critical error during database initialization:', error.stack);
     throw error;
@@ -1209,8 +1225,8 @@ export async function initDB() {
 export async function getUserById(userId) {
   try {
     const result = await pool.query(
-      `SELECT id, username, first_name, last_name, role, main_role, roles, units, unit, position 
-       FROM users 
+      `SELECT id, username, first_name, last_name, role, main_role, roles, units, unit, position, company
+       FROM users
        WHERE id = $1 AND deleted_at IS NULL`,
       [userId]
     );
@@ -1320,6 +1336,10 @@ const DEFAULT_WORKFLOW_CONFIG = {
     fuel_request_approver_ids: [],
     price_per_litre: null,
     require_reference_link: false,
+    require_reference_link_fuel: false,
+    require_reference_link_vehicle: false,
+    require_reference_link_cash: false,
+    require_reference_link_material: false,
   },
   ticket_escalation: DEFAULT_TICKET_ESCALATION,
   ticket_sla: DEFAULT_TICKET_SLA,
@@ -1342,6 +1362,10 @@ export async function getWorkflowConfig() {
           fuel_request_approver_ids: normalizeIdList(realm.fuel_request_approver_ids || []),
           price_per_litre: null,
           require_reference_link: false,
+          require_reference_link_fuel: false,
+          require_reference_link_vehicle: false,
+          require_reference_link_cash: false,
+          require_reference_link_material: false,
         },
         ticket_escalation: normalizeTicketEscalationConfig(DEFAULT_TICKET_ESCALATION),
         ticket_sla: normalizeTicketSlaConfig(DEFAULT_TICKET_SLA),
@@ -1388,6 +1412,10 @@ export async function getWorkflowConfig() {
         ? Number(workflowTransport.price_per_litre)
         : null,
       require_reference_link: workflowTransport.require_reference_link === true || workflowTransport.require_reference_link === 'required',
+      require_reference_link_fuel: workflowTransport.require_reference_link_fuel === true || workflowTransport.require_reference_link_fuel === 'required',
+      require_reference_link_vehicle: workflowTransport.require_reference_link_vehicle === true || workflowTransport.require_reference_link_vehicle === 'required',
+      require_reference_link_cash: workflowTransport.require_reference_link_cash === true || workflowTransport.require_reference_link_cash === 'required',
+      require_reference_link_material: workflowTransport.require_reference_link_material === true || workflowTransport.require_reference_link_material === 'required',
     };
     return {
       material,
@@ -1471,6 +1499,10 @@ export async function updateWorkflowConfig(config) {
       fuel_request_approver_ids: normalizeIdList(incomingTransport.fuel_request_approver_ids || []),
       price_per_litre: Number.isFinite(priceVal) && priceVal >= 0 ? priceVal : null,
       require_reference_link: incomingTransport.require_reference_link === true || incomingTransport.require_reference_link === 'required',
+      require_reference_link_fuel: incomingTransport.require_reference_link_fuel === true || incomingTransport.require_reference_link_fuel === 'required',
+      require_reference_link_vehicle: incomingTransport.require_reference_link_vehicle === true || incomingTransport.require_reference_link_vehicle === 'required',
+      require_reference_link_cash: incomingTransport.require_reference_link_cash === true || incomingTransport.require_reference_link_cash === 'required',
+      require_reference_link_material: incomingTransport.require_reference_link_material === true || incomingTransport.require_reference_link_material === 'required',
     },
     ticket_escalation: normalizeTicketEscalationConfig(
       config.ticket_escalation ?? existing.ticket_escalation
@@ -1525,35 +1557,46 @@ function normalizeIdList(value) {
   return [...new Set(value.map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0))];
 }
 
-export async function getRealmApprovers() {
+// Storage note: this settings row predates multi-tenancy and was a flat object
+// ({material_user_ids: [...], ...} — always C&W's). It's now company-keyed
+// ({ CW: {...}, PTEL: {...} }); `_isLegacyFlatRealmShape` tells the two apart so every existing
+// C&W caller (which never passes `company`) keeps reading/writing exactly the same data as
+// before the migration.
+function _isLegacyFlatRealmShape(parsed) {
+  return !!parsed && typeof parsed === 'object' && !Array.isArray(parsed) &&
+    ('material_user_ids' in parsed || 'cash_user_ids' in parsed) && !('CW' in parsed) && !('PTEL' in parsed);
+}
+
+export async function getRealmApprovers(company = 'CW') {
   try {
     const result = await pool.query("SELECT value FROM settings WHERE key_name = 'realm_approvers'");
     if (result.rowCount === 0 || !result.rows[0].value) {
-      setRealmApproverIds(DEFAULT_REALM_APPROVERS);
+      setRealmApproverIds(DEFAULT_REALM_APPROVERS, company);
       return { ...DEFAULT_REALM_APPROVERS };
     }
     const parsed = typeof result.rows[0].value === 'string'
       ? JSON.parse(result.rows[0].value)
       : result.rows[0].value;
+    const bucket = _isLegacyFlatRealmShape(parsed) ? (company === 'CW' ? parsed : {}) : (parsed[company] || {});
     const realm = {
-      material_user_ids: normalizeIdList(parsed.material_user_ids),
-      cash_user_ids: normalizeIdList(parsed.cash_user_ids),
-      transport_approver_ids: normalizeIdList(parsed.transport_approver_ids),
-      transport_supervisor_ids: normalizeIdList(parsed.transport_supervisor_ids),
-      vehicle_request_approver_ids: normalizeIdList(parsed.vehicle_request_approver_ids),
-      finance_user_ids: normalizeIdList(parsed.finance_user_ids),
-      fuel_request_approver_ids: normalizeIdList(parsed.fuel_request_approver_ids),
+      material_user_ids: normalizeIdList(bucket.material_user_ids),
+      cash_user_ids: normalizeIdList(bucket.cash_user_ids),
+      transport_approver_ids: normalizeIdList(bucket.transport_approver_ids),
+      transport_supervisor_ids: normalizeIdList(bucket.transport_supervisor_ids),
+      vehicle_request_approver_ids: normalizeIdList(bucket.vehicle_request_approver_ids),
+      finance_user_ids: normalizeIdList(bucket.finance_user_ids),
+      fuel_request_approver_ids: normalizeIdList(bucket.fuel_request_approver_ids),
     };
-    setRealmApproverIds(realm);
+    setRealmApproverIds(realm, company);
     return realm;
   } catch (error) {
     console.error('Error fetching realm approvers:', error.stack);
-    setRealmApproverIds(DEFAULT_REALM_APPROVERS);
+    setRealmApproverIds(DEFAULT_REALM_APPROVERS, company);
     return { ...DEFAULT_REALM_APPROVERS };
   }
 }
 
-export async function updateRealmApprovers(payload = {}) {
+export async function updateRealmApprovers(payload = {}, company = 'CW') {
   const realm = {
     material_user_ids: normalizeIdList(payload.material_user_ids),
     cash_user_ids: normalizeIdList(payload.cash_user_ids),
@@ -1564,26 +1607,38 @@ export async function updateRealmApprovers(payload = {}) {
     fuel_request_approver_ids: normalizeIdList(payload.fuel_request_approver_ids),
   };
 
-  const configRow = await pool.query("SELECT value FROM settings WHERE key_name = 'workflow_config'");
-  const existingWorkflow = configRow.rowCount > 0 && configRow.rows[0].value ? JSON.parse(configRow.rows[0].value) : { ...DEFAULT_WORKFLOW_CONFIG };
-  const primarySupervisor = normalizeTransportSupervisorId(realm.transport_supervisor_ids) ?? normalizeTransportSupervisorId(existingWorkflow.transport?.supervisor_id) ?? null;
-  const mergedWorkflow = {
-    ...existingWorkflow,
-    transport: {
-      ...DEFAULT_WORKFLOW_CONFIG.transport,
-      ...(existingWorkflow.transport || {}),
-      approver_ids: normalizeIdList(realm.transport_approver_ids),
-      supervisor_id: primarySupervisor,
-      transport_supervisor_ids: normalizeIdList(realm.transport_supervisor_ids),
-      vehicle_request_approver_ids: normalizeIdList(realm.vehicle_request_approver_ids),
-      finance_user_ids: normalizeIdList(realm.finance_user_ids),
-      fuel_request_approver_ids: normalizeIdList(realm.fuel_request_approver_ids),
-    },
-  };
+  const storedRealm = await pool.query("SELECT value FROM settings WHERE key_name = 'realm_approvers'");
+  const parsedExisting = storedRealm.rowCount > 0 && storedRealm.rows[0].value
+    ? (typeof storedRealm.rows[0].value === 'string' ? JSON.parse(storedRealm.rows[0].value) : storedRealm.rows[0].value)
+    : {};
+  const byCompany = _isLegacyFlatRealmShape(parsedExisting) ? { CW: parsedExisting } : { ...parsedExisting };
+  byCompany[company] = realm;
+  await updateSetting('realm_approvers', JSON.stringify(byCompany));
 
-  await updateSetting('realm_approvers', JSON.stringify(realm));
-  await updateSetting('workflow_config', JSON.stringify(mergedWorkflow));
-  setRealmApproverIds(realm);
+  // The transport/fuel/vehicle runtime gate (workflow_config.transport) isn't split per company
+  // yet — PTEL has no transport/fuel/vehicle module in this pass, only Sales — so only a C&W
+  // realm save mirrors into it; a PTEL save must never overwrite C&W's live transport config.
+  if (company === 'CW') {
+    const configRow = await pool.query("SELECT value FROM settings WHERE key_name = 'workflow_config'");
+    const existingWorkflow = configRow.rowCount > 0 && configRow.rows[0].value ? JSON.parse(configRow.rows[0].value) : { ...DEFAULT_WORKFLOW_CONFIG };
+    const primarySupervisor = normalizeTransportSupervisorId(realm.transport_supervisor_ids) ?? normalizeTransportSupervisorId(existingWorkflow.transport?.supervisor_id) ?? null;
+    const mergedWorkflow = {
+      ...existingWorkflow,
+      transport: {
+        ...DEFAULT_WORKFLOW_CONFIG.transport,
+        ...(existingWorkflow.transport || {}),
+        approver_ids: normalizeIdList(realm.transport_approver_ids),
+        supervisor_id: primarySupervisor,
+        transport_supervisor_ids: normalizeIdList(realm.transport_supervisor_ids),
+        vehicle_request_approver_ids: normalizeIdList(realm.vehicle_request_approver_ids),
+        finance_user_ids: normalizeIdList(realm.finance_user_ids),
+        fuel_request_approver_ids: normalizeIdList(realm.fuel_request_approver_ids),
+      },
+    };
+    await updateSetting('workflow_config', JSON.stringify(mergedWorkflow));
+  }
+
+  setRealmApproverIds(realm, company);
   return realm;
 }
 
@@ -1623,7 +1678,7 @@ export async function getUserByLogin(identifier) {
     let result = await pool.query(
       `SELECT id, first_name, last_name, username, email, password, role,
               main_role, roles, units, unit, position, status, phone, department,
-              suspension_reason, unsuspend_reason, unsuspend_ack, avatar_url
+              suspension_reason, unsuspend_reason, unsuspend_ack, avatar_url, company
        FROM users
        WHERE LOWER(username) = $1 AND deleted_at IS NULL`,
       [lower]
@@ -1632,7 +1687,7 @@ export async function getUserByLogin(identifier) {
       result = await pool.query(
         `SELECT id, first_name, last_name, username, email, password, role,
                 main_role, roles, units, unit, position, status, phone, department,
-                suspension_reason, unsuspend_reason, unsuspend_ack, avatar_url
+                suspension_reason, unsuspend_reason, unsuspend_ack, avatar_url, company
          FROM users
          WHERE LOWER(email) = $1 AND deleted_at IS NULL`,
         [lower]
@@ -1661,14 +1716,18 @@ export async function getUserByUsername(username) {
   }
 }
 
-export async function getUsers() {
+export async function getUsers(company = null) {
   try {
+    const params = [];
+    const companyClause = company ? (params.push(company), `AND company = $${params.length}`) : '';
     const result = await pool.query(
-      `SELECT id, first_name, last_name, username, email, role, main_role, roles, units, unit, position, avatar_url, created_at 
-       FROM users 
+      `SELECT id, first_name, last_name, username, email, role, main_role, roles, units, unit, position, avatar_url, created_at, company
+       FROM users
        WHERE deleted_at IS NULL
          AND LOWER(username) <> 'superadmin'
-       ORDER BY created_at DESC`
+         ${companyClause}
+       ORDER BY created_at DESC`,
+      params
     );
     return result.rows.map(user => {
       // Parse JSONB fields
@@ -1758,6 +1817,7 @@ export async function createUser(firstName, lastName, email, role, userId, ip, o
       ...(selectedUnit ? [selectedUnit] : []),
       ...(Array.isArray(options.units) ? options.units : []),
     ]);
+    const targetCompany = typeof options.company === 'string' && options.company.trim() ? options.company.trim() : 'CW';
 
     let plainPassword;
     if (useAutoGenerate) {
@@ -1808,6 +1868,7 @@ export async function createUser(firstName, lastName, email, role, userId, ip, o
           units = $8::jsonb,
           unit = $9,
           position = $10,
+          company = $12,
           deleted_at = NULL,
           updated_at = CURRENT_TIMESTAMP
         WHERE id = $11
@@ -1824,6 +1885,7 @@ export async function createUser(firstName, lastName, email, role, userId, ip, o
           defaultUnits[0] || selectedUnit,
           selectedPosition,
           reactivateId,
+          targetCompany,
         ]
       );
       await insertAuditLog(client, userId, 'reactivate_user', ip, {
@@ -1835,8 +1897,8 @@ export async function createUser(firstName, lastName, email, role, userId, ip, o
     } else {
       const defaultUnits = selectedUnits.length ? selectedUnits : defaultUnitsForRole(normalizedRole);
       result = await client.query(
-        `INSERT INTO users (first_name, last_name, username, email, password, role, main_role, roles, units, unit, position, created_at, deleted_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $6, jsonb_build_array($7::text), $8::jsonb, $9, $10, CURRENT_TIMESTAMP, NULL) RETURNING *`,
+        `INSERT INTO users (first_name, last_name, username, email, password, role, main_role, roles, units, unit, position, created_at, deleted_at, company)
+         VALUES ($1, $2, $3, $4, $5, $6, $6, jsonb_build_array($7::text), $8::jsonb, $9, $10, CURRENT_TIMESTAMP, NULL, $11) RETURNING *`,
         [
           firstName.trim(),
           lastName.trim(),
@@ -1848,6 +1910,7 @@ export async function createUser(firstName, lastName, email, role, userId, ip, o
           JSON.stringify(defaultUnits),
           defaultUnits[0] || selectedUnit,
           selectedPosition,
+          targetCompany,
         ]
       );
       await insertAuditLog(client, userId, 'create_user', ip, {
@@ -2294,8 +2357,8 @@ export async function insertAuditLog(userId, action, ip = 'unknown', details = n
       // SAVEPOINT so a failed audit insert does not abort the parent transaction
       await client.query('SAVEPOINT audit_log_sp');
       await client.query(
-        `INSERT INTO audit_logs (user_id, action, ip_address, details, timestamp)
-         VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)`,
+        `INSERT INTO audit_logs (user_id, action, ip_address, details, timestamp, company)
+         VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP, COALESCE((SELECT company FROM users WHERE id = $1), 'CW'))`,
         [actualUserId, actualAction, actualIp, actualDetails ? JSON.stringify(actualDetails) : null]
       );
       await client.query('RELEASE SAVEPOINT audit_log_sp');
@@ -2313,8 +2376,8 @@ export async function insertAuditLog(userId, action, ip = 'unknown', details = n
 
   try {
     await pool.query(
-      `INSERT INTO audit_logs (user_id, action, ip_address, details, timestamp)
-       VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)`,
+      `INSERT INTO audit_logs (user_id, action, ip_address, details, timestamp, company)
+       VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP, COALESCE((SELECT company FROM users WHERE id = $1), 'CW'))`,
       [actualUserId, actualAction, actualIp, actualDetails ? JSON.stringify(actualDetails) : null]
     );
   } catch (error) {
@@ -2322,8 +2385,11 @@ export async function insertAuditLog(userId, action, ip = 'unknown', details = n
   }
 }
 
-export async function getAuditLogs() {
+export async function getAuditLogs(company = null) {
   try {
+    const params = [];
+    let where = '';
+    if (company) { params.push(company); where = `WHERE al.company = $${params.length}`; }
     const result = await pool.query(`
       SELECT
         al.id,
@@ -2332,12 +2398,14 @@ export async function getAuditLogs() {
         al.ip_address,
         al.details::text AS details_text,
         al.timestamp,
+        al.company,
         COALESCE(u.first_name || ' ' || u.last_name, 'System') AS full_name,
         COALESCE(u.username, 'system') AS username
       FROM audit_logs al
       LEFT JOIN users u ON al.user_id = u.id AND u.deleted_at IS NULL
+      ${where}
       ORDER BY al.timestamp DESC
-    `);
+    `, params);
     const safeParse = (text) => {
       if (!text || text === 'null') return {};
       try {
@@ -2521,16 +2589,19 @@ export async function deleteCategory(categoryId, userId, ip) {
   }
 }
 
-export async function getItems() {
+export async function getItems(company = null) {
   try {
+    const params = [];
+    let companyClause = '';
+    if (company) { params.push(company); companyClause = `AND i.company = $${params.length}`; }
     const result = await pool.query(`
       SELECT i.*, c.name AS category_name, COALESCE(v.name, i.vendor_name) AS vendor_name
       FROM items i
       LEFT JOIN categories c ON i.category_id = c.id
       LEFT JOIN vendors v ON i.vendor_id = v.id
-      WHERE i.deleted_at IS NULL
+      WHERE i.deleted_at IS NULL ${companyClause}
       ORDER BY i.created_at DESC
-    `);
+    `, params);
     return result.rows;
   } catch (error) {
     console.error('Error fetching items:', error.stack);
@@ -2538,7 +2609,7 @@ export async function getItems() {
   }
 }
 
-export async function addItem(itemData, userId, ip) {
+export async function addItem(itemData, userId, ip, company = 'CW') {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -2556,8 +2627,8 @@ export async function addItem(itemData, userId, ip) {
       throw new Error('Unit price must be non-negative if provided');
     }
     const result = await client.query(
-      'INSERT INTO items (name, description, category_id, vendor_id, quantity, low_stock_threshold, vendor_name, unit_price, receipt_images, created_at, updated_at, deleted_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, CURRENT_TIMESTAMP, NULL, NULL) RETURNING *',
-      [name, description || null, parsedCategoryId, parsedVendorId, parsedQuantity, parsedLowStockThreshold, vendor_name || null, parsedUnitPrice, receipt_images || JSON.stringify([])]
+      'INSERT INTO items (name, description, category_id, vendor_id, quantity, low_stock_threshold, vendor_name, unit_price, receipt_images, created_at, updated_at, deleted_at, company) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, CURRENT_TIMESTAMP, NULL, NULL, $10) RETURNING *',
+      [name, description || null, parsedCategoryId, parsedVendorId, parsedQuantity, parsedLowStockThreshold, vendor_name || null, parsedUnitPrice, receipt_images || JSON.stringify([]), company || 'CW']
     );
     const itemId = result.rows[0].id;
     if (Array.isArray(serial_numbers) && serial_numbers.length > 0) {
@@ -2925,8 +2996,9 @@ export async function createRequest(requestData, selectedApproverIds, requestTyp
         created_by, team_leader_name, team_leader_phone, project_name, isp_name, location,
         deployment_type, release_by, received_by, type, reason, status,
         department, purpose, deliver_to, deliver_phone, special_instructions, date_needed, total_amount, created_by_id, ticket_id,
-        linked_cash_request_id
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'pending', $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
+        linked_cash_request_id, company
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'pending', $12, $13, $14, $15, $16, $17, $18, $19, $20, $21,
+        COALESCE((SELECT company FROM users WHERE id = $19), 'CW'))
       RETURNING *`,
       [
         createdBy,
@@ -3064,7 +3136,7 @@ export async function createRequest(requestData, selectedApproverIds, requestTyp
   }
 }
 
-export async function getRequests(userRole, userId) {
+export async function getRequests(userRole, userId, company = null) {
   try {
     const userResult = await pool.query(
       `SELECT id, first_name, last_name, username, role, main_role, roles, units, unit, position
@@ -3136,6 +3208,13 @@ export async function getRequests(userRole, userId) {
 
     if (conditions.length > 0) {
       query += ' AND (' + conditions.join(' OR ') + ')';
+    }
+    // Company scope applies even to "sees everything" director-tier access above — that bypass
+    // means "everything in my company," not literally every tenant's data. Only a null company
+    // (the true System Admin — see middleware/tenant.js) skips this entirely.
+    if (company) {
+      params.push(company);
+      query += ` AND r.company = $${params.length}`;
     }
     query += ` GROUP BY r.id ORDER BY r.created_at DESC`;
     const result = await pool.query(query, params);
@@ -3500,7 +3579,12 @@ export async function getNotificationsForUser(userId) {
     await addColumnIfNotExists('system_notifications', 'target_user_id', 'INTEGER REFERENCES users(id) ON DELETE CASCADE');
     await addColumnIfNotExists('system_notifications', 'link_url', 'TEXT');
     await addColumnIfNotExists('system_notifications', 'notification_type', "VARCHAR(40) DEFAULT 'broadcast'");
+    await addColumnIfNotExists('system_notifications', 'company', 'VARCHAR(20)');
 
+    // A broadcast (no target_user_id) reaches this user only if it's untagged (a true System
+    // Admin announcement meant for literally everyone) or tagged with their own company — a
+    // C&W-wide broadcast must never reach a PTEL account and vice versa. A directly targeted
+    // notification always reaches its target regardless of company.
     const result = await pool.query(
       `
       SELECT n.id,
@@ -3517,7 +3601,10 @@ export async function getNotificationsForUser(userId) {
              ) AS read
         FROM system_notifications n
        WHERE n.is_active = TRUE
-         AND (n.target_user_id IS NULL OR n.target_user_id = $1)
+         AND (
+           n.target_user_id = $1
+           OR (n.target_user_id IS NULL AND (n.company IS NULL OR n.company = (SELECT company FROM users WHERE id = $1)))
+         )
        ORDER BY n.created_at DESC
        LIMIT 80
       `,
@@ -3647,6 +3734,7 @@ export async function createNotification(
   await addColumnIfNotExists('system_notifications', 'target_user_id', 'INTEGER REFERENCES users(id) ON DELETE CASCADE');
   await addColumnIfNotExists('system_notifications', 'link_url', 'TEXT');
   await addColumnIfNotExists('system_notifications', 'notification_type', "VARCHAR(40) DEFAULT 'broadcast'");
+  await addColumnIfNotExists('system_notifications', 'company', 'VARCHAR(20)');
   let safeCreatedBy = createdBy || null;
   if (safeCreatedBy) {
     const creator = await pool.query(
@@ -3657,8 +3745,14 @@ export async function createNotification(
   }
 
   const result = await pool.query(
-    `INSERT INTO system_notifications (title, message, created_by, target_user_id, link_url, notification_type)
-     VALUES ($1, $2, $3, $4, $5, $6)
+    `INSERT INTO system_notifications (title, message, created_by, target_user_id, link_url, notification_type, company)
+     VALUES ($1, $2, $3, $4, $5, $6,
+       CASE
+         WHEN $4::int IS NOT NULL THEN (SELECT company FROM users WHERE id = $4)
+         WHEN $3::int IS NOT NULL AND (SELECT LOWER(username) FROM users WHERE id = $3) = 'superadmin' THEN NULL
+         WHEN $3::int IS NOT NULL THEN (SELECT company FROM users WHERE id = $3)
+         ELSE NULL
+       END)
      RETURNING *`,
     [
       title.trim(),
@@ -4097,7 +4191,7 @@ export async function finalizeRequest(requestId, finalizeData, userId, ip) {
       }
     }
     await client.query(
-      'UPDATE requests SET status = $1, release_by = $2, updated_at = CURRENT_TIMESTAMP WHERE id = $3',
+      'UPDATE requests SET status = $1, release_by = $2, released_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = $3',
       ['completed', releasedBy.trim(), requestId]
     );
     if (waybill && typeof waybill === 'object') {
@@ -4180,6 +4274,7 @@ export async function getRequestDetails(requestId) {
     }
     const approvals = await pool.query(`
       SELECT a.*,
+             a.created_at AS approved_at,
              COALESCE(
                NULLIF(TRIM(CONCAT(COALESCE(u.first_name, ''), ' ', COALESCE(u.last_name, ''))), ''),
                a.approver_name

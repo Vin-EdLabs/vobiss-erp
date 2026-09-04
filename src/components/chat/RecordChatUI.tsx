@@ -11,7 +11,6 @@ import {
   MessageSquare,
   Package,
   RotateCcw,
-  Sparkles,
   Ticket,
   FolderKanban,
 } from 'lucide-react';
@@ -161,10 +160,7 @@ function ThreadSummaryCard({ card }: { card: SummaryCard }) {
         </div>
         <div className="chat-summary-card-titles">
           <p className="chat-summary-card-headline">{card.headline}</p>
-          <p className="chat-summary-card-tagline">
-            <Sparkles className="chat-summary-card-sparkle" aria-hidden />
-            {card.tagline}
-          </p>
+          <p className="chat-summary-card-tagline">{card.tagline}</p>
         </div>
         <span className="chat-summary-card-kind">{ui.label}</span>
       </div>

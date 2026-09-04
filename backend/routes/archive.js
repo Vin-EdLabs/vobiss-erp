@@ -2,15 +2,19 @@ import express from 'express';
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
+import sharp from 'sharp';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
 import { authenticateToken } from '../middleware/auth.js';
+import { authenticateOrShareToken } from '../middleware/shareAuth.js';
 import { logUserAction } from '../services/activityLog.js';
 import { effectiveUnitsForUser, isSystemAdminAccount, userHasAnyRole } from '../roles.js';
+import pool from '../db.js';
 import {
   ensureArchiveTables, isArchiveStaff, canViewFolder,
   listFolders, getFolder, createFolder, renameFolder, deleteFolder,
   listFiles, getFile, recordUpload, renameOrMoveFile, deleteFile,
+  listShareableFolders, copyFileToFolder,
   extensionOf, ALLOWED_EXTENSIONS, PREVIEWABLE_EXTENSIONS, MAX_FILE_SIZE,
 } from '../services/archive.js';
 
@@ -21,6 +25,23 @@ const router = express.Router();
 // Deliberately NOT under backend/uploads — see the comment at the top of services/archive.js.
 const storageDir = path.join(__dirname, '..', 'archive-storage');
 if (!fs.existsSync(storageDir)) fs.mkdirSync(storageDir, { recursive: true });
+const thumbsDir = path.join(storageDir, 'thumbnails');
+if (!fs.existsSync(thumbsDir)) fs.mkdirSync(thumbsDir, { recursive: true });
+
+const IMAGE_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp']);
+
+/** Best-effort — a failed thumbnail never blocks the actual upload. */
+async function generateThumbnail(sourcePath, sourceFilename) {
+  try {
+    const thumbName = `thumb-${path.basename(sourceFilename, path.extname(sourceFilename))}.webp`;
+    const thumbPath = path.join(thumbsDir, thumbName);
+    await sharp(sourcePath).resize(320, 320, { fit: 'inside', withoutEnlargement: true }).webp({ quality: 72 }).toFile(thumbPath);
+    return thumbPath;
+  } catch (e) {
+    console.warn('[archive] thumbnail generation failed:', e.message);
+    return null;
+  }
+}
 
 const storage = multer.diskStorage({
   destination: (_req, _file, cb) => cb(null, storageDir),
@@ -50,6 +71,70 @@ router.use(async (_req, _res, next) => {
     next(e);
   }
 });
+// Registered before the router-wide auth gate below so a valid share token can serve these
+// three read-only file routes without a user session — that's what lets a "Public" share
+// link actually work for someone outside the app. Every other route in this file (including
+// mutations) still requires full authentication.
+async function resolveSharedOrOwnFile(req, res) {
+  const fileId = req.isSharedView ? Number(req.shareLink.record_id) : Number(req.params.id);
+  const file = await getFile(fileId);
+  if (!file) { res.status(404).json({ error: 'File not found' }); return null; }
+  if (!req.isSharedView) {
+    const folder = await getFolder(file.folder_id);
+    if (!folder || !canViewFolder(req.user, folder)) { res.status(403).json({ error: 'You do not have access to this file' }); return null; }
+  }
+  return file;
+}
+
+// GET /api/archive/files/:id — metadata only, for the file preview page (in-app or shared).
+router.get('/files/:id', authenticateOrShareToken('archive_file', authenticateToken), async (req, res) => {
+  try {
+    const file = await resolveSharedOrOwnFile(req, res);
+    if (!file) return;
+    const { file_path, thumbnail_path, ...meta } = file;
+    res.json({ ...meta, has_thumbnail: Boolean(thumbnail_path) });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /api/archive/files/:id/thumbnail — small inline image, images only.
+router.get('/files/:id/thumbnail', authenticateOrShareToken('archive_file', authenticateToken), async (req, res) => {
+  try {
+    const file = await resolveSharedOrOwnFile(req, res);
+    if (!file) return;
+    if (!file.thumbnail_path || !fs.existsSync(file.thumbnail_path)) {
+      return res.status(404).json({ error: 'No thumbnail available for this file' });
+    }
+    res.setHeader('Content-Type', 'image/webp');
+    res.setHeader('Cache-Control', 'private, max-age=86400');
+    fs.createReadStream(file.thumbnail_path).pipe(res);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /api/archive/files/:id/download — streamed, never buffered.
+router.get('/files/:id/download', authenticateOrShareToken('archive_file', authenticateToken), async (req, res) => {
+  try {
+    const file = await resolveSharedOrOwnFile(req, res);
+    if (!file) return;
+    if (!fs.existsSync(file.file_path)) return res.status(404).json({ error: 'The file is missing from storage' });
+    res.download(file.file_path, file.display_name || file.original_name);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /api/archive/files/:id/preview — inline stream for pdf/images only.
+router.get('/files/:id/preview', authenticateOrShareToken('archive_file', authenticateToken), async (req, res) => {
+  try {
+    const file = await resolveSharedOrOwnFile(req, res);
+    if (!file) return;
+    if (!fs.existsSync(file.file_path)) return res.status(404).json({ error: 'The file is missing from storage' });
+    if (!PREVIEWABLE_EXTENSIONS.has(String(file.extension || '').toLowerCase())) {
+      return res.status(415).json({ error: 'Preview is not available for this file type — download it instead.' });
+    }
+    res.setHeader('Content-Type', file.mime_type || 'application/octet-stream');
+    res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(file.display_name || file.original_name)}"`);
+    fs.createReadStream(file.file_path).pipe(res);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 router.use(authenticateToken);
 
 const requireArchiveStaff = (req, res, next) =>
@@ -63,6 +148,16 @@ router.get('/units', (req, res) => {
   const isAdmin = isSystemAdminAccount(req.user) || userHasAnyRole(req.user, ['director', 'cto']);
   const units = isAdmin ? KNOWN_UNITS : KNOWN_UNITS.filter((u) => effectiveUnitsForUser(req.user).includes(u));
   res.json({ units });
+});
+
+// GET /api/archive/folders/shareable — every global/unit folder in the system (never private
+// ones), for the "share a copy to another folder" picker. Registered before the ":folderId"
+// route below so "shareable" is never mistaken for a folder id.
+router.get('/folders/shareable', async (req, res) => {
+  try {
+    const folders = await listShareableFolders(req.user);
+    res.json({ folders });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // GET /api/archive/folders?scope=&unitSlug=&q=&page=&limit=
@@ -134,11 +229,12 @@ router.post('/folders/:folderId/files', (req, res) => {
       const saved = [];
       for (const f of files) {
         const ext = extensionOf(f.originalname);
+        const thumbnailPath = IMAGE_EXTENSIONS.has(ext) ? await generateThumbnail(f.path, f.filename) : null;
         const record = await recordUpload(req.user, folderId, {
           originalName: f.originalname, displayName: f.originalname, mimeType: f.mimetype,
-          extension: ext, sizeBytes: f.size, filePath: f.path,
+          extension: ext, sizeBytes: f.size, filePath: f.path, thumbnailPath,
         });
-        saved.push(record);
+        saved.push({ ...record, has_thumbnail: Boolean(record.thumbnail_path), thumbnail_path: undefined });
         await logUserAction(req.user, { actionType: 'archive_file_uploaded', recordType: 'archive_file', recordId: record.id, description: `You uploaded "${f.originalname}" to the "${folder.name}" archive folder` });
       }
       res.status(201).json({ files: saved });
@@ -158,42 +254,31 @@ router.patch('/files/:id', async (req, res) => {
 router.delete('/files/:id', async (req, res) => {
   try {
     const file = await deleteFile(req.user, Number(req.params.id));
-    if (fs.existsSync(file.file_path)) fs.unlink(file.file_path, () => {});
+    // A "share to another folder" copy points at the same on-disk file (and thumbnail) as
+    // its source — only remove the bytes once no archive_files row references them anymore.
+    const stillReferenced = await pool.query(`SELECT 1 FROM archive_files WHERE file_path = $1 LIMIT 1`, [file.file_path]);
+    if (stillReferenced.rowCount === 0) {
+      if (fs.existsSync(file.file_path)) fs.unlink(file.file_path, () => {});
+      if (file.thumbnail_path && fs.existsSync(file.thumbnail_path)) fs.unlink(file.thumbnail_path, () => {});
+    }
     await logUserAction(req.user, { actionType: 'archive_file_deleted', recordType: 'archive_file', recordId: file.id, description: `You deleted "${file.display_name}" from Archive` });
     res.json({ deleted: true });
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
-async function authorizeFileAccess(req, res) {
-  const file = await getFile(Number(req.params.id));
-  if (!file) { res.status(404).json({ error: 'File not found' }); return null; }
-  const folder = await getFolder(file.folder_id);
-  if (!folder || !canViewFolder(req.user, folder)) { res.status(403).json({ error: 'You do not have access to this file' }); return null; }
-  if (!fs.existsSync(file.file_path)) { res.status(404).json({ error: 'The file is missing from storage' }); return null; }
-  return file;
-}
-
-// GET /api/archive/files/:id/download — streamed, never buffered.
-router.get('/files/:id/download', async (req, res) => {
+// POST /api/archive/files/:id/copy-to — share a copy of this file into another folder,
+// including one owned by a different department. The original is untouched.
+router.post('/files/:id/copy-to', async (req, res) => {
   try {
-    const file = await authorizeFileAccess(req, res);
-    if (!file) return;
-    res.download(file.file_path, file.display_name || file.original_name);
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// GET /api/archive/files/:id/preview — inline stream for pdf/images only.
-router.get('/files/:id/preview', async (req, res) => {
-  try {
-    const file = await authorizeFileAccess(req, res);
-    if (!file) return;
-    if (!PREVIEWABLE_EXTENSIONS.has(String(file.extension || '').toLowerCase())) {
-      return res.status(415).json({ error: 'Preview is not available for this file type — download it instead.' });
-    }
-    res.setHeader('Content-Type', file.mime_type || 'application/octet-stream');
-    res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(file.display_name || file.original_name)}"`);
-    fs.createReadStream(file.file_path).pipe(res);
-  } catch (e) { res.status(500).json({ error: e.message }); }
+    const { folderId } = req.body || {};
+    if (!folderId) return res.status(400).json({ error: 'folderId is required' });
+    const copy = await copyFileToFolder(req.user, Number(req.params.id), Number(folderId));
+    await logUserAction(req.user, {
+      actionType: 'archive_file_shared', recordType: 'archive_file', recordId: copy.id,
+      description: `You shared a copy of "${copy.display_name}" into another folder`,
+    });
+    res.status(201).json(copy);
+  } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
 export default router;

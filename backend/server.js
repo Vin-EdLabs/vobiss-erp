@@ -31,6 +31,7 @@ import {
   upsertPushSubscription, removePushSubscription
 } from './db.js';
 import pool from './db.js';
+import { attachTenant } from './middleware/tenant.js';
 import { sendLowStockAlert as originalSendLowStockAlert } from './emailService.js';
 import profileRoutes from './routes/profile.js';
 import fieldRoutes from './routes/field.js';
@@ -84,6 +85,7 @@ import chatAdminRoutes from './routes/chatAdmin.js';
 import chatContextRoutes from './routes/chatContext.js';
 import globalSearchRoutes from './routes/globalSearch.routes.js';
 import vobiRoutes from './routes/vobi.js';
+import vobiFeedRoutes from './routes/vobiFeed.js';
 import vobiVaultRoutes from './routes/vobiVault.routes.js';
 import hrRoutes from './routes/hr.js';
 import hrSelfRoutes from './routes/hrSelf.js';
@@ -102,7 +104,7 @@ import {
 } from './services/chatSystemMessage.js';
 import { ensureRequestThread } from './services/chatRecordThreads.js';
 import { getRealtimeIo } from './realtime/channels.js';
-import { resolveReferenceInput, attachReference, isReferenceRequired } from './services/referenceLink.js';
+import { resolveReferenceInput, attachReference, isReferenceRequired, isReferenceRequiredFor } from './services/referenceLink.js';
 import { getRecordSummary } from './services/referenceRegistry.js';
 
 /**
@@ -130,6 +132,7 @@ async function persistLinkedReferences(sourceType, sourceId, links, userId) {
 }
 import { logUserAction } from './services/activityLog.js';
 import { recordTimingEvent, checkSlaThresholdsAndNotify } from './services/workflowTimeEngine.js';
+import { runVobiFeedSweep } from './services/vobiLiveFeed.js';
 import activityRoutes from './routes/activity.js';
 import sharedLinksRoutes from './routes/sharedLinks.js';
 import { emitToUser, emitToStaff } from './realtime/channels.js';
@@ -323,6 +326,7 @@ app.use('/api/chat/admin', chatAdminRoutes);
 app.use('/api/chat/context', chatContextRoutes);
 app.use('/api/search', globalSearchRoutes);
 app.use('/api/vobi', vobiRoutes);
+app.use('/api/vobi-feed', vobiFeedRoutes);
 app.use('/api/vobi-vault', vobiVaultRoutes);
 app.use('/api/hr', hrRoutes);
 app.use('/api/hr-self', hrSelfRoutes);
@@ -478,6 +482,25 @@ const requireUserManager = (req, res, next) => {
   }
   next();
 };
+
+/** A company-scoped admin (not the true System Admin) may only act on users in their own
+ *  company — requireUserManager only checks the actor's role, never the target's company, so
+ *  every /api/users/:id mutation route calls this first. Returns true when the caller may act
+ *  on this target; false otherwise, after already sending a 404 (not 403, to avoid confirming
+ *  the id exists in another tenant). */
+async function assertTargetUserCompany(targetId, req, res) {
+  if (isSystemAdminAccount(req.user)) return true;
+  const result = await pool.query('SELECT company FROM users WHERE id = $1 AND deleted_at IS NULL', [targetId]);
+  if (result.rowCount === 0) {
+    res.status(404).json({ error: 'User not found' });
+    return false;
+  }
+  if ((req.user.company || 'CW') !== result.rows[0].company) {
+    res.status(404).json({ error: 'User not found' });
+    return false;
+  }
+  return true;
+}
 
 const requireSuperAdminOrIssuer = (req, res, next) => {
   if (!canExecuteMaterial(req.user)) return res.status(403).json({ error: 'Procurement access required' });
@@ -752,7 +775,7 @@ app.post('/api/login', async (req, res) => {
       : [user.role || 'requester'];
     const units = user.units && Array.isArray(user.units) ? user.units : [];
     const permissionUser = { ...user, main_role: mainRole, roles, units };
-    await getRealmApprovers();
+    await getRealmApprovers(user.company || 'CW');
     const loginPermissions = permissionFlags(permissionUser);
     
     const token = jwt.sign({ 
@@ -767,6 +790,7 @@ app.post('/api/login', async (req, res) => {
       units: units,   // Units for access control
       unit: user.unit || null,
       position: user.position || null,
+      company: user.company || 'CW',
       permissions: loginPermissions,
     }, JWT_SECRET, { expiresIn: process.env.JWT_EXPIRES_IN || '7d' });
     
@@ -784,6 +808,7 @@ app.post('/api/login', async (req, res) => {
         units: units,  // Units
         unit: user.unit || null,
         position: user.position || null,
+        company: user.company || 'CW',
         permissions: loginPermissions,
         first_name: user.first_name,
         last_name: user.last_name,
@@ -803,7 +828,7 @@ app.get('/api/me', authenticateToken, async (req, res) => {
   try {
     const result = await pool.query(
       `SELECT id, username, first_name, last_name, role, main_role, roles, units, unit, position, status,
-              suspension_reason, unsuspend_reason, unsuspend_ack, avatar_url
+              suspension_reason, unsuspend_reason, unsuspend_ack, avatar_url, company
        FROM users WHERE id = $1 AND deleted_at IS NULL`,
       [req.user.id]
     );
@@ -820,7 +845,7 @@ app.get('/api/me', authenticateToken, async (req, res) => {
     const rolesArr = Array.isArray(roles) && roles.length > 0 ? roles : [dbUser.role || 'requester'];
     const units = dbUser.units && (typeof dbUser.units === 'string' ? JSON.parse(dbUser.units) : dbUser.units);
     const unitsArr = Array.isArray(units) ? units : [];
-    await getRealmApprovers();
+    await getRealmApprovers(dbUser.company || 'CW');
     const permissionUser = { ...dbUser, main_role: mainRole, roles: rolesArr, units: unitsArr };
     try {
       await ensureUserChatMembership(dbUser.id, rolesArr);
@@ -836,6 +861,7 @@ app.get('/api/me', authenticateToken, async (req, res) => {
       units: unitsArr,
       unit: dbUser.unit || null,
       position: dbUser.position || null,
+      company: dbUser.company || 'CW',
       permissions: permissionFlags(permissionUser),
       first_name: dbUser.first_name,
       last_name: dbUser.last_name,
@@ -875,7 +901,7 @@ app.post('/api/logout', authenticateToken, async (req, res) => {
   }
 });
 
-app.get('/api/audit-logs', authenticateToken, async (req, res) => {
+app.get('/api/audit-logs', authenticateToken, attachTenant, async (req, res) => {
   try {
     const permissionUser = await getFreshPermissionUser(req.user.id);
     if (
@@ -885,7 +911,7 @@ app.get('/api/audit-logs', authenticateToken, async (req, res) => {
     ) {
       return res.status(403).json({ error: 'Access denied' });
     }
-    const logs = await getAuditLogs();
+    const logs = await getAuditLogs(req.company);
     res.json(logs);
   } catch (error) {
     console.error('Error fetching audit logs:', error.stack);
@@ -948,7 +974,11 @@ app.put('/api/config/workflow', authenticateToken, requireSuperAdmin, async (req
 
 app.get('/api/realm', authenticateToken, requireSuperAdmin, async (req, res) => {
   try {
-    const realm = await getRealmApprovers();
+    // A true System Admin may inspect any company's realm via ?company=; every other
+    // superadmin-role account (e.g. a future PTEL-scoped superadmin) is always locked to their
+    // own company regardless of what they pass.
+    const requestedCompany = isSystemAdminAccount(req.user) ? (req.query.company || 'CW') : (req.user.company || 'CW');
+    const realm = await getRealmApprovers(requestedCompany);
     const ids = [...new Set([...(realm.material_user_ids || []), ...(realm.cash_user_ids || [])])];
     let people = [];
     if (ids.length) {
@@ -967,7 +997,7 @@ app.get('/api/realm', authenticateToken, requireSuperAdmin, async (req, res) => 
         unit: row.unit,
       }));
     }
-    res.json({ ...realm, people });
+    res.json({ ...realm, people, company: requestedCompany });
   } catch (error) {
     console.error('Error fetching realm:', error.stack);
     res.status(500).json({ error: error.message || 'Failed to load Realm' });
@@ -1118,8 +1148,10 @@ app.put('/api/transport/settings', authenticateToken, requireSuperAdmin, async (
   }
 });
 
-app.get('/api/transport/requests', authenticateToken, async (req, res) => {
+app.get('/api/transport/requests', authenticateToken, attachTenant, async (req, res) => {
   try {
+    const companyClause = req.company ? 'AND tr.company = $1' : '';
+    const companyParams = req.company ? [req.company] : [];
     const rows = await pool.query(
       `SELECT tr.*,
               u.first_name AS engineer_first_name, u.last_name AS engineer_last_name,
@@ -1127,8 +1159,9 @@ app.get('/api/transport/requests', authenticateToken, async (req, res) => {
        FROM transport_requests tr
        LEFT JOIN users u ON u.id = tr.engineer_id
        LEFT JOIN users ru ON ru.id = tr.requester_id
-       WHERE tr.deleted_at IS NULL
-       ORDER BY tr.created_at DESC`
+       WHERE tr.deleted_at IS NULL ${companyClause}
+       ORDER BY tr.created_at DESC`,
+      companyParams
     );
     const config = await getWorkflowConfig();
     const transport = config.transport || { approver_ids: [], supervisor_id: null };
@@ -1242,9 +1275,10 @@ app.post('/api/transport/requests', authenticateToken, async (req, res) => {
       `INSERT INTO transport_requests (
         requester_id, requester_name, site_name, location, client_name, engineer_id, purpose,
         status, current_stage, selected_approver_ids,
-        reference_type, reference_id, reference_number, reference_title, reference_status
+        reference_type, reference_id, reference_number, reference_title, reference_status, company
       )
-       VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', 'approver', $8::jsonb, $9, $10, $11, $12, $13)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', 'approver', $8::jsonb, $9, $10, $11, $12, $13,
+        COALESCE((SELECT company FROM users WHERE id = $1), 'CW'))
        RETURNING *`,
       [
         req.user.id,
@@ -1329,6 +1363,9 @@ app.get('/api/transport/requests/:id', authenticateOrShareToken('transport_reque
       return res.status(404).json({ error: 'Transport request not found' });
     }
     const request = requestRow.rows[0];
+    if (!req.isSharedView && !isSystemAdminAccount(req.user) && (req.user.company || 'CW') !== request.company) {
+      return res.status(404).json({ error: 'Transport request not found' });
+    }
     const approvals = await pool.query(
       `SELECT * FROM transport_request_approvals WHERE request_id = $1 ORDER BY created_at ASC`,
       [request.id]
@@ -1406,6 +1443,13 @@ app.post('/api/transport/requests/:id/approve', authenticateToken, async (req, r
     if (!isApprover && !isSupervisor && req.user.role !== 'admin' && req.user.role !== 'superadmin') {
       return res.status(403).json({ error: 'You are not allowed to approve this request.' });
     }
+    // A Realm member who requested this cannot also be the one who approves it — same rule
+    // already enforced for material/cash requests. Only a true System Admin may request and
+    // approve the same record.
+    const approverPermissionUser = await getFreshPermissionUser(req.user.id);
+    if (Number(request.requester_id) === Number(req.user.id) && !canBypassApprovalRestrictions(approverPermissionUser)) {
+      return res.status(403).json({ error: 'You cannot approve a transport request that you created.' });
+    }
     if (request.status === 'rejected') return res.status(400).json({ error: 'This request has already been rejected.' });
     if (request.status === 'approved') return res.status(400).json({ error: 'This request has already been approved.' });
 
@@ -1414,15 +1458,27 @@ app.post('/api/transport/requests/:id/approve', authenticateToken, async (req, r
       return res.status(400).json({ error: 'Approval notes or a digital signature are required.' });
     }
 
-    const stageToRecord = isSupervisor ? 'supervisor' : 'approver';
+    // The acting stage is decided by where the REQUEST currently sits, not by guessing a
+    // priority order between the actor's roles — someone who is both a configured approver
+    // and the transport supervisor must be able to act as approver while the request is still
+    // at the approver step, then act as supervisor once it's actually their turn. Deciding
+    // this from isSupervisor alone (old code) locked such a person out of the approver step
+    // entirely, since it always routed them to 'supervisor' regardless of current_stage.
+    let stageToRecord;
+    if (request.current_stage === 'approver') {
+      if (!isApprover) {
+        return res.status(403).json({ error: 'You are not one of the configured approvers for this request.' });
+      }
+      stageToRecord = 'approver';
+    } else if (request.current_stage === 'supervisor') {
+      if (!isSupervisor) {
+        return res.status(403).json({ error: 'Only the transport supervisor can approve at this step.' });
+      }
+      stageToRecord = 'supervisor';
+    } else {
+      return res.status(400).json({ error: 'This request is not currently awaiting approval.' });
+    }
     const approverName = formatPersonName(req.user, req.user.username);
-
-    if (stageToRecord === 'approver' && request.current_stage !== 'approver') {
-      return res.status(400).json({ error: 'This request is already at the supervisor step.' });
-    }
-    if (stageToRecord === 'supervisor' && request.current_stage !== 'supervisor') {
-      return res.status(400).json({ error: 'Please complete the approver stage before the supervisor steps in.' });
-    }
 
     await pool.query(
       `INSERT INTO transport_request_approvals (request_id, approver_id, approver_name, stage, decision, reason)
@@ -1507,15 +1563,18 @@ app.post('/api/transport/requests/:id/reject', authenticateToken, async (req, re
     if (!reason) {
       return res.status(400).json({ error: 'A rejection reason is required.' });
     }
+    // Same fix as the approve route: label the rejection with the stage the request was
+    // actually at, not with a guessed priority between the actor's roles.
+    const stageAtRejection = requestRow.current_stage === 'supervisor' ? 'supervisor' : 'approver';
     const approverName = formatPersonName(req.user, req.user.username);
     await pool.query(
       `INSERT INTO transport_request_approvals (request_id, approver_id, approver_name, stage, decision, reason)
        VALUES ($1, $2, $3, $4, 'rejected', $5)`,
-      [requestRow.id, req.user.id, approverName, isSupervisor ? 'supervisor' : 'approver', reason]
+      [requestRow.id, req.user.id, approverName, stageAtRejection, reason]
     );
     await pool.query(
       `UPDATE transport_requests SET status = 'rejected', current_stage = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2`,
-      [isSupervisor ? 'supervisor' : 'approver', request.rows[0].id]
+      [stageAtRejection, request.rows[0].id]
     );
 
     await createNotification(
@@ -1536,7 +1595,7 @@ app.post('/api/transport/requests/:id/reject', authenticateToken, async (req, re
       eventType: 'rejected', stageName: 'pending_approval', triggeredByUserId: req.user.id, attributeToUserId: req.user.id,
     }).catch(() => {});
 
-    res.json({ message: 'Transport request rejected.', request: { id: request.rows[0].id, status: 'rejected', current_stage: isSupervisor ? 'supervisor' : 'approver' } });
+    res.json({ message: 'Transport request rejected.', request: { id: request.rows[0].id, status: 'rejected', current_stage: stageAtRejection } });
   } catch (error) {
     console.error('Error rejecting transport request:', error.stack);
     res.status(500).json({ error: error.message || 'Failed to reject transport request' });
@@ -1690,8 +1749,9 @@ app.post('/api/transport/requests/:id/vehicle-request', authenticateToken, async
 
 app.put('/api/realm', authenticateToken, requireSuperAdmin, async (req, res) => {
   try {
-    const realm = await updateRealmApprovers(req.body || {});
-    res.json(realm);
+    const targetCompany = isSystemAdminAccount(req.user) ? (req.body?.company || req.query.company || 'CW') : (req.user.company || 'CW');
+    const realm = await updateRealmApprovers(req.body || {}, targetCompany);
+    res.json({ ...realm, company: targetCompany });
   } catch (error) {
     console.error('Error updating realm:', error.stack);
     res.status(500).json({ error: error.message || 'Failed to save Realm' });
@@ -1796,7 +1856,7 @@ app.get('/api/users/directory', authenticateToken, async (req, res) => {
 // superadmin-only via GET /api/realm).
 app.get('/api/realm/approver-ids', authenticateToken, async (req, res) => {
   try {
-    const realm = await getRealmApprovers();
+    const realm = await getRealmApprovers(req.user.company || 'CW');
     res.json(realm);
   } catch (error) {
     console.error('Error fetching realm approver ids:', error.stack);
@@ -1804,9 +1864,9 @@ app.get('/api/realm/approver-ids', authenticateToken, async (req, res) => {
   }
 });
 
-app.get('/api/users', authenticateToken, requireUserManager, async (req, res) => {
+app.get('/api/users', authenticateToken, requireUserManager, attachTenant, async (req, res) => {
   try {
-    const users = await getUsers();
+    const users = await getUsers(req.company);
     res.json(users);
   } catch (error) {
     console.error('Error fetching users:', error.stack);
@@ -1822,6 +1882,9 @@ app.post('/api/users', authenticateToken, requireUserManager, async (req, res) =
     if (normalizedRole === 'system_admin' || normalizedRole === 'superadmin') {
       return res.status(403).json({ error: 'Superadmin cannot be assigned. Use Admin for system access.' });
     }
+    // A company-scoped admin's new users always land in their own company; only a true System
+    // Admin may pick which company a new user belongs to (defaulting to C&W).
+    const targetCompany = isSystemAdminAccount(req.user) ? (req.body.company || 'CW') : (req.user.company || 'CW');
     const user = await createUser(first_name, last_name, email, normalizedRole, req.user.id, getClientIp(req), {
       password,
       useAutoGenerate: useAutoGenerate === true,
@@ -1829,6 +1892,7 @@ app.post('/api/users', authenticateToken, requireUserManager, async (req, res) =
       unit,
       position,
       units: Array.isArray(units) ? units : [],
+      company: targetCompany,
     });
     // User is always persisted before optional email; never fail the HTTP request on SMTP errors.
     res.status(201).json(user);
@@ -1852,6 +1916,7 @@ app.put('/api/users/:id/role', authenticateToken, requireUserManager, async (req
     if (role === 'system_admin' || role === 'superadmin') {
       return res.status(403).json({ error: 'Superadmin cannot be assigned. Use Admin for system access.' });
     }
+    if (!(await assertTargetUserCompany(userId, req, res))) return;
     const user = await updateUserRole(userId, role, req.user.id, getClientIp(req));
     res.json(user);
   } catch (error) {
@@ -1867,6 +1932,7 @@ app.put('/api/users/:id', authenticateToken, requireUserManager, async (req, res
     if (updates.role === 'system_admin' || updates.role === 'superadmin') {
       return res.status(403).json({ error: 'Superadmin cannot be assigned. Use Admin for system access.' });
     }
+    if (!(await assertTargetUserCompany(userId, req, res))) return;
     const user = await updateUser(userId, updates, req.user.id, getClientIp(req));
     res.json(user);
   } catch (error) {
@@ -1878,6 +1944,7 @@ app.put('/api/users/:id', authenticateToken, requireUserManager, async (req, res
 app.delete('/api/users/:id', authenticateToken, requireUserManager, async (req, res) => {
   try {
     const userId = parseInt(req.params.id);
+    if (!(await assertTargetUserCompany(userId, req, res))) return;
     const result = await deleteUser(userId, req.user.id, getClientIp(req));
     res.json(result);
   } catch (error) {
@@ -1889,6 +1956,7 @@ app.delete('/api/users/:id', authenticateToken, requireUserManager, async (req, 
 app.post('/api/users/:id/reset-password', authenticateToken, requireUserManager, async (req, res) => {
   try {
     const userId = parseInt(req.params.id, 10);
+    if (!(await assertTargetUserCompany(userId, req, res))) return;
     const { password, sendEmail } = req.body || {};
     const result = await resetUserPassword(userId, req.user.id, getClientIp(req), {
       password,
@@ -2119,9 +2187,9 @@ app.post('/api/send-low-stock-alert', authenticateToken, async (req, res) => {
   }
 });
 
-app.get('/api/items', authenticateToken, async (req, res) => {
+app.get('/api/items', authenticateToken, attachTenant, async (req, res) => {
   try {
-    const items = await getItems();
+    const items = await getItems(req.company);
     res.json(items);
   } catch (error) {
     console.error('Error fetching items:', error.stack);
@@ -2135,7 +2203,7 @@ app.post('/api/items', authenticateToken, upload.single('receiptImage'), async (
     let receiptImages = [];
     if (req.file) receiptImages = [`/uploads/${req.file.filename}`];
     const ip = getClientIp(req);
-    const item = await addItem({ ...itemData, receipt_images: JSON.stringify(receiptImages) }, req.user.id, ip);
+    const item = await addItem({ ...itemData, receipt_images: JSON.stringify(receiptImages) }, req.user.id, ip, req.user.company);
     const parsedQuantity = parseInt(itemData.quantity, 10);
     const threshold = item.low_stock_threshold || 5;
     if (parsedQuantity <= threshold) {
@@ -2358,6 +2426,14 @@ app.post('/api/requests', authenticateToken, async (req, res) => {
         fieldErrors
       );
     }
+    const referenceConfig = await getWorkflowConfig();
+    if (isReferenceRequiredFor(requestType, referenceConfig.transport || {}) && linkedReferences.length === 0) {
+      return validationErrorResponse(
+        res,
+        'A linked reference is required before this request can be submitted.',
+        [{ field: 'linked_references', message: 'Link at least one ticket, project, or other request before submitting.' }]
+      );
+    }
     const requesterPermissionUser = await getFreshPermissionUser(req.user.id);
     if (!requesterPermissionUser) return res.status(401).json({ error: 'User not found' });
     if (
@@ -2369,7 +2445,7 @@ app.post('/api/requests', authenticateToken, async (req, res) => {
       ]);
     }
     const selectedIds = selectedApproverIds.map((id) => Number(id)).filter(Boolean);
-    const realm = await getRealmApprovers();
+    const realm = await getRealmApprovers(req.user.company || 'CW');
     const allowedIds = new Set(
       (requestType === 'cash_request' ? realm.cash_user_ids : realm.material_user_ids).map(Number)
     );
@@ -2492,9 +2568,9 @@ app.post('/api/requests', authenticateToken, async (req, res) => {
   }
 });
 
-app.get('/api/requests', authenticateToken, async (req, res) => {
+app.get('/api/requests', authenticateToken, attachTenant, async (req, res) => {
   try {
-    const requests = await getRequests(req.user.role, req.user.id);
+    const requests = await getRequests(req.user.role, req.user.id, req.company);
     res.json(requests);
   } catch (error) {
     console.error('Error fetching requests:', error.stack);
@@ -2691,10 +2767,8 @@ async function assertRequestDetailAccess(requestId, user) {
     err.status = 401;
     throw err;
   }
-  if (canBypassApprovalRestrictions(permissionUser)) return;
-
   const { rows } = await pool.query(
-    `SELECT r.id, r.type, r.created_by_id, r.created_by,
+    `SELECT r.id, r.type, r.created_by_id, r.created_by, r.company,
             EXISTS (
               SELECT 1 FROM request_approvers ra
               WHERE ra.request_id = r.id AND ra.approver_id = $2
@@ -2710,6 +2784,15 @@ async function assertRequestDetailAccess(requestId, user) {
     throw err;
   }
 
+  // Company scope: even a "sees everything" bypass below means "everything in my own
+  // company," not literally every tenant's data. Only a true System Admin (null company) skips this.
+  if (!isSystemAdminAccount(user) && (user.company || 'CW') !== request.company) {
+    const err = new Error('Request not found');
+    err.status = 404;
+    throw err;
+  }
+
+  if (canBypassApprovalRestrictions(permissionUser)) return;
   if (Number(request.created_by_id) === Number(user.id) || request.assigned_to_user) return;
   if (canReleaseCash(permissionUser) && request.type === 'cash_request') return;
   if (canExecuteMaterial(permissionUser) && request.type !== 'cash_request') return;
@@ -2923,4 +3006,11 @@ server.listen(port, '0.0.0.0', async () => {
   };
   void runTicketAutoAssign();
   setInterval(runTicketAutoAssign, 60 * 1000);
+
+  // Vobi Live Ops Feed — first sweep 30s after startup (lets the DB pool/tables settle),
+  // then every 15 minutes.
+  setTimeout(() => {
+    void runVobiFeedSweep();
+    setInterval(runVobiFeedSweep, 15 * 60 * 1000);
+  }, 30 * 1000);
 });

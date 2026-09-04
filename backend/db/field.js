@@ -19,4 +19,8 @@ export async function initFieldSchema(pool) {
   await pool.query(
     `CREATE INDEX IF NOT EXISTS idx_field_operations_updated ON field_operations (updated_at DESC)`
   );
+
+  // Multi-tenant — 'CW' default backfills every existing activity as C&W's.
+  const { addCompanyColumn } = await import('./tenant.js');
+  await addCompanyColumn('field_operations');
 }

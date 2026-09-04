@@ -27,6 +27,7 @@ const RealmPage = () => {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [selectedCompany, setSelectedCompany] = useState<'CW' | 'PTEL'>('CW');
 
   useEffect(() => {
     const role = String(user?.main_role || user?.role || '').trim().toLowerCase();
@@ -36,14 +37,18 @@ const RealmPage = () => {
       return;
     }
     load();
-  }, [navigate, user, isAdminSuper]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [navigate, user, isAdminSuper, selectedCompany]);
 
   const load = async () => {
     try {
       setLoading(true);
       setError(null);
-      const [userRows, realm] = await Promise.all([getUsers(), getRealmApprovers()]);
-      setUsers(userRows || []);
+      const [userRows, realm] = await Promise.all([
+        getUsers(),
+        getRealmApprovers(isAdminSuper ? selectedCompany : undefined),
+      ]);
+      setUsers((userRows || []).filter((u: any) => !isAdminSuper || (u.company || 'CW') === selectedCompany));
       setMaterialIds(realm.material_user_ids || []);
       setCashIds(realm.cash_user_ids || []);
       setTransportIds(realm.transport_approver_ids || []);
@@ -107,7 +112,7 @@ const RealmPage = () => {
         transport_supervisor_ids: nextTransportSupervisor,
         vehicle_request_approver_ids: nextVehicle,
         finance_user_ids: nextFinance,
-      });
+      }, isAdminSuper ? selectedCompany : undefined);
       setMaterialIds(saved.material_user_ids || nextMaterial);
       setCashIds(saved.cash_user_ids || nextCash);
       setTransportIds(saved.transport_approver_ids || nextTransport);
@@ -314,16 +319,31 @@ const RealmPage = () => {
 
   return (
     <div className="mx-auto max-w-6xl p-6">
-      <div className="mb-6 flex items-start gap-3">
-        <Landmark className="mt-0.5 h-9 w-9 text-[var(--primary)]" />
-        <div>
-          <h1 className="text-2xl font-bold text-[var(--text-primary)]">Realm</h1>
-          <p className="mt-1 text-sm text-[var(--text-secondary)]">
-            Choose who can approve material and cash requests. Unit and position do not matter. Added to Material only
-            → Material Approvals. Added to Cash only → Cash Approvals. Added to both → both. Directors, Finance, and
-            Issuers keep their existing access.
-          </p>
+      <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="flex items-start gap-3">
+          <Landmark className="mt-0.5 h-9 w-9 text-[var(--primary)]" />
+          <div>
+            <h1 className="text-2xl font-bold text-[var(--text-primary)]">Realm</h1>
+            <p className="mt-1 text-sm text-[var(--text-secondary)]">
+              Choose who can approve material and cash requests. Unit and position do not matter. Added to Material only
+              → Material Approvals. Added to Cash only → Cash Approvals. Added to both → both. Directors, Finance, and
+              Issuers keep their existing access.
+            </p>
+          </div>
         </div>
+        {isAdminSuper && (
+          <div className="flex items-center gap-2">
+            <label className="text-xs font-medium text-[var(--text-muted)]">Company</label>
+            <select
+              value={selectedCompany}
+              onChange={(e) => setSelectedCompany(e.target.value as 'CW' | 'PTEL')}
+              className="h-9 rounded-[var(--radius-sm)] border border-[var(--border-strong)] bg-[var(--surface)] px-3 text-sm text-[var(--text-primary)]"
+            >
+              <option value="CW">C&amp;W</option>
+              <option value="PTEL">PTEL</option>
+            </select>
+          </div>
+        )}
       </div>
 
       {error && (

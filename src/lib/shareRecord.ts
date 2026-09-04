@@ -14,6 +14,7 @@ import {
   Users as UsersIcon,
   Wallet,
   Wrench,
+  Paperclip,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -37,6 +38,7 @@ const RECORD_ICONS: Record<string, LucideIcon> = {
   maintenance: Wrench,
   wip_entry: ListTodo,
   ip_circuit: Cable,
+  archive_file: Paperclip,
 };
 
 export function iconForRecordType(recordType: string): LucideIcon {

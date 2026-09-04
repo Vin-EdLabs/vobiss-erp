@@ -24,12 +24,14 @@ export function invalidateAllCache() {
 }
 
 export function invalidateVobiData(userId) {
-  invalidateCache('global');
   if (userId != null && userId !== '') {
     invalidateCache(`user_${userId}`);
   }
+  // The global ERP snapshot is cached per company (see vobiDataService.js's fetchGlobalData) —
+  // 'global_CW', 'global_PTEL', 'global_ALL' (System Admin), etc. — so every variant must be
+  // dropped, not just a literal 'global' key that no longer exists.
   for (const key of [...cache.keys()]) {
-    if (String(key).startsWith('role_')) cache.delete(key);
+    if (String(key).startsWith('role_') || String(key).startsWith('global_') || key === 'global') cache.delete(key);
   }
 }
 

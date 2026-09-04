@@ -6,6 +6,7 @@ import multer from 'multer';
 import pool, { getWorkflowConfig, createNotification } from '../db.js';
 import { authenticateToken } from '../middleware/auth.js';
 import { authenticateOrShareToken } from '../middleware/shareAuth.js';
+import { attachTenant } from '../middleware/tenant.js';
 import { isSystemAdminAccount, userHasAnyRole } from '../roles.js';
 import { resolveReferenceInput, attachReference, isReferenceRequired, isReferenceRequiredFor } from '../services/referenceLink.js';
 import { getRecordSummary } from '../services/referenceRegistry.js';
@@ -86,6 +87,9 @@ router.get('/:id', authenticateOrShareToken('fuel_request', authenticateToken), 
     }
 
     const request = reqRes.rows[0];
+    if (!req.isSharedView && !isSystemAdminAccount(req.user) && (req.user.company || 'CW') !== request.company) {
+      return res.status(404).json({ error: 'Fuel request not found' });
+    }
 
     const approvalsRes = await pool.query(
       `SELECT * FROM fuel_request_approvals WHERE request_id = $1 ORDER BY created_at ASC`,
@@ -295,8 +299,9 @@ router.post('/', async (req, res) => {
         vehicle_plate, fuel_type, quantity_litres, price_per_litre,
         estimated_amount, purpose, selected_approver_ids,
         reference_type, reference_number, reference_title, reference_id, reference_status,
-        status, current_stage
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14::jsonb, $15, $16, $17, $18, $19, 'Pending', 'approver')
+        status, current_stage, company
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14::jsonb, $15, $16, $17, $18, $19, 'Pending', 'approver',
+        COALESCE((SELECT company FROM users WHERE id = $2), 'CW'))
       RETURNING *`,
       [
         refNo,
@@ -360,7 +365,7 @@ router.post('/', async (req, res) => {
 });
 
 // GET /api/transport/fuel-requests
-router.get('/', async (req, res) => {
+router.get('/', attachTenant, async (req, res) => {
   try {
     const { finance_queue, tab } = req.query;
     const config = await getWorkflowConfig();
@@ -379,6 +384,11 @@ router.get('/', async (req, res) => {
       WHERE fr.deleted_at IS NULL`;
     const params = [];
 
+    if (req.company) {
+      params.push(req.company);
+      query += ` AND fr.company = $${params.length}`;
+    }
+
     if (finance_queue === 'true') {
       if (tab === 'pending_cash') {
         query += ` AND fr.current_stage = 'finance_cash'`;
@@ -395,17 +405,18 @@ router.get('/', async (req, res) => {
       const isSupervisor = Number(transportConfig.supervisor_id) === userId;
       const isFinance = (transportConfig.finance_user_ids || []).map(Number).includes(userId) || userRole === 'finance';
 
-      const conditions = [`fr.requester_id = $1`];
       params.push(userId);
+      const userIdParam = params.length;
+      const conditions = [`fr.requester_id = $${userIdParam}`];
 
       if (isApprover) {
         conditions.push(`fr.current_stage = 'approver'`);
-        conditions.push(`EXISTS (SELECT 1 FROM fuel_request_approvals a WHERE a.request_id = fr.id AND a.approver_id = $1)`);
-        conditions.push(`COALESCE(fr.selected_approver_ids, '[]'::jsonb) @> to_jsonb($1::int)`);
+        conditions.push(`EXISTS (SELECT 1 FROM fuel_request_approvals a WHERE a.request_id = fr.id AND a.approver_id = $${userIdParam})`);
+        conditions.push(`COALESCE(fr.selected_approver_ids, '[]'::jsonb) @> to_jsonb($${userIdParam}::int)`);
       }
       if (isSupervisor) {
         conditions.push(`fr.current_stage = 'supervisor' OR fr.status IN ('Approved by Approver', 'Approved by Supervisor', 'Approved')`);
-        conditions.push(`EXISTS (SELECT 1 FROM fuel_request_approvals a WHERE a.request_id = fr.id AND a.approver_id = $1)`);
+        conditions.push(`EXISTS (SELECT 1 FROM fuel_request_approvals a WHERE a.request_id = fr.id AND a.approver_id = $${userIdParam})`);
       }
       if (isFinance) {
         conditions.push(`fr.current_stage IN ('finance_cash', 'awaiting_receipt', 'finance_completed', 'completed')`);

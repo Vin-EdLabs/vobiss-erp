@@ -1,7 +1,9 @@
 // src/pages/finance/CashRequestForm.tsx
 import React, { useState, useEffect } from 'react';
 import { Plus, Search, Clock, CheckCircle, DollarSign, XCircle, Users, FileText } from 'lucide-react';
-import { getApprovers, createCashRequest, getRequests } from '../../api';
+import { getApprovers, createCashRequest, getRequests, getWorkflowConfig } from '../../api';
+import { ReferenceLinkPicker } from '@/components/references/ReferenceLinkPicker';
+import type { ReferenceSummary } from '@/lib/referenceRegistry';
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -65,6 +67,8 @@ const CashRequestForm: React.FC = () => {
   const [lineItems, setLineItems] = useState([
     { description: '', qty: '', unitPrice: '', total: '0' }
   ]);
+  const [linkedReferences, setLinkedReferences] = useState<ReferenceSummary[]>([]);
+  const [requireReference, setRequireReference] = useState(false);
 
   useVobiSection({
     id: 'cash-request-form',
@@ -108,6 +112,12 @@ const CashRequestForm: React.FC = () => {
   useEffect(() => {
     Promise.all([loadApprovers(), loadRequests()]);
   }, [user]);
+
+  useEffect(() => {
+    getWorkflowConfig()
+      .then((workflow: any) => setRequireReference(Boolean(workflow?.transport?.require_reference_link_cash)))
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     filterRequests();
@@ -236,6 +246,22 @@ const CashRequestForm: React.FC = () => {
       return;
     }
 
+    if (requireReference && linkedReferences.length === 0) {
+      vobiAmbientStore.getState().setExactIssue({
+        title: 'Reference link is required',
+        body: 'This cash request needs at least one linked reference before it can be submitted.',
+        formKey: 'cash-request',
+        fieldErrors: [{
+          field: 'linkedReferences',
+          label: 'Linked Reference',
+          message: 'Link a ticket, project, or other request before submitting.',
+        }],
+        action: 'Show me',
+      });
+      setSubmitting(false);
+      return;
+    }
+
     if (!formData.purpose.trim()) {
       vobiAmbientStore.getState().setExactIssue({
         title: 'Purpose is required',
@@ -276,6 +302,7 @@ const CashRequestForm: React.FC = () => {
     const requestData = {
       ...formData,
       totalAmount: parseFloat(calculateTotal()),
+      linked_references: linkedReferences.map((ref) => ({ type: ref.type, id: ref.id })),
     };
 
     try {
@@ -284,14 +311,15 @@ const CashRequestForm: React.FC = () => {
       setIsFormOpen(false);
       loadRequests();
       setLineItems([{ description: '', qty: '', unitPrice: '', total: '0' }]);
-      setFormData(prev => ({ 
-        ...prev, 
-        purpose: '', 
-        deliverTo: '', 
-        deliverPhone: '', 
-        department: '', 
-        dateNeeded: '', 
-        specialInstructions: '' 
+      setLinkedReferences([]);
+      setFormData(prev => ({
+        ...prev,
+        purpose: '',
+        deliverTo: '',
+        deliverPhone: '',
+        department: '',
+        dateNeeded: '',
+        specialInstructions: ''
       }));
     } catch (error: any) {
       toast({ title: "Error", description: error.message || "Submission failed", variant: "destructive" });

@@ -17,11 +17,15 @@ export function AttachmentZone({
   stage,
   onUpload,
   allowUpload = true,
+  size = 'default',
 }: {
   attachments: ProjectRequestAttachment[];
   stage?: string;
   onUpload?: (file: File) => Promise<void>;
   allowUpload?: boolean;
+  /** 'large' shows images big and uncropped (e.g. survey photos Sales needs to actually read),
+   *  instead of the small cropped thumbnail grid used for general-purpose record attachments. */
+  size?: 'default' | 'large';
 }) {
   const [uploading, setUploading] = useState(false);
   const [drag, setDrag] = useState(false);
@@ -92,11 +96,47 @@ export function AttachmentZone({
       )}
 
       {list.length > 0 ? (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <div className={size === 'large' ? 'space-y-6' : 'grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3'}>
           {list.map((att) => {
             const url = projectRequestFileUrl(att.file_path);
             const isImage = isImageFile(att.mime_type, att.file_name);
             const isPdf = isPdfFile(att.mime_type, att.file_name);
+
+            // Large + image: no card chrome, just a big, clean image — capped so it stays
+            // readable on screen (not stretched to whatever the container's full width is), with
+            // a small preview button to pop it open at true full size.
+            if (size === 'large' && isImage) {
+              return (
+                <div key={att.id} className="group relative space-y-1.5">
+                  <div className="relative overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--surface-secondary)] shadow-[var(--shadow-md)]">
+                    <img
+                      src={url}
+                      alt={att.file_name}
+                      className="mx-auto max-h-[480px] w-auto max-w-full object-contain"
+                      onError={(e) => {
+                        (e.target as HTMLImageElement).style.display = 'none';
+                      }}
+                    />
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      className="absolute bottom-2 right-2 h-8 shadow-[var(--shadow-md)]"
+                      onClick={() => setPreviewUrl(url)}
+                    >
+                      <Eye className="mr-1 h-3.5 w-3.5" />
+                      Preview
+                    </Button>
+                  </div>
+                  <div className="flex flex-wrap items-center justify-between gap-2 px-0.5 text-xs text-[var(--text-muted)]">
+                    <span className="truncate">{att.file_name} · {att.uploader_name} · {new Date(att.created_at).toLocaleDateString()}</span>
+                    <a href={url} target="_blank" rel="noopener noreferrer" className="shrink-0 font-medium text-[var(--primary)] hover:underline">
+                      Open full size
+                    </a>
+                  </div>
+                </div>
+              );
+            }
 
             return (
               <div

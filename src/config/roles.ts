@@ -33,6 +33,14 @@ export const ALL_STAFF_ROLES = [
   'relationship_officer',
   'customer',
   'hr',
+  // PTEL (multi-tenant)
+  'ptel_sales',
+  'ptel_cx_manager',
+  'ptel_finance',
+  'ptel_hr_admin',
+  'ptel_data',
+  'ptel_service_delivery',
+  'ptel_executive',
 ] as const;
 
 export type StaffRole = (typeof ALL_STAFF_ROLES)[number];

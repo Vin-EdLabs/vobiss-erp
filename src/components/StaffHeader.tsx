@@ -14,7 +14,10 @@ import {
   Clock,
   BookOpen,
   Share2,
+  RadioTower,
 } from 'lucide-react';
+import { VobiLiveOpsPanel } from '@/components/VobiLiveOpsPanel';
+import { getVobiFeed } from '@/api/vobiFeed';
 import { useQueryClient } from '@tanstack/react-query';
 import { timeOfDayGreeting } from '@/components/ui/greeting-banner';
 import { TodoPanel } from '@/components/todos/TodoPanel';
@@ -117,6 +120,9 @@ const StaffHeader: React.FC<StaffHeaderProps> = ({
   const unreadCount = notifUnread + chatUnread;
   const [now, setNow] = useState(() => new Date());
   const [notifOpen, setNotifOpen] = useState(false);
+  const [liveOpsOpen, setLiveOpsOpen] = useState(false);
+  const [liveOpsUnread, setLiveOpsUnread] = useState(0);
+  const [liveOpsSeverity, setLiveOpsSeverity] = useState<'green' | 'amber' | 'red'>('green');
   const [accountOpen, setAccountOpen] = useState(false);
   const [manualOpen, setManualOpen] = useState(false);
   const [manualTime, setManualTime] = useState(() => {
@@ -197,6 +203,49 @@ const StaffHeader: React.FC<StaffHeaderProps> = ({
   useEffect(() => {
     void setAppBadge(unreadCount);
   }, [unreadCount]);
+
+  // Live Ops severity — SLA BREACH means red, unassigned/escalated means amber, else green.
+  const liveOpsSeverityFor = (text: string): 'green' | 'amber' | 'red' => {
+    if (text.includes('SLA BREACH')) return 'red';
+    const lower = text.toLowerCase();
+    if (lower.includes('unassigned') || lower.includes('escalated')) return 'amber';
+    return 'green';
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+    getVobiFeed('CW')
+      .then(({ entries }) => {
+        if (!cancelled && entries[0]) setLiveOpsSeverity(liveOpsSeverityFor(entries[0].narrated_text));
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    const onFeedUpdate = (e: Event) => {
+      const detail = (e as CustomEvent<{ narrated_text?: string }>).detail;
+      if (!detail?.narrated_text) return;
+      setLiveOpsSeverity(liveOpsSeverityFor(detail.narrated_text));
+      if (!liveOpsOpen) setLiveOpsUnread((prev) => prev + 1);
+    };
+    window.addEventListener('vobi:feed-update', onFeedUpdate);
+    return () => window.removeEventListener('vobi:feed-update', onFeedUpdate);
+  }, [liveOpsOpen]);
+
+  const openLiveOps = () => {
+    setLiveOpsOpen(true);
+    setLiveOpsUnread(0);
+  };
+
+  const liveOpsDotClass =
+    liveOpsSeverity === 'red'
+      ? 'bg-[var(--accent-red)]'
+      : liveOpsSeverity === 'amber'
+        ? 'bg-[var(--accent-amber)]'
+        : 'bg-[var(--accent-green)]';
 
   const roleLabel =
     (isAdminSuperAccount(user) ? SYSTEM_ADMIN_LABEL : '') ||
@@ -300,6 +349,7 @@ const StaffHeader: React.FC<StaffHeaderProps> = ({
   const timeLabel = now.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
 
   return (
+    <>
     <header
       className="staff-topbar sticky top-0 z-30 flex h-[var(--topbar-height)] shrink-0 items-center gap-1 overflow-visible border-b border-[var(--topbar-border)] bg-[var(--topbar-bg)] px-3 text-[var(--text-primary)] sm:gap-3 sm:px-5"
       style={{ paddingTop: 'env(safe-area-inset-top)' }}
@@ -334,6 +384,24 @@ const StaffHeader: React.FC<StaffHeaderProps> = ({
             <BellOff className="h-[17px] w-[17px]" />
           </button>
         )}
+        <button
+          type="button"
+          onClick={openLiveOps}
+          className={cn(iconBtn, 'relative')}
+          aria-label="Live Ops"
+          title="Vobi Live Ops Feed"
+        >
+          <RadioTower className="h-[17px] w-[17px]" />
+          <span
+            className={cn('absolute right-0.5 top-0.5 h-2 w-2 animate-pulse rounded-full ring-2 ring-[var(--topbar-bg)]', liveOpsDotClass)}
+            aria-hidden="true"
+          />
+          {liveOpsUnread > 0 && (
+            <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-[var(--accent-red)] px-1 text-[9px] font-bold text-white">
+              {liveOpsUnread > 9 ? '9+' : liveOpsUnread}
+            </span>
+          )}
+        </button>
         <Popover open={notifOpen} onOpenChange={setNotifOpen}>
           <PopoverTrigger asChild>
             <button type="button" className={cn(iconBtn, 'relative')} aria-label="Notifications">
@@ -534,6 +602,8 @@ const StaffHeader: React.FC<StaffHeaderProps> = ({
         </DialogContent>
       </Dialog>
     </header>
+    <VobiLiveOpsPanel open={liveOpsOpen} onClose={() => setLiveOpsOpen(false)} />
+    </>
   );
 };
 

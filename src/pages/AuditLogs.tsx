@@ -2,8 +2,11 @@
 import React, { useState, useEffect } from 'react';
 import { getAuditLogs } from '../api';
 import * as XLSX from 'xlsx';
+import { useAuth } from '../context/AuthContext';
+import { COMPANY_LABELS } from '../hooks/useCompany';
 
 const AuditLogs = () => {
+  const { isAdminSuper } = useAuth();
   const [logs, setLogs] = useState([]);
   const [filteredLogs, setFilteredLogs] = useState([]);
   const [paginatedLogs, setPaginatedLogs] = useState([]);
@@ -11,6 +14,7 @@ const AuditLogs = () => {
   const [error, setError] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedUser, setSelectedUser] = useState('All');
+  const [selectedCompany, setSelectedCompany] = useState('All');
   const [sortBy, setSortBy] = useState('user');
   const [loginStats, setLoginStats] = useState({ totalToday: 0, usersToday: {} });
   const [filterDate, setFilterDate] = useState(() => new Date().toLocaleDateString('en-CA'));
@@ -292,6 +296,10 @@ const AuditLogs = () => {
       filtered = filtered.filter(log => (log.full_name || log.username || (log.user_id ? `Deleted User (${log.user_id})` : 'Anonymous')) === selectedUser);
     }
 
+    if (isAdminSuper && selectedCompany !== 'All') {
+      filtered = filtered.filter(log => (log.company || 'CW') === selectedCompany);
+    }
+
     filtered.sort((a, b) => {
       if (sortBy === 'timestamp') {
         return parseTimestamp(b.timestamp).getTime() - parseTimestamp(a.timestamp).getTime();
@@ -305,7 +313,7 @@ const AuditLogs = () => {
 
     setFilteredLogs(filtered);
     setCurrentPage(1);
-  }, [logs, searchTerm, selectedUser, sortBy, showAll, filterDate]);
+  }, [logs, searchTerm, selectedUser, selectedCompany, isAdminSuper, sortBy, showAll, filterDate]);
 
   useEffect(() => {
     const totalPages = Math.ceil(filteredLogs.length / pageSize);
@@ -466,7 +474,22 @@ const AuditLogs = () => {
 
       {/* Filters */}
       <div className="bg-white rounded-xl shadow-[var(--shadow-md)] border border-gray-200 p-6 mb-6">
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <div className={`grid grid-cols-1 gap-4 ${isAdminSuper ? 'md:grid-cols-5' : 'md:grid-cols-4'}`}>
+          {isAdminSuper && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Company</label>
+              <select
+                value={selectedCompany}
+                onChange={(e) => setSelectedCompany(e.target.value)}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              >
+                <option value="All">All</option>
+                {Object.entries(COMPANY_LABELS).map(([slug, label]) => (
+                  <option key={slug} value={slug}>{label}</option>
+                ))}
+              </select>
+            </div>
+          )}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">Search</label>
             <input

@@ -416,16 +416,22 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
       window.dispatchEvent(new CustomEvent('chat:unread-changed'));
     };
 
+    const onVobiFeedUpdate = (payload: unknown) => {
+      window.dispatchEvent(new CustomEvent('vobi:feed-update', { detail: payload }));
+    };
+
     socket.on('connect', onConnect);
     socket.on('disconnect', onDisconnect);
     socket.on(CHANNEL, onPayload);
     socket.on('new_message', onNewMessage);
+    socket.on('vobi:feed-update', onVobiFeedUpdate);
 
     return () => {
       socket.off('connect', onConnect);
       socket.off('disconnect', onDisconnect);
       socket.off(CHANNEL, onPayload);
       socket.off('new_message', onNewMessage);
+      socket.off('vobi:feed-update', onVobiFeedUpdate);
       socket.disconnect();
       if (socketRef.current === socket) socketRef.current = null;
     };

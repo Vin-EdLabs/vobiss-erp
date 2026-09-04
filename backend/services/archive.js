@@ -43,6 +43,7 @@ export async function ensureArchiveTables() {
       extension VARCHAR(20),
       size_bytes BIGINT,
       file_path TEXT NOT NULL,
+      thumbnail_path TEXT,
       uploaded_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
       created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
@@ -66,6 +67,13 @@ export async function ensureArchiveTables() {
     `);
   } catch (e) {
     console.warn('archive_folders scope migration:', e.message);
+  }
+
+  // Migration-safe widening for installs that predate thumbnails.
+  try {
+    await pool.query(`ALTER TABLE archive_files ADD COLUMN IF NOT EXISTS thumbnail_path TEXT`);
+  } catch (e) {
+    console.warn('archive_files thumbnail_path migration:', e.message);
   }
 
   tableReady = true;
@@ -119,6 +127,15 @@ export function canManageFolder(user, folder) {
   if (isAdminTier(user)) return true;
   if (folder.scope === 'unit') return isUnitManagerOf(user, folder.unit_slug) || folder.created_by === user.id;
   return folder.created_by === user.id;
+}
+
+/** Whether `user` may drop a shared copy of a file into `folder` — deliberately looser than
+ * canViewFolder/canManageFolder: this is what lets one department share a file into another
+ * department's folder. Private folders are still an absolute exception — never a target
+ * unless it's your own. */
+export function canCopyIntoFolder(user, folder) {
+  if (folder.scope === 'private') return folder.created_by === user.id;
+  return isArchiveStaff(user);
 }
 
 export function extensionOf(filename) {
@@ -255,6 +272,7 @@ export async function listFiles(user, folderId, { q, page = 1, limit = 30 } = {}
   const countResult = await pool.query(`SELECT COUNT(*) FROM archive_files af WHERE ${where}`, params);
   const result = await pool.query(
     `SELECT af.id, af.folder_id, af.original_name, af.display_name, af.mime_type, af.extension, af.size_bytes, af.uploaded_by, af.created_at,
+            (af.thumbnail_path IS NOT NULL) AS has_thumbnail,
             COALESCE(NULLIF(trim(concat_ws(' ', u.first_name, u.last_name)), ''), u.username) AS uploaded_by_name
      FROM archive_files af
      LEFT JOIN users u ON u.id = af.uploaded_by
@@ -273,12 +291,12 @@ export async function getFile(id) {
   return r.rows[0] || null;
 }
 
-export async function recordUpload(user, folderId, { originalName, displayName, mimeType, extension, sizeBytes, filePath }) {
+export async function recordUpload(user, folderId, { originalName, displayName, mimeType, extension, sizeBytes, filePath, thumbnailPath }) {
   await ensureArchiveTables();
   const result = await pool.query(
-    `INSERT INTO archive_files (folder_id, original_name, display_name, mime_type, extension, size_bytes, file_path, uploaded_by)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
-    [folderId, originalName, displayName || originalName, mimeType || null, extension || null, sizeBytes || null, filePath, user.id]
+    `INSERT INTO archive_files (folder_id, original_name, display_name, mime_type, extension, size_bytes, file_path, thumbnail_path, uploaded_by)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
+    [folderId, originalName, displayName || originalName, mimeType || null, extension || null, sizeBytes || null, filePath, thumbnailPath || null, user.id]
   );
   return result.rows[0];
 }
@@ -316,4 +334,41 @@ export async function deleteFile(user, id) {
   if (!canManageFile(user, file, folder)) throw new Error('You do not have permission to delete this file');
   await pool.query(`DELETE FROM archive_files WHERE id = $1`, [id]);
   return file;
+}
+
+// ---------------------------------------------------------------------------
+// Cross-department sharing (copy a file's metadata into another folder — same
+// bytes on disk, no extra storage or upload).
+// ---------------------------------------------------------------------------
+
+/** Every global/unit folder in the system, for the "share to another folder" picker.
+ * Private folders never appear here — this is deliberately the one place folder names
+ * cross department lines, so it must never leak a private folder's existence. */
+export async function listShareableFolders(user) {
+  await ensureArchiveTables();
+  if (!isArchiveStaff(user)) return [];
+  const result = await pool.query(
+    `SELECT id, name, scope, unit_slug FROM archive_folders WHERE scope IN ('global','unit') ORDER BY scope ASC, name ASC`
+  );
+  return result.rows;
+}
+
+export async function copyFileToFolder(user, fileId, targetFolderId) {
+  await ensureArchiveTables();
+  const file = await getFile(fileId);
+  if (!file) throw new Error('File not found');
+  const sourceFolder = await getFolder(file.folder_id);
+  if (!sourceFolder || !canViewFolder(user, sourceFolder)) throw new Error('You do not have access to this file');
+
+  const targetFolder = await getFolder(targetFolderId);
+  if (!targetFolder) throw new Error('Target folder not found');
+  if (targetFolder.id === file.folder_id) throw new Error('This file is already in that folder');
+  if (!canCopyIntoFolder(user, targetFolder)) throw new Error('You do not have permission to share into this folder');
+
+  const result = await pool.query(
+    `INSERT INTO archive_files (folder_id, original_name, display_name, mime_type, extension, size_bytes, file_path, thumbnail_path, uploaded_by)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
+    [targetFolder.id, file.original_name, file.display_name, file.mime_type, file.extension, file.size_bytes, file.file_path, file.thumbnail_path, user.id]
+  );
+  return result.rows[0];
 }

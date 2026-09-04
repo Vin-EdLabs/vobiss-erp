@@ -152,20 +152,25 @@ export function canCreateCashRequest() {
   return true;
 }
 
-let realmMaterialIds = new Set();
-let realmCashIds = new Set();
+// Keyed by company so a PTEL approver and a C&W approver can be cached side by side without
+// either company's list clobbering the other's — each request is checked against the acting
+// user's own company bucket, never a single shared list.
+const realmMaterialIdsByCompany = new Map();
+const realmCashIdsByCompany = new Map();
 
-export function setRealmApproverIds({ material_user_ids = [], cash_user_ids = [] } = {}) {
-  realmMaterialIds = new Set((material_user_ids || []).map(Number).filter(Boolean));
-  realmCashIds = new Set((cash_user_ids || []).map(Number).filter(Boolean));
+export function setRealmApproverIds({ material_user_ids = [], cash_user_ids = [] } = {}, company = 'CW') {
+  realmMaterialIdsByCompany.set(company, new Set((material_user_ids || []).map(Number).filter(Boolean)));
+  realmCashIdsByCompany.set(company, new Set((cash_user_ids || []).map(Number).filter(Boolean)));
 }
 
 export function isRealmMaterialApprover(user) {
-  return realmMaterialIds.has(Number(user?.id));
+  const set = realmMaterialIdsByCompany.get(user?.company || 'CW');
+  return set ? set.has(Number(user?.id)) : false;
 }
 
 export function isRealmCashApprover(user) {
-  return realmCashIds.has(Number(user?.id));
+  const set = realmCashIdsByCompany.get(user?.company || 'CW');
+  return set ? set.has(Number(user?.id)) : false;
 }
 
 export function canApproveMaterialRequest(user) {
@@ -181,9 +186,13 @@ export function canApproveCashRequest(user) {
 
 export function canExecuteMaterial(user) {
   if (canBypassApprovalRestrictions(user)) return true;
+  // Anyone in the Procurement unit sees/executes material requests, regardless of their exact
+  // job title — the old AND-of-unit-and-position check silently locked out anyone whose
+  // position string wasn't one of the four exact matches below (e.g. "Procurement Manager").
+  // The position list still covers stock/store roles that sit outside the Procurement unit.
   const hasProcurementUnit = normalizedUnits(user).includes('procurement');
   const hasExecutionPosition = normalizedPositions(user).some((position) => MATERIAL_EXECUTION_POSITIONS.has(position));
-  return hasProcurementUnit && hasExecutionPosition;
+  return hasProcurementUnit || hasExecutionPosition;
 }
 
 export function canReleaseCash(user) {

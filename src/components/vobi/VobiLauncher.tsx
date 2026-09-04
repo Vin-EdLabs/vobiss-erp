@@ -3,6 +3,7 @@ import { cn } from '@/lib/utils';
 import { useVobi } from '@/context/VobiContext';
 import { useVobiOverview } from '@/hooks/useVobiOverview';
 import { useVobiAmbientStore } from '@/stores/vobiAmbientStore';
+import { useVobiLiveOpsStore } from '@/stores/vobiLiveOpsStore';
 
 interface VobiLauncherProps {
   theme: 'light' | 'dark';
@@ -10,6 +11,7 @@ interface VobiLauncherProps {
 
 export function VobiLauncher({ theme: _theme }: VobiLauncherProps) {
   const { isOpen, toggle } = useVobi();
+  const liveOpsOpen = useVobiLiveOpsStore((state) => state.open);
   const ambientMode = useVobiAmbientStore((state) => state.mode);
   const ambientOpen = useVobiAmbientStore((state) => state.isOpen);
   const openAmbient = useVobiAmbientStore((state) => state.open);
@@ -46,7 +48,7 @@ export function VobiLauncher({ theme: _theme }: VobiLauncherProps) {
         'bg-[#111827]',
         'transition-transform duration-200 hover:scale-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#5DCAA5]/70',
         (hasPending || hasAmbientNotice) && !isOpen && 'vobi-attention-ring',
-        isOpen && 'pointer-events-none opacity-0'
+        (isOpen || liveOpsOpen) && 'pointer-events-none opacity-0'
       )}
     >
       <style>{`

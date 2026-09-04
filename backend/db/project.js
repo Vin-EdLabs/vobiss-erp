@@ -151,6 +151,16 @@ async function runInitProjectRequestTables() {
   await pool.query(`ALTER TABLE project_requests ADD COLUMN IF NOT EXISTS design_assigned_to INTEGER REFERENCES users(id) ON DELETE SET NULL;`);
   await pool.query(`ALTER TABLE project_requests ADD COLUMN IF NOT EXISTS design_assigned_name VARCHAR(255);`);
   await pool.query(`ALTER TABLE project_requests ADD COLUMN IF NOT EXISTS design_assigned_at TIMESTAMP;`);
+  // Remembers who last worked the Design stage even after submitDesignRequest clears
+  // design_assigned_to (so the request reads "unclaimed" while it's with Sales for review) —
+  // rejectSalesReview restores design_assigned_to from these when it bounces the request back,
+  // so it lands straight back on the same person instead of the general unclaimed queue.
+  await pool.query(`ALTER TABLE project_requests ADD COLUMN IF NOT EXISTS last_design_assigned_to INTEGER REFERENCES users(id) ON DELETE SET NULL;`);
+  await pool.query(`ALTER TABLE project_requests ADD COLUMN IF NOT EXISTS last_design_assigned_name VARCHAR(255);`);
+
+  // Multi-tenant — 'CW' default backfills every existing request as C&W's.
+  const { addCompanyColumn } = await import('./tenant.js');
+  await addCompanyColumn('project_requests');
 
   // Service Request -> WIP auto-sync — each confirmed SR keeps a mirrored WIP row (see
   // services/wipSync.js) and, once linked, shares its real chat channel with the WIP row too.
@@ -205,6 +215,7 @@ async function runInitProjectRequestTables() {
     );
   `);
   await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_one_design_primary ON design_materials ((is_primary_input)) WHERE is_primary_input;`);
+  await seedDefaultDesignMaterials();
   await pool.query(`
     CREATE TABLE IF NOT EXISTS project_request_design_materials (
       id SERIAL PRIMARY KEY,
@@ -216,6 +227,35 @@ async function runInitProjectRequestTables() {
       quantity DECIMAL(14,4) NOT NULL DEFAULT 0,
       line_cost DECIMAL(14,2) NOT NULL DEFAULT 0,
       calculation_formula TEXT
+    );
+  `);
+
+  // Fixed formula-driven BOM calculator settings — see getDesignEngineeringSettings() /
+  // updateDesignEngineeringSettings() below and computeDesignBom() on the frontend
+  // (src/lib/designBom.ts) for the actual formulas these numbers feed.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS design_engineering_settings (
+      id SERIAL PRIMARY KEY,
+      company VARCHAR(20) NOT NULL DEFAULT 'CW' UNIQUE,
+      pole_span_m DECIMAL(10,2) NOT NULL DEFAULT 45,
+      bracket_ratio DECIMAL(10,4) NOT NULL DEFAULT 0.40,
+      tension_termination_allowance DECIMAL(10,2) NOT NULL DEFAULT 1,
+      steel_banding_ratio DECIMAL(10,4) NOT NULL DEFAULT 1.5,
+      buckle_ratio DECIMAL(10,4) NOT NULL DEFAULT 1.0,
+      default_fat_allocation DECIMAL(10,2) NOT NULL DEFAULT 1,
+      default_9m_replacement_poles DECIMAL(10,2) NOT NULL DEFAULT 8,
+      default_11m_road_crossing_poles DECIMAL(10,2) NOT NULL DEFAULT 8,
+      default_duc_segment_m DECIMAL(10,2) NOT NULL DEFAULT 300,
+      rate_adss_cable DECIMAL(14,2) NOT NULL DEFAULT 1.00,
+      rate_duc_ducting DECIMAL(14,2) NOT NULL DEFAULT 1.00,
+      rate_drop_cable DECIMAL(14,2) NOT NULL DEFAULT 1.50,
+      rate_bracket DECIMAL(14,2) NOT NULL DEFAULT 0,
+      rate_clamp DECIMAL(14,2) NOT NULL DEFAULT 0,
+      rate_banding DECIMAL(14,2) NOT NULL DEFAULT 0,
+      rate_buckle DECIMAL(14,2) NOT NULL DEFAULT 0,
+      rate_fat DECIMAL(14,2) NOT NULL DEFAULT 0,
+      rate_pole DECIMAL(14,2) NOT NULL DEFAULT 0,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
   `);
 
@@ -501,7 +541,7 @@ export async function listProjectRequests({
   const { rows } = await pool.query(
     `SELECT pr.id, pr.customer_name, pr.site_name, pr.region, pr.status, pr.current_stage,
             pr.created_at, pr.updated_at, pr.project_unit_name, pr.created_by_name,
-            pr.chat_channel_id
+            pr.chat_channel_id, pr.circuit_id
      FROM project_requests pr
      ${where}
      ORDER BY ${sortCol} ${sortDir}`,
@@ -583,6 +623,41 @@ export async function getProjectRequestById(id) {
   };
 }
 
+// The BOM calculator's 13 line items, listed here so they're visible in Settings → Design
+// Configuration → Legacy Materials Catalog too (for admins pricing them out), not just computed
+// on the fly. Prices start at 0 — deliberately left for a later pass; the calculation_formula
+// column is documentation only here (the live calculator in src/lib/designBom.ts is what
+// actually runs the numbers for real requests). Only seeds when the catalog is completely empty,
+// so it never overwrites materials an admin already configured.
+const DEFAULT_DESIGN_MATERIALS = [
+  { name: 'ADSS Cable', unit: 'm', formula: 'ADSS Distance (entered directly by Design)' },
+  { name: 'Drop Cable', unit: 'm', formula: 'Drop Cable Distance (entered directly by Design)' },
+  { name: 'DUC (Underground Ducting)', unit: 'm', formula: 'Default Underground DUC Segment (Settings)' },
+  { name: 'Usable Poles (ADSS + Drop)', unit: 'pcs', formula: 'CEIL(ADSS Distance / Pole Span) + CEIL(Drop Distance / Pole Span)' },
+  { name: 'Deadend Poles', unit: 'pcs', formula: 'Static default (0)' },
+  { name: 'New 9m Replacement Poles', unit: 'pcs', formula: 'Default 9m Replacement Poles (Settings)' },
+  { name: 'New 11m Road-Crossing Poles', unit: 'pcs', formula: 'Default 11m Road-Crossing Poles (Settings)' },
+  { name: 'Pole Brackets', unit: 'pcs', formula: 'CEIL(Total Usable Poles x Bracket Ratio)' },
+  { name: 'Tension Clamps', unit: 'pcs', formula: '(2 x Pole Brackets) + Tension Termination Allowance' },
+  { name: 'Suspension Clamps', unit: 'pcs', formula: 'Total Usable Poles - Pole Brackets' },
+  { name: 'Steel Banding', unit: 'm', formula: 'CEIL(Total Usable Poles x Steel Banding Ratio)' },
+  { name: 'Buckles', unit: 'pcs', formula: 'Steel Banding meterage x Buckle Ratio' },
+  { name: 'FAT (Fiber Access Terminal)', unit: 'pcs', formula: 'Default FAT Allocation (Settings)' },
+];
+
+async function seedDefaultDesignMaterials() {
+  const { rows } = await pool.query('SELECT COUNT(*)::int AS count FROM design_materials');
+  if (rows[0].count > 0) return;
+  for (let i = 0; i < DEFAULT_DESIGN_MATERIALS.length; i++) {
+    const m = DEFAULT_DESIGN_MATERIALS[i];
+    await pool.query(
+      `INSERT INTO design_materials (material_name, unit, unit_price, calculation_formula, is_primary_input, sort_order)
+       VALUES ($1, $2, 0, $3, false, $4)`,
+      [m.name, m.unit, m.formula, i + 1]
+    );
+  }
+}
+
 export async function getDesignMaterials() {
   const { rows } = await pool.query(
     `SELECT id, material_name, unit, unit_price::float, calculation_formula, is_primary_input, sort_order
@@ -612,6 +687,47 @@ export async function saveDesignMaterial(data, id = null) {
 export async function deleteDesignMaterial(id) {
   const { rowCount } = await pool.query('DELETE FROM design_materials WHERE id = $1', [id]);
   if (!rowCount) throw new Error('Material not found');
+}
+
+// Design Engineering Settings — the fixed formula-driven BOM calculator's configurable ratios
+// and unit rates (Pole Span, Bracket Ratio, ADSS_CABLE_RATE, etc). One row per company; a company
+// with no row yet gets the spec's defaults auto-created on first read. This replaces manual
+// per-request material/quantity entry — Design only enters ADSS/Drop distances, everything else
+// (pole counts, brackets, clamps, banding, buckles, FAT, DUC) is computed from these settings.
+const DESIGN_ENGINEERING_SETTINGS_FIELDS = [
+  'pole_span_m', 'bracket_ratio', 'tension_termination_allowance', 'steel_banding_ratio', 'buckle_ratio',
+  'default_fat_allocation', 'default_9m_replacement_poles', 'default_11m_road_crossing_poles', 'default_duc_segment_m',
+  'rate_adss_cable', 'rate_duc_ducting', 'rate_drop_cable', 'rate_bracket', 'rate_clamp', 'rate_banding', 'rate_buckle', 'rate_fat', 'rate_pole',
+];
+
+export async function getDesignEngineeringSettings(company = 'CW') {
+  const { rows } = await pool.query('SELECT * FROM design_engineering_settings WHERE company = $1', [company]);
+  if (rows[0]) return rows[0];
+  const { rows: inserted } = await pool.query(
+    `INSERT INTO design_engineering_settings (company) VALUES ($1)
+     ON CONFLICT (company) DO UPDATE SET company = EXCLUDED.company RETURNING *`,
+    [company]
+  );
+  return inserted[0];
+}
+
+export async function updateDesignEngineeringSettings(company, data) {
+  const setClauses = [];
+  const params = [company];
+  for (const field of DESIGN_ENGINEERING_SETTINGS_FIELDS) {
+    if (data[field] === undefined) continue;
+    const value = Number(data[field]);
+    if (!Number.isFinite(value) || value < 0) throw new Error(`${field} must be a valid non-negative number`);
+    params.push(value);
+    setClauses.push(`${field} = $${params.length}`);
+  }
+  if (!setClauses.length) throw new Error('No valid settings provided');
+  await getDesignEngineeringSettings(company); // ensure the row exists first
+  const { rows } = await pool.query(
+    `UPDATE design_engineering_settings SET ${setClauses.join(', ')}, updated_at = CURRENT_TIMESTAMP WHERE company = $1 RETURNING *`,
+    params
+  );
+  return rows[0];
 }
 
 export async function createDesignRequest(data, user) {
@@ -647,28 +763,51 @@ export async function createSalesRequest(data, user) {
     `INSERT INTO project_requests (customer_name, site_name, location, region, isp, initial_remarks, status, current_stage,
       project_unit_name, created_by_user_id, created_by_name, is_design_request, customer_id, site_id,
       capacity, service_type, account_manager, feasibility_type, request_type,
-      technical_contact_name, technical_contact_email, technical_contact_phone, site_coordinates)
-     VALUES ($1,$2,$3,$4,$5,$6,'pending','design','Design Unit',$7,$8,true,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19) RETURNING *`,
+      technical_contact_name, technical_contact_email, technical_contact_phone, site_coordinates, company)
+     VALUES ($1,$2,$3,$4,$5,$6,'pending','design','Design Unit',$7,$8,true,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20) RETURNING *`,
     [data.customer_name || siteName, siteName, data.location || null, data.region || null, data.isp || null,
       data.initial_remarks || null, user.id, authorName, data.customer_id || null, data.site_id || null,
       data.capacity || null, data.service_type || null, data.account_manager || null, data.feasibility_type || null, data.request_type || null,
-      data.technical_contact_name || null, data.technical_contact_email || null, data.technical_contact_phone || null, data.site_coordinates || null]
+      data.technical_contact_name || null, data.technical_contact_email || null, data.technical_contact_phone || null, data.site_coordinates || null,
+      user.company || 'CW']
   );
   return getProjectRequestById(rows[0].id);
 }
 
-export async function submitDesignRequest(id, data, user) {
+/** Customer name and site name are the two fields every downstream unit (Design, Project, TX,
+ *  IP, NOC) treats as fixed identity — only Sales, who owns the customer relationship, may ever
+ *  rename them, and the change is a plain column UPDATE so every other unit's view of the same
+ *  row picks it up immediately (there's no separate copy to keep in sync). */
+export async function updateSalesRequestIdentity(id, data, user) {
+  const customerName = String(data.customer_name || '').trim();
   const siteName = String(data.site_name || '').trim();
+  if (!customerName) throw new Error('Customer / client name is required');
   if (!siteName) throw new Error('Site name is required');
   const { rows } = await pool.query(
-    `UPDATE project_requests SET site_name=$2, location=$3, region=$4, isp=$5, survey_date=$6, design_specification=$7,
-      design_reference=$8, cable_displacement=$9, adss=$10, drop_cable=$11,
+    `UPDATE project_requests SET customer_name=$2, site_name=$3, updated_at=CURRENT_TIMESTAMP
+     WHERE id=$1 AND is_design_request=true RETURNING *`,
+    [id, customerName, siteName]
+  );
+  if (!rows[0]) throw new Error('Request not found');
+  const authorName = `${user.first_name || ''} ${user.last_name || ''}`.trim() || user.username;
+  await addProjectRequestRemark(id, { comment_text: `${authorName} updated the customer/site details.`, stage: 'sales' }, user);
+  return getProjectRequestById(id);
+}
+
+export async function submitDesignRequest(id, data, user) {
+  // customer_name / site_name are Sales-owned identity fields (see updateSalesRequestIdentity
+  // below) — Design works the survey against whatever Sales set and can't rename either here.
+  const submitterName = `${user.first_name || ''} ${user.last_name || ''}`.trim() || user.username;
+  const { rows } = await pool.query(
+    `UPDATE project_requests SET location=$2, region=$3, isp=$4, survey_date=$5, design_specification=$6,
+      design_reference=$7, cable_displacement=$8, adss=$9, drop_cable=$10,
       status='submitted_to_sales', current_stage='sales', project_unit_name='Sales',
-      design_assigned_to=NULL, design_assigned_name=NULL, design_assigned_at=NULL, updated_at=CURRENT_TIMESTAMP
-     WHERE id=$1 AND is_design_request=true AND current_stage='design' AND design_assigned_to=$12 RETURNING *`,
-    [id, siteName, data.location || null, data.region || null, data.isp || null, data.survey_date || null,
+      design_assigned_to=NULL, design_assigned_name=NULL, design_assigned_at=NULL,
+      last_design_assigned_to=$11, last_design_assigned_name=$12, updated_at=CURRENT_TIMESTAMP
+     WHERE id=$1 AND is_design_request=true AND current_stage='design' AND design_assigned_to=$11 RETURNING *`,
+    [id, data.location || null, data.region || null, data.isp || null, data.survey_date || null,
       data.design_specification || null, data.design_reference || null,
-      data.cable_displacement || null, data.adss || null, data.drop_cable || null, user.id]
+      data.cable_displacement || null, data.adss || null, data.drop_cable || null, user.id, submitterName]
   );
   if (!rows[0]) {
     // Give an accurate reason — the request may simply not exist / already be past Design, or
@@ -722,12 +861,16 @@ export async function rejectSalesReview(id, comment, user) {
   if (!text) throw new Error('A comment is required when rejecting back to Design');
   const { rows } = await pool.query(
     `UPDATE project_requests
-     SET current_stage='design', status='pending', updated_at=CURRENT_TIMESTAMP
+     SET current_stage='design', status='pending', updated_at=CURRENT_TIMESTAMP,
+      -- Land it straight back on whoever last worked Design instead of the unclaimed queue.
+      design_assigned_to=last_design_assigned_to, design_assigned_name=last_design_assigned_name,
+      design_assigned_at=CASE WHEN last_design_assigned_to IS NOT NULL THEN CURRENT_TIMESTAMP ELSE NULL END
      WHERE id=$1 AND current_stage='sales' RETURNING *`,
     [id]
   );
   if (!rows[0]) throw new Error('Request is not awaiting Sales review');
-  await addProjectRequestRemark(id, { comment_text: text, stage: 'sales' }, user);
+  const authorName = `${user.first_name || ''} ${user.last_name || ''}`.trim() || user.username;
+  await addProjectRequestRemark(id, { comment_text: `${authorName} rejected: ${text}`, stage: 'sales' }, user);
   return getProjectRequestById(id);
 }
 
@@ -765,11 +908,17 @@ export async function forwardWorkflowRequest(id, fromStage, toStage, fields) {
   return getProjectRequestById(id);
 }
 
-export async function listDesignRequests() {
+// `company` is only passed by the Sales-unit route (PTEL only has a Sales unit today) — the
+// Design Unit's own view of this same list intentionally stays unfiltered, matching the rest of
+// the Design/Project/TX/IP/NOC pipeline which isn't company-scoped in this pass.
+export async function listDesignRequests(company = null) {
+  const params = [];
+  const companyClause = company ? (params.push(company), `AND company = $${params.length}`) : '';
   const { rows } = await pool.query(
     `SELECT id, customer_name, site_name, location, region, isp, survey_date, status, current_stage, created_by_name, created_at, updated_at,
        design_assigned_to, design_assigned_name, design_assigned_at
-     FROM project_requests WHERE is_design_request = true ORDER BY updated_at DESC`
+     FROM project_requests WHERE is_design_request = true ${companyClause} ORDER BY updated_at DESC`,
+    params
   );
   return rows;
 }
@@ -1002,7 +1151,7 @@ function pickIpPayload(data = {}) {
 export async function ipForwardRequest(requestId, data, user) {
   await assertProjectRequestNotLocked(requestId);
   const { fields, comment_text } = pickIpPayload(data);
-  const routeToStage = data?.route_to_stage === 'ts' ? 'ts' : 'project';
+  const routeToStage = data?.route_to_stage === 'ts' ? 'ts' : data?.route_to_stage === 'noc' ? 'noc' : 'project';
   const nextStatus = routeToStage === 'ts' ? 'pending' : 'integrated';
   const { rows } = await pool.query(
     `UPDATE project_requests SET

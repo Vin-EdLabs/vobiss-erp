@@ -24,6 +24,9 @@ export interface StageBreakdown {
   unitSlug: string | null;
   userId: number | null;
   userFullName: string | null;
+  /** Who closed this pool-style segment (e.g. one of several approvers) — set only when the
+   * segment has no single owner of its own. Null while the segment is still open/pending. */
+  approvedByName?: string | null;
   startedAt: string;
   endedAt: string | null;
   minutes: number;
@@ -46,6 +49,9 @@ export interface RecordTurnaround {
   slaStatus: SlaStatus | null;
   exceededStages: { stageName: string | null; minutes: number; criticalThresholdMinutes: number | null }[];
   notStarted?: boolean;
+  /** Who the current open stage is actually pending on / already approved by — only present
+   * for cash/material/item-return requests while the current stage is a pool-style approval. */
+  currentStageApprovers?: { pending: string[]; approved: string[] } | null;
 }
 
 export interface LiveSegment {

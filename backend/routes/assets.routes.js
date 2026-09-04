@@ -2,9 +2,12 @@
 import express from 'express';
 import pool from '../db.js';
 import { authenticateToken } from '../middleware/auth.js';
+import { attachTenant } from '../middleware/tenant.js';
+import { isSystemAdminAccount } from '../roles.js';
 
 const router = express.Router();
 router.use(authenticateToken);
+router.use(attachTenant);
 
 const softDeleteCol = (table) => `deleted_at`;
 const whereNotDeleted = (table) => `${table}.deleted_at IS NULL`;
@@ -567,6 +570,8 @@ router.get('/meta/next-tag', async (req, res) => {
 // ---------- Assets list ----------
 router.get('/', async (req, res) => {
   try {
+    const companyClause = req.company ? 'AND a.company = $1' : '';
+    const companyParams = req.company ? [req.company] : [];
     const r = await pool.query(
       `SELECT a.id, a.tag, a.name, a.serial_number, a.brand, a.model, a.description,
               a.status, a.purchase_date, a.cost, a.warranty_until, a.photos, a.created_at, a.updated_at,
@@ -578,7 +583,8 @@ router.get('/', async (req, res) => {
        LEFT JOIN asset_locations al ON a.location_id = al.id AND al.deleted_at IS NULL
        LEFT JOIN asset_personnel p ON a.assigned_to_id = p.id AND p.deleted_at IS NULL
        LEFT JOIN asset_vendors v ON a.vendor_id = v.id AND v.deleted_at IS NULL
-       WHERE a.deleted_at IS NULL ORDER BY a.created_at DESC`
+       WHERE a.deleted_at IS NULL ${companyClause} ORDER BY a.created_at DESC`,
+      companyParams
     );
     res.json(r.rows.map((row) => ({
       ...row,
@@ -602,7 +608,7 @@ router.get('/:id', async (req, res) => {
     const r = await pool.query(
       `SELECT a.id, a.tag, a.name, a.serial_number, a.brand, a.model, a.description,
               a.status, a.purchase_date, a.cost, a.warranty_until, a.photos, a.created_at, a.updated_at,
-              a.category_id, a.location_id, a.assigned_to_id, a.vendor_id,
+              a.category_id, a.location_id, a.assigned_to_id, a.vendor_id, a.company,
               ac.name AS category, al.name AS location,
               (p.first_name || ' ' || p.last_name) AS assigned_to, v.name AS vendor_name
        FROM assets a
@@ -615,6 +621,9 @@ router.get('/:id', async (req, res) => {
     );
     if (r.rowCount === 0) return res.status(404).json({ error: 'Asset not found' });
     const row = r.rows[0];
+    if (!isSystemAdminAccount(req.user) && (req.user.company || 'CW') !== row.company) {
+      return res.status(404).json({ error: 'Asset not found' });
+    }
     res.json({
       ...row,
       id: String(row.id),
@@ -638,10 +647,10 @@ router.post('/', async (req, res) => {
     const tag = await nextAssetTag();
     const photoArr = Array.isArray(photos) ? photos : [];
     const r = await pool.query(
-      `INSERT INTO assets (tag, name, serial_number, brand, model, description, category_id, location_id, status, assigned_to_id, purchase_date, cost, vendor_id, warranty_until, photos)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+      `INSERT INTO assets (tag, name, serial_number, brand, model, description, category_id, location_id, status, assigned_to_id, purchase_date, cost, vendor_id, warranty_until, photos, company)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
        RETURNING id, tag, name, serial_number, brand, model, description, category_id, location_id, status, assigned_to_id, purchase_date, cost, vendor_id, warranty_until, photos, created_at, updated_at`,
-      [tag, name.trim(), (serial_number || '').trim() || null, (brand || '').trim() || null, (model || '').trim() || null, (description || '').trim() || null, category_id ? parseInt(category_id, 10) : null, location_id ? parseInt(location_id, 10) : null, status && ['available', 'assigned', 'in_repair', 'damaged', 'lost', 'retired'].includes(status) ? status : 'available', assigned_to_id ? parseInt(assigned_to_id, 10) : null, purchase_date || null, cost != null && cost !== '' ? parseFloat(cost) : null, vendor_id ? parseInt(vendor_id, 10) : null, warranty_until || null, JSON.stringify(photoArr)]
+      [tag, name.trim(), (serial_number || '').trim() || null, (brand || '').trim() || null, (model || '').trim() || null, (description || '').trim() || null, category_id ? parseInt(category_id, 10) : null, location_id ? parseInt(location_id, 10) : null, status && ['available', 'assigned', 'in_repair', 'damaged', 'lost', 'retired'].includes(status) ? status : 'available', assigned_to_id ? parseInt(assigned_to_id, 10) : null, purchase_date || null, cost != null && cost !== '' ? parseFloat(cost) : null, vendor_id ? parseInt(vendor_id, 10) : null, warranty_until || null, JSON.stringify(photoArr), req.user.company || 'CW']
     );
     const row = r.rows[0];
     const [cat, loc, person, vendor] = await Promise.all([
@@ -682,7 +691,7 @@ router.put('/:id', async (req, res) => {
         warranty_until = $13,
         photos = COALESCE($14, photos),
         updated_at = CURRENT_TIMESTAMP
-       WHERE id = $15 AND deleted_at IS NULL
+       WHERE id = $15 AND deleted_at IS NULL AND ($16::text IS NULL OR company = $16)
        RETURNING id, tag, name, serial_number, brand, model, description, category_id, location_id, status, assigned_to_id, purchase_date, cost, vendor_id, warranty_until, photos, created_at, updated_at`,
       [
         name != null ? name.trim() : null,
@@ -700,6 +709,7 @@ router.put('/:id', async (req, res) => {
         warranty_until !== undefined ? warranty_until || null : undefined,
         photos != null ? JSON.stringify(Array.isArray(photos) ? photos : []) : undefined,
         id,
+        req.company,
       ]
     );
     if (r.rowCount === 0) return res.status(404).json({ error: 'Asset not found' });
@@ -730,8 +740,8 @@ router.delete('/:id', async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
     const r = await pool.query(
-      `UPDATE assets SET deleted_at = CURRENT_TIMESTAMP WHERE id = $1 AND deleted_at IS NULL RETURNING id`,
-      [id]
+      `UPDATE assets SET deleted_at = CURRENT_TIMESTAMP WHERE id = $1 AND deleted_at IS NULL AND ($2::text IS NULL OR company = $2) RETURNING id`,
+      [id, req.company]
     );
     if (r.rowCount === 0) return res.status(404).json({ error: 'Asset not found' });
     res.json({ message: 'Deleted' });

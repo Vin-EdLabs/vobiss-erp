@@ -37,7 +37,12 @@ export default function ProductionDetail({ id: idProp }: { id?: string; unitSlug
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
 
-  const units: string[] = Array.isArray(user?.units) ? user.units : [];
+  // Combine singular `unit` with the plural `units` array — some real accounts only ever had the
+  // singular field set (units array empty/missing), which silently failed every isSales/isDesign/
+  // etc check below and hid the Confirm/Reject buttons for genuine Sales/Design staff.
+  const units: string[] = [user?.unit, ...(Array.isArray(user?.units) ? user.units : [])]
+    .filter(Boolean)
+    .map((u: string) => String(u).toLowerCase());
   const isAdmin = user?.role === 'superadmin' || user?.main_role === 'superadmin';
   const isTs = isAdmin || units.includes('ts');
   const isIp = isAdmin || units.includes('ip');
@@ -116,12 +121,18 @@ export default function ProductionDetail({ id: idProp }: { id?: string; unitSlug
     return 'upcoming';
   };
 
+  // NOC has already added the circuit to monitoring — current_stage flips back to 'project' so
+  // Project can act on the Sign-Off Form, but every stage already ran. Without this, Project/TX/
+  // IP/NOC would misread that rank-3 flip as "back to step 3" and show themselves as
+  // upcoming/active again, looking like the whole flow restarted.
+  const awaitingSignOff = request.status === 'noc_approved' && !isLocked;
+
   const designStatus = statusFor(1);
   const salesReviewStatus = currentRank === 2 ? 'active' : hasReachedSalesReview ? 'done' : 'upcoming';
-  const projectStatus = statusFor(3);
-  const tsStatus = statusFor(4);
-  const ipStatus = statusFor(5);
-  const nocStatus = currentRank === 6 ? 'active' : currentRank > 6 || (request.current_stage === 'project' && request.status === 'noc_approved') ? 'done' : 'upcoming';
+  const projectStatus = awaitingSignOff ? 'done' : statusFor(3);
+  const tsStatus = awaitingSignOff ? 'done' : statusFor(4);
+  const ipStatus = awaitingSignOff ? 'done' : statusFor(5);
+  const nocStatus = awaitingSignOff ? 'done' : currentRank === 6 ? 'active' : currentRank > 6 ? 'done' : 'upcoming';
 
   // An unclaimed request isn't editable by anyone until a Design Unit member claims it (self or
   // a named colleague) — see DesignAssignmentBar below. Once claimed, only that person can act.

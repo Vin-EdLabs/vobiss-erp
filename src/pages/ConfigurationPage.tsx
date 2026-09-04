@@ -24,6 +24,40 @@ import {
   type TicketSlaPriorityKey,
   type SlaUnit,
 } from '@/lib/ticketSla';
+import { getWorkflowTimeConfig, saveWorkflowTimeConfig, type WorkflowTimeConfigRow } from '@/api/timeEngine';
+
+type SrSlaFieldUnit = 'minutes' | 'hours' | 'days';
+type SrSlaField = { value: number; unit: SrSlaFieldUnit };
+interface SrSlaUnitState {
+  expected: SrSlaField;
+  warning: SrSlaField;
+  critical: SrSlaField;
+}
+
+/** A Service Request can originate from Design or Sales, so the same real-world stage (e.g.
+ *  "Design is working on it") is logged under two different workflow_type chains depending on
+ *  which unit started the request — see workflowTimeEngine.js's DEFAULT_CONFIG comment. Each
+ *  unit row here edits every underlying (workflow_type, stage_name) pair together so that
+ *  duality never has to be explained to whoever is setting these times. */
+const SERVICE_REQUEST_SLA_UNITS: { key: string; label: string; hint: string; pairs: [string, string][] }[] = [
+  { key: 'design', label: 'Design Unit', hint: 'Surveying the site and preparing the material list', pairs: [['design_request', 'design'], ['sales_request', 'design']] },
+  { key: 'sales', label: 'Sales Unit', hint: 'Reviewing a completed design survey before Project', pairs: [['design_request', 'sales']] },
+  { key: 'project', label: 'Project Unit', hint: 'Coordinating the confirmed request', pairs: [['sales_request', 'project'], ['service_request', 'project']] },
+  { key: 'ts', label: 'TX — Transmission', hint: 'Transmission technical review', pairs: [['service_request', 'ts_review']] },
+  { key: 'ip', label: 'IP Unit', hint: 'IP provisioning review', pairs: [['service_request', 'ip_review']] },
+  { key: 'noc', label: 'NOC Unit', hint: 'Final integration and approval', pairs: [['service_request', 'noc_review']] },
+];
+
+function minutesToSrField(minutes: number | null | undefined): SrSlaField {
+  const m = Number(minutes) || 0;
+  if (m > 0 && m % 1440 === 0) return { value: m / 1440, unit: 'days' };
+  if (m > 0 && m % 60 === 0) return { value: m / 60, unit: 'hours' };
+  return { value: m, unit: 'minutes' };
+}
+function srFieldToMinutes(field: SrSlaField): number {
+  const multiplier = field.unit === 'days' ? 1440 : field.unit === 'hours' ? 60 : 1;
+  return Math.max(1, Math.round(field.value * multiplier));
+}
 
 export default function ConfigurationPage() {
   const { user, isAdminSuper } = useAuth();
@@ -36,6 +70,9 @@ export default function ConfigurationPage() {
   const [savingSla, setSavingSla] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [srSla, setSrSla] = useState<Record<string, SrSlaUnitState>>({});
+  const [loadingSrSla, setLoadingSrSla] = useState(true);
+  const [savingSrSla, setSavingSrSla] = useState(false);
 
   useVobiSection({
     id: 'material-config',
@@ -62,6 +99,12 @@ export default function ConfigurationPage() {
     priority: 27,
   });
   useVobiSection({
+    id: 'service-request-sla-config',
+    title: 'Service Request SLA',
+    help: 'Set how long each unit (Design, Sales, Project, TX, IP, NOC) has to act on a service request before it is flagged as breaching its SLA.',
+    priority: 25,
+  });
+  useVobiSection({
     id: 'save-configuration',
     title: 'Save Configuration',
     help: 'Changes do not apply until Save configuration is clicked.',
@@ -83,6 +126,82 @@ export default function ConfigurationPage() {
       .then((users) => setAllUsers(users))
       .catch(() => setAllUsers([]));
   }, []);
+
+  // Only the true System Admin can save this (backend requires it — see timeEngine.js's
+  // requireAdmin), so it's loaded/shown only for them rather than the broader company-scoped
+  // 'admin' set canManageConfiguration already allows onto the rest of this page.
+  useEffect(() => {
+    if (!isAdminSuper) {
+      setLoadingSrSla(false);
+      return;
+    }
+    setLoadingSrSla(true);
+    getWorkflowTimeConfig()
+      .then((rows) => {
+        const byPair = new Map<string, WorkflowTimeConfigRow>();
+        for (const row of rows) byPair.set(`${row.workflow_type}:${row.stage_name}`, row);
+        const next: Record<string, SrSlaUnitState> = {};
+        for (const unit of SERVICE_REQUEST_SLA_UNITS) {
+          const [wt, stage] = unit.pairs[0];
+          const row = byPair.get(`${wt}:${stage}`);
+          next[unit.key] = {
+            expected: minutesToSrField(row?.expected_duration_minutes),
+            warning: minutesToSrField(row?.warning_threshold_minutes),
+            critical: minutesToSrField(row?.critical_threshold_minutes),
+          };
+        }
+        setSrSla(next);
+      })
+      .catch(() => setSrSla({}))
+      .finally(() => setLoadingSrSla(false));
+  }, [isAdminSuper]);
+
+  const updateSrSlaField = (unitKey: string, field: keyof SrSlaUnitState, patch: Partial<SrSlaField>) => {
+    setSrSla((prev) => ({
+      ...prev,
+      [unitKey]: {
+        ...prev[unitKey],
+        [field]: { ...prev[unitKey]?.[field], ...patch },
+      },
+    }));
+  };
+
+  const handleSaveSrSla = async () => {
+    setSavingSrSla(true);
+    setError(null);
+    setSuccess(null);
+    try {
+      const calls: Promise<unknown>[] = [];
+      for (const unit of SERVICE_REQUEST_SLA_UNITS) {
+        const state = srSla[unit.key];
+        if (!state) continue;
+        const expected = srFieldToMinutes(state.expected);
+        const warning = srFieldToMinutes(state.warning);
+        const critical = srFieldToMinutes(state.critical);
+        for (const [workflow_type, stage_name] of unit.pairs) {
+          calls.push(
+            saveWorkflowTimeConfig({
+              workflow_type,
+              stage_name,
+              expected_duration_minutes: expected,
+              warning_threshold_minutes: warning,
+              critical_threshold_minutes: critical,
+              is_active: true,
+            })
+          );
+        }
+      }
+      await Promise.all(calls);
+      toast({
+        title: 'Service Request SLA saved',
+        description: 'Design, Sales, Project, TX, IP, and NOC will now be flagged if they hold a request past these times.',
+      });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to save Service Request SLA');
+    } finally {
+      setSavingSrSla(false);
+    }
+  };
 
   const load = async () => {
     try {
@@ -314,7 +433,7 @@ export default function ConfigurationPage() {
         <section className="bg-white rounded-xl border border-gray-200 shadow-[var(--shadow-md)] overflow-hidden flex flex-col">
           <div className="px-6 py-4 bg-amber-50 border-b border-amber-200 flex items-center gap-2 shrink-0">
             <Shield className="h-5 w-5 text-amber-700" />
-            <h2 className="text-lg font-semibold text-gray-900">Transport & Fuel Configuration</h2>
+            <h2 className="text-lg font-semibold text-gray-900">Requests & Reference Linking</h2>
           </div>
           <div className="p-6 flex flex-col gap-4 text-sm text-gray-600">
             <div>
@@ -358,6 +477,8 @@ export default function ConfigurationPage() {
                   { key: 'require_reference_link', label: 'Require reference link on Transport Requests' },
                   { key: 'require_reference_link_fuel', label: 'Require reference link on Fuel Requests' },
                   { key: 'require_reference_link_vehicle', label: 'Require reference link on Vehicle Rental Requests' },
+                  { key: 'require_reference_link_cash', label: 'Require reference link on Cash Requests' },
+                  { key: 'require_reference_link_material', label: 'Require reference link on Material Requests' },
                 ] as const
               ).map(({ key, label }) => (
                 <div key={key} className="mb-4 last:mb-0">
@@ -399,7 +520,7 @@ export default function ConfigurationPage() {
 
             <div className="pt-3 border-t border-gray-100">
               <p className="mb-2 text-xs text-gray-500">
-                Transport request approvers, supervisors, fuel request approvers, and vehicle finance users are assigned in <span className="font-semibold text-gray-800">Realm</span> so they follow standard approval controls.
+Transport request approvers, supervisors, fuel request approvers, vehicle finance users, and cash/material request approvers are assigned in <span className="font-semibold text-gray-800">Realm</span> so they follow standard approval controls.
               </p>
               <button
                 type="button"
@@ -746,6 +867,97 @@ export default function ConfigurationPage() {
           </div>
         </div>
       </section>
+
+      {isAdminSuper && (
+        <section className="mt-6 bg-white rounded-xl border border-gray-200 shadow-[var(--shadow-md)] overflow-hidden">
+          <div className="px-6 py-4 bg-slate-900 border-b border-slate-800 flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <Clock className="h-5 w-5 text-emerald-400" />
+              <div>
+                <h2 className="text-lg font-semibold text-white">Service Request SLA</h2>
+                <p className="text-xs text-slate-300">
+                  How long each unit has to act on a service request — Design → Sales → Project → TX/IP/NOC — before it's flagged as a breach.
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={handleSaveSrSla}
+              disabled={savingSrSla || loadingSrSla}
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-emerald-500 text-white text-sm font-medium hover:bg-emerald-400 disabled:opacity-50"
+            >
+              {savingSrSla ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+              {savingSrSla ? 'Saving…' : 'Save Service Request SLA'}
+            </button>
+          </div>
+          <div className="p-6 space-y-5">
+            {loadingSrSla ? (
+              <div className="flex items-center justify-center py-10 text-slate-500">
+                <Loader2 className="h-6 w-6 animate-spin" />
+              </div>
+            ) : (
+              <div className="overflow-x-auto rounded-xl border border-slate-200">
+                <table className="w-full min-w-[820px] text-sm">
+                  <thead className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
+                    <tr>
+                      <th className="px-4 py-3 font-semibold">Unit</th>
+                      <th className="px-4 py-3 font-semibold">Expected time</th>
+                      <th className="px-4 py-3 font-semibold">Warn after</th>
+                      <th className="px-4 py-3 font-semibold">Breach after</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {SERVICE_REQUEST_SLA_UNITS.map((unit) => {
+                      const state = srSla[unit.key];
+                      if (!state) return null;
+                      const fields: { key: keyof SrSlaUnitState; badge: string }[] = [
+                        { key: 'expected', badge: 'bg-slate-100 text-slate-700' },
+                        { key: 'warning', badge: 'bg-amber-100 text-amber-800' },
+                        { key: 'critical', badge: 'bg-rose-100 text-rose-800' },
+                      ];
+                      return (
+                        <tr key={unit.key} className="bg-white align-top">
+                          <td className="px-4 py-4">
+                            <span className="block text-sm font-semibold text-slate-900">{unit.label}</span>
+                            <span className="block text-xs text-slate-500">{unit.hint}</span>
+                          </td>
+                          {fields.map(({ key }) => (
+                            <td key={key} className="px-4 py-4">
+                              <div className="flex items-center gap-2">
+                                <input
+                                  type="number"
+                                  min={1}
+                                  value={state[key].value}
+                                  onChange={(e) =>
+                                    updateSrSlaField(unit.key, key, { value: Math.max(1, parseInt(e.target.value, 10) || 1) })
+                                  }
+                                  className="w-16 rounded-lg border border-slate-300 px-2.5 py-2 text-sm focus:ring-2 focus:ring-emerald-500"
+                                />
+                                <select
+                                  value={state[key].unit}
+                                  onChange={(e) => updateSrSlaField(unit.key, key, { unit: e.target.value as SrSlaFieldUnit })}
+                                  className="rounded-lg border border-slate-300 px-2.5 py-2 text-sm bg-white"
+                                >
+                                  <option value="minutes">Minutes</option>
+                                  <option value="hours">Hours</option>
+                                  <option value="days">Days</option>
+                                </select>
+                              </div>
+                            </td>
+                          ))}
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            <p className="text-xs text-slate-500">
+              Warnings and breaches notify the unit's manager/supervisor and appear on their workspace under "Needs your attention" — same mechanism already used for tickets, material requests, and transport.
+            </p>
+          </div>
+        </section>
+      )}
     </div>
   );
 }

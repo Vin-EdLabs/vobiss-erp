@@ -13,6 +13,7 @@ interface User {
   units?: string[];          // Units for access control
   unit?: string | null;
   position?: string | null;
+  company?: string | null;   // 'CW' | 'PTEL' | future tenants — see useCompany()
   first_name?: string;
   last_name?: string;
   full_name?: string;
@@ -33,6 +34,13 @@ interface User {
 
 export type AccessMode = 'work' | 'system';
 
+/** localStorage key for the System Admin's "View as Company" override — see setViewAsCompany.
+ *  Not per-user (unlike accessMode) since this is a browser-local admin tool preference, not a
+ *  real account setting, and is cleared on logout so it never carries over to another account
+ *  signed in on the same machine. src/main.tsx reads this same key to attach the
+ *  x-view-as-company header to every API request. */
+export const VIEW_AS_COMPANY_KEY = 'vobiss_view_as_company';
+
 interface AuthContextType {
   user: User | null;
   token: string | null;
@@ -42,6 +50,8 @@ interface AuthContextType {
   canUseSystemMode: boolean;
   isSystemMode: boolean;
   isAdminSuper: boolean;
+  viewAsCompany: string | null;
+  setViewAsCompany: (company: string | null) => void;
   login: (token: string, user: User) => void;
   logout: () => void;
   updateUser: (updates: Partial<User>) => void;
@@ -101,6 +111,7 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
   const [token, setToken] = useState<string | null>(null);
   const [hrEmployee, setHrEmployee] = useState<any | null>(null);
   const [accessMode, setAccessModeState] = useState<AccessMode>('work');
+  const [viewAsCompany, setViewAsCompanyState] = useState<string | null>(null);
   const [showWarning, setShowWarning] = useState(false);
   const navigate = useNavigate();
 
@@ -115,8 +126,10 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
     setUser(null);
     setHrEmployee(null);
     setAccessModeState('work');
+    setViewAsCompanyState(null);
     localStorage.removeItem('token');
     localStorage.removeItem('user');
+    localStorage.removeItem(VIEW_AS_COMPANY_KEY);
   }, []);
 
   // Load persisted data on mount
@@ -164,6 +177,7 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
           units: Array.isArray(payload.units) ? payload.units : [],
           unit: payload.unit ?? null,
           position: payload.position ?? null,
+          company: payload.company ?? 'CW',
           first_name: payload.first_name,
           last_name: payload.last_name,
           full_name: payload.full_name,
@@ -223,6 +237,27 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
     [accessModeStorageKey, user]
   );
 
+  // Only the true System Admin may set this — everyone else (including a company-scoped
+  // 'admin') is always locked to their own company server-side regardless of what's in
+  // localStorage, so this is purely a convenience gate for the UI, not the real enforcement.
+  useEffect(() => {
+    if (!user || !isAdminSuperUser(user)) {
+      setViewAsCompanyState(null);
+      return;
+    }
+    setViewAsCompanyState(localStorage.getItem(VIEW_AS_COMPANY_KEY) || null);
+  }, [user?.id, user?.username, user?.full_name, user?.role, user?.main_role]);
+
+  const setViewAsCompany = React.useCallback(
+    (company: string | null) => {
+      if (!user || !isAdminSuperUser(user)) return;
+      setViewAsCompanyState(company);
+      if (company) localStorage.setItem(VIEW_AS_COMPANY_KEY, company);
+      else localStorage.removeItem(VIEW_AS_COMPANY_KEY);
+    },
+    [user]
+  );
+
   const refreshUserFromServer = React.useCallback(() => {
     if (!token) return Promise.resolve();
     return getMe()
@@ -236,6 +271,7 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
           units: me.units ?? [],
           unit: me.unit ?? null,
           position: me.position ?? null,
+          company: me.company ?? 'CW',
           first_name: me.first_name,
           last_name: me.last_name,
           full_name: me.full_name,
@@ -401,6 +437,8 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
         canUseSystemMode,
         isSystemMode,
         isAdminSuper,
+        viewAsCompany,
+        setViewAsCompany,
         login,
         logout,
         updateUser,

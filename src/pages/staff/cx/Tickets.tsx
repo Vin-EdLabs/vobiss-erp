@@ -61,6 +61,8 @@ interface Ticket {
   contact_phone?: string;
   project_name: string;
   project_id?: string;
+  site_name?: string;
+  site_code?: string;
   source?: 'portal' | 'email' | 'phone';
   description?: string;
   creator_name?: string;
@@ -252,6 +254,8 @@ const AllTickets: React.FC = () => {
       attachments: ticket.attachments,
       project_name: ticket.project_name || ticket.project?.name || 'General',
       project_id: ticket.project_id || ticket.project?.id,
+      site_name: ticket.site_name || ticket.site?.name,
+      site_code: ticket.site_code || ticket.site?.code,
       source: ticket.source || 'portal',
       description: ticket.description || 'No description provided.',
       creator_name:
@@ -366,6 +370,7 @@ const AllTickets: React.FC = () => {
         t.title?.toLowerCase().includes(lower) ||
         t.customer_name?.toLowerCase().includes(lower) ||
         t.project_name?.toLowerCase().includes(lower) ||
+        t.site_name?.toLowerCase().includes(lower) ||
         t.ticket_id?.toLowerCase().includes(lower) ||
         t.customer_email?.toLowerCase().includes(lower) ||
         t.customer_phone?.toLowerCase().includes(lower)
@@ -598,6 +603,8 @@ const AllTickets: React.FC = () => {
         customer_email: fullTicketInfo.customer_email || fullTicketInfo.contact_email || ticket.customer_email || ticket.contact_email,
         customer_phone: fullTicketInfo.customer_phone || fullTicketInfo.contact_phone || ticket.customer_phone || ticket.contact_phone,
         project_name: fullTicketInfo.project_name || ticket.project_name,
+        site_name: fullTicketInfo.site_name || ticket.site_name,
+        site_code: fullTicketInfo.site_code || ticket.site_code,
         description: fullTicketInfo.description || ticket.description || 'No description provided.',
         creator_name: fullTicketInfo.creator_name || ticket.creator_name || 'Unknown',
         source: fullTicketInfo.source || ticket.source,
@@ -842,9 +849,7 @@ const AllTickets: React.FC = () => {
                     <th className="px-4 py-3 text-left font-medium">Source</th>
                     <th className="px-4 py-3 text-left font-medium">Customer</th>
                     <th className="px-4 py-3 text-left font-medium">Tags</th>
-                    <th className="px-4 py-3 text-left font-medium">Phone</th>
-                    <th className="px-4 py-3 text-left font-medium">Email</th>
-                    <th className="px-4 py-3 text-left font-medium">Project</th>
+                    <th className="px-4 py-3 text-left font-medium">Site name</th>
                     <th className="px-4 py-3 text-left font-medium">Created</th>
                     <th className="px-4 py-3 text-left font-medium">Status</th>
                     <th className="px-4 py-3 text-left font-medium">Priority</th>
@@ -881,13 +886,9 @@ const AllTickets: React.FC = () => {
                         <td className="px-4 py-3">
                           <TicketTagBadgesRow tags={ticket.tags} max={3} compact />
                         </td>
-                        <td className="px-4 py-3 text-slate-600">
-                          {ticket.customer_phone || ticket.contact_phone || <span className="text-slate-400 italic">—</span>}
+                        <td className="px-4 py-3 font-medium text-slate-800">
+                          {ticket.site_name || <span className="text-slate-400 italic font-normal">—</span>}
                         </td>
-                        <td className="px-4 py-3 text-slate-600">
-                          {ticket.customer_email || ticket.contact_email || <span className="text-slate-400 italic">—</span>}
-                        </td>
-                        <td className="px-4 py-3 font-medium text-slate-800">{ticket.project_name}</td>
                         <td className="px-4 py-3 text-slate-600">
                           <div className="flex items-center gap-1.5">
                             <Clock className="w-4 h-4" />

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { Check, Download, Eye, FileSignature, Loader2, Pencil, Plus, Printer, Search, Send, X } from 'lucide-react';
 import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
@@ -39,10 +39,14 @@ export function SignoffFormsList() {
   </div>;
 }
 
-const empty = (user: any) => ({ contractor: 'Vobiss Solutions Ltd', site_name: '', vobiss_name: nameOf(user), vobiss_date: today(), status: 'draft' });
+const empty = (user: any, prefill?: any) => ({ contractor: 'Vobiss Solutions Ltd', site_name: '', vobiss_name: nameOf(user), vobiss_date: today(), status: 'draft', ...(prefill || {}) });
 export default function SignoffFormPage() {
   const { isSharedView, routeParams } = useSharedView();
-  const { id: routeId } = useParams(); const id = isSharedView ? routeParams?.id : routeId; const isNew = id === 'new'; const navigate = useNavigate(); const { user } = useAuth(); const { toast } = useToast(); const [form, setForm] = useState<any>(() => empty(user)); const [loading, setLoading] = useState(!isNew); const [saving, setSaving] = useState(false); const [approvalSignature, setApprovalSignature] = useState(''); const [rejectReason, setRejectReason] = useState(''); const [linkOptions, setLinkOptions] = useState<any>({ service_requests: [], wip_entries: [] }); const documentRef = useRef<HTMLDivElement>(null);
+  const location = useLocation();
+  // Arriving from a Service Request's "Sign Off" button pre-links this form and carries over
+  // whatever the SR already knows (site name, circuit ID) so Project doesn't retype it.
+  const prefill = (location.state as any)?.signoffPrefill;
+  const { id: routeId } = useParams(); const id = isSharedView ? routeParams?.id : routeId; const isNew = id === 'new'; const navigate = useNavigate(); const { user } = useAuth(); const { toast } = useToast(); const [form, setForm] = useState<any>(() => empty(user, prefill)); const [loading, setLoading] = useState(!isNew); const [saving, setSaving] = useState(false); const [approvalSignature, setApprovalSignature] = useState(''); const [rejectReason, setRejectReason] = useState(''); const [linkOptions, setLinkOptions] = useState<any>({ service_requests: [], wip_entries: [] }); const documentRef = useRef<HTMLDivElement>(null);
   const editable = !isSharedView && (isNew || ((supervisor(user) || systemAdmin(user)) && Number(form.created_by) === Number(user?.id) && ['draft','rejected'].includes(form.status))); const isManager = !isSharedView && manager(user);
   useEffect(() => { if (!isNew && id) getSignoffForm(Number(id)).then(setForm).catch((e) => toast({ title: 'Unable to load form', description: e.message, variant: 'destructive' })).finally(() => setLoading(false)); }, [id, isNew, toast]);
   useEffect(() => { void getSignoffLinkOptions().then(setLinkOptions).catch(() => undefined); }, []);

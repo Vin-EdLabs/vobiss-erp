@@ -25,12 +25,23 @@ import { ConfirmActionDialog, type ConfirmActionState } from '@/components/noc/s
 
 const NOC_MANAGER_ROLES = ['noc_manager', 'noc_supervisor', 'director', 'cto'];
 
+// Real accounts usually carry the actual job title in `position` ("NOC Supervisor") with
+// role/main_role left as a generic account type — a role-slug-only check silently hid shift
+// times and the staff picker from real NOC supervisors whose role isn't literally tagged.
+function isNocManagerByPosition(user: any): boolean {
+  const position = String(user?.position || '').trim().toLowerCase();
+  const looksLikeManager = position.includes('manager') || position.includes('supervisor');
+  const units = [user?.unit, ...(Array.isArray(user?.units) ? user.units : [])]
+    .map((u) => String(u || '').trim().toLowerCase());
+  return looksLikeManager && units.includes('noc');
+}
+
 export default function ShiftSchedule() {
   const { user } = useAuth();
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
-  const isManager = isSystemAdminAccount(user) || userHasAnyRole(user, NOC_MANAGER_ROLES);
+  const isManager = isSystemAdminAccount(user) || userHasAnyRole(user, NOC_MANAGER_ROLES) || isNocManagerByPosition(user);
 
   const [now, setNow] = useState(new Date());
   useEffect(() => {

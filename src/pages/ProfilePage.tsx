@@ -1,12 +1,13 @@
 // src/pages/ProfilePage.tsx ← FINAL + AUDIT LOG (Nothing Removed!)
 import React, { useRef, useState } from 'react';
-import { Settings, User, Lock, Save, Eye, EyeOff, CheckCircle, Camera } from 'lucide-react';
+import { Settings, User, Lock, Save, Eye, EyeOff, CheckCircle, Camera, Building2 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { API_URL } from '@/lib/api';
 import { UserAvatar } from '@/components/UserAvatar';
+import { COMPANY_LABELS } from '@/hooks/useCompany';
 
 const ProfilePage = () => {
-  const { user, updateUser } = useAuth();
+  const { user, updateUser, isAdminSuper, viewAsCompany, setViewAsCompany } = useAuth();
 
   const [username, setUsername] = useState(user?.username || '');
   const [currentPassword, setCurrentPassword] = useState('');
@@ -117,6 +118,35 @@ const ProfilePage = () => {
         <h1 className="text-2xl font-semibold tracking-tight text-[var(--text-primary)]">Profile & Security</h1>
         <p className="mt-1 text-sm text-[var(--text-secondary)]">Your workspace photo, login, and password</p>
       </div>
+
+      {isAdminSuper && (
+        <div className="mb-4 rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-6 shadow-[var(--shadow-md)]">
+          <label className="mb-2 flex items-center gap-2 text-sm font-medium text-[var(--text-body)]">
+            <Building2 className="h-5 w-5 text-[var(--primary)]" />
+            Company View
+          </label>
+          <p className="mb-3 text-xs text-[var(--text-muted)]">
+            As System Admin you normally see every company at once. Pick one here to scope everything —
+            HR, requests, Vobi, dashboards — to just that company, as if you were logged in as one of
+            their staff. Switch back to "All Companies" any time.
+          </p>
+          <select
+            value={viewAsCompany || ''}
+            onChange={(e) => setViewAsCompany(e.target.value || null)}
+            className="w-full max-w-xs rounded-[var(--radius-sm)] border border-[var(--border-strong)] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--text-primary)] outline-none"
+          >
+            <option value="">All Companies</option>
+            {Object.entries(COMPANY_LABELS).map(([slug, label]) => (
+              <option key={slug} value={slug}>{label}</option>
+            ))}
+          </select>
+          {viewAsCompany && (
+            <p className="mt-2 text-xs font-medium text-[var(--warning-text)]">
+              Currently viewing as {COMPANY_LABELS[viewAsCompany] || viewAsCompany} everywhere in the app.
+            </p>
+          )}
+        </div>
+      )}
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
         <div className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-6 shadow-[var(--shadow-md)]">

@@ -22,6 +22,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useAuth } from '../../context/AuthContext';
 import { RecordChatButton } from '@/components/chat/RecordChatButton';
 import { ShareButton } from '@/components/ShareButton';
+import { ApproveRejectActions } from '@/components/requests/ApproveRejectActions';
 import { useSharedView } from '@/context/SharedViewContext';
 import { WorkflowTimeline } from '@/components/timeline/WorkflowTimeline';
 import { buildPreviewTable } from '@/lib/shareRecord';
@@ -396,6 +397,7 @@ interface CashRequestDetails {
   approvals: Approval[];
   rejections: Rejection[];
   chat_channel_id?: string | null;
+  requires_director_approval?: boolean;
 }
 
 const getStatusBadge = (status: string) => {
@@ -546,6 +548,15 @@ const CashDetails: React.FC = () => {
 
   const canConfirm = isRequester && request?.status === 'finance_approved' && !request?.received_at;
 
+  const isDirectorOrAdmin = user?.main_role === 'director' || user?.role === 'director' || user?.main_role === 'superadmin' || user?.role === 'superadmin';
+  const decisionStage: 'approver' | 'finance' | 'director' =
+    request?.status === 'supervisor_approved'
+      ? 'finance'
+      : request?.requires_director_approval && isDirectorOrAdmin
+        ? 'director'
+        : 'approver';
+  const canDecide = !isRequester && (request?.status === 'pending' || request?.status === 'supervisor_approved');
+
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-screen">
@@ -624,6 +635,15 @@ const CashDetails: React.FC = () => {
                 recordType="cash_request"
                 recordId={request.id}
                 chatChannelId={request.chat_channel_id}
+              />
+            )}
+            {canDecide && !isSharedView && request && (
+              <ApproveRejectActions
+                requestId={request.id}
+                stage={decisionStage}
+                kind="Cash Request"
+                approveLabel={decisionStage === 'finance' ? 'Release Funds' : 'Approve'}
+                onDone={loadData}
               />
             )}
             {canConfirm && !isSharedView && (

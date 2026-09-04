@@ -15,8 +15,8 @@ VOBISS ERP / Vobiss Inventory Hub
 VOBISS is a full-stack enterprise operations platform. It combines inventory,
 procurement requests, cash advances, transport, service requests, project work,
 customer support, network assets, field work, human resources, performance
-management, reporting, chat, notifications, and administrative controls in one
-workspace.
+management, reporting, chat, notifications, PTEL operations, and administrative
+controls in one workspace.
 
 The system is role-aware. A user does not automatically see every module. The
 sidebar and route protection determine access from the user's system role, unit,
@@ -83,6 +83,13 @@ HR USER
 CUSTOMER PORTAL USER
 - Uses a separate customer experience to view sites, create tickets, track ticket
   status, and manage their profile.
+
+PTEL USERS
+- PTEL is a company-scoped operating area with separate role names and access
+  rules from the main C&W workspace.
+- PTEL Sales is currently available at /ptel/sales/dashboard.
+- PTEL HR, Finance, Transport, Inventory, Assets, and Audit Logs routes exist as
+  protected rollout placeholders until their dedicated experiences are built.
 
 ACCESS MODE
 - Some administrator-capable users can switch between Work and System access
@@ -177,6 +184,10 @@ user's role and unit.
 - Customer Portal Dashboard: /customer/dashboard
   Shows customer sites, ticket totals, ticket statuses, recent tickets, and
   support actions.
+
+- PTEL Sales Dashboard: /ptel/sales/dashboard
+  Provides the current PTEL Sales workspace for PTEL sales, executive, and CX
+  manager users.
 
 
 5. INVENTORY AND MATERIAL REQUESTS
@@ -496,6 +507,14 @@ FIELD ENGINEERING WORK PAGES
 TX handles transmission and technical field ticket work. Field Work provides a
 separate work assignment and completion workflow.
 
+FIELD WORK API
+- Field work is mounted at /api/field-work.
+- Supervisors create and view team assignments; engineers can view work assigned
+  to them through /staff/field/my-field-work.
+- Non-privileged users see only assignments linked to them, while field
+  supervisors, NOC confirmers, and authorized administrators can view the broader
+  field-work queue.
+
 
 16. FIELD ACTIVITIES
 --------------------
@@ -633,6 +652,20 @@ CUSTOMER FLOW
 Customer access is isolated from internal staff access. A customer should not use
 staff dashboard routes or staff tokens.
 
+PTEL ROUTES
+- PTEL Sales Dashboard: /ptel/sales/dashboard
+- PTEL HR placeholder: /ptel/hr
+- PTEL Finance placeholder: /ptel/finance
+- PTEL Transport placeholder: /ptel/transport
+- PTEL Inventory placeholder: /ptel/inventory
+- PTEL Assets placeholder: /ptel/assets
+- PTEL Audit Logs placeholder: /ptel/audit-logs
+
+PTEL access is protected by dedicated roles including ptel_sales,
+ptel_cx_manager, ptel_finance, ptel_hr_admin, ptel_data,
+ptel_service_delivery, and ptel_executive. A placeholder route indicates the
+protected entry point exists; it does not mean that the module is fully built.
+
 
 21. SYSTEM ADMINISTRATION
 -------------------------
@@ -649,6 +682,16 @@ PAGES
 - System Messages: /system-messages
 - System Settings: /settings
 - Vobi Vault: /admin/vobi-vault
+
+MULTI-COMPANY ACCESS
+- The current company scopes are C&W (CW) and PTEL.
+- Company-scoped users, requests, transport records, inventory, HR records,
+  projects, tickets, and related operational data remain isolated from other
+  companies.
+- A company administrator manages users and records within that company. Only
+  a true system administrator can manage or inspect company-specific settings.
+- Realm approver settings support company-specific approver lists while keeping
+  legacy flat C&W settings compatible.
 
 ADMINISTRATIVE FUNCTIONS
 - Create, update, disable, and manage staff accounts.
@@ -742,11 +785,13 @@ MAIN FILES
 - src/App.tsx: frontend application shell and high-level application wiring.
 - src/main.tsx: browser entrypoint, BrowserRouter, styles, and service worker setup.
 - src/pages/Index.tsx: protected staff shell, sidebar/header, and frontend routes.
+- src/hooks/useCompany.ts: current company context and company labels.
 - src/components/Sidebar.tsx: role-aware staff navigation and attention counters.
 - src/pages/: frontend pages grouped by module.
 - src/api/: frontend API clients.
 - src/context/: authentication, realtime, Vobi, and application contexts.
 - backend/server.js: main Express backend entrypoint and route registration.
+- backend/middleware/tenant.js: company/tenant context attachment.
 - backend/db.js: core database access and legacy/general database functions.
 - backend/routes/: backend domain route modules.
 - backend/services/: workflow, chat, email, reporting, and operational services.
@@ -755,6 +800,7 @@ MAIN FILES
 - backend/push/: Web Push and FCM delivery.
 - backend/migrations/: database migration scripts.
 - public/: public assets, service workers, redirects, and static files.
+- backend/seeds/ptel-users.js: PTEL user seed data.
 
 
 25. IMPORTANT BACKEND DOMAIN AREAS

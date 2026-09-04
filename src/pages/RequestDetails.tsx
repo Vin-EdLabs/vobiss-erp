@@ -10,6 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { ArrowLeft, Edit, Save, X, Plus, Printer } from 'lucide-react';
 import { RecordChatButton } from '@/components/chat/RecordChatButton';
 import { ShareButton } from '@/components/ShareButton';
+import { ApproveRejectActions } from '@/components/requests/ApproveRejectActions';
 import { buildPreviewTable } from '@/lib/shareRecord';
 import { PersonName } from '@/components/PersonName';
 import { useSharedView } from '@/context/SharedViewContext';
@@ -79,6 +80,7 @@ interface RequestDetails {
   location: string;
   deployment_type?: 'Deployment' | 'Maintenance';
   release_by: string | null;
+  released_at?: string | null;
   received_by: string | null;
   reason?: string;
   status: 'pending' | 'approved' | 'completed' | 'rejected';
@@ -313,6 +315,14 @@ const RequestDetails: React.FC = () => {
                 recordType={isReturn ? 'item_return' : 'material_request'}
                 recordId={request.id}
                 chatChannelId={request.chat_channel_id}
+              />
+            )}
+            {!isSharedView && request.status === 'pending' && (
+              <ApproveRejectActions
+                requestId={request.id}
+                stage="approver"
+                kind={isReturn ? 'Item Return' : 'Material Request'}
+                onDone={loadData}
               />
             )}
             {!isSharedView && (
@@ -648,7 +658,7 @@ const RequestDetails: React.FC = () => {
               {request.release_by && (
                 <div className="mb-2 pb-1 border-b border-gray-200">
                   <div className="flex mb-0.5 font-bold text-gray-900"><span className="w-16">Issuer:</span><span className="ml-1">{request.release_by}</span></div>
-                  <div className="flex text-gray-700"><span className="w-16">Date:</span><span className="ml-1 font-medium">{formatDateTime(request.updated_at)}</span></div>
+                  <div className="flex text-gray-700"><span className="w-16">Date:</span><span className="ml-1 font-medium">{formatDateTime(request.released_at || request.updated_at)}</span></div>
                 </div>
               )}
               {request.approvals.length > 0 && (

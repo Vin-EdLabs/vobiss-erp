@@ -45,7 +45,7 @@ const STATUS_LABELS: Record<string, string> = {
   pending: 'Pending',
   ongoing: 'Ongoing',
   integrated: 'Integrated',
-  noc_approved: 'NOC Approved',
+  noc_approved: 'Ready for Sign-Off',
   submitted_to_sales: 'Submitted to Sales',
   completed: 'Completed',
   rejected: 'Rejected',

@@ -17,7 +17,15 @@ const router = express.Router();
 const STAFF_ROLES = ['noc', 'noc_manager', 'noc_supervisor'];
 const MANAGER_ROLES = ['noc_manager', 'noc_supervisor'];
 const canUseSchedule = (user) => isSystemAdminAccount(user) || userHasAnyRole(user, [...STAFF_ROLES, 'director', 'cto']) || effectiveUnitsForUser(user).includes('noc');
-const canManageSchedule = (user) => isSystemAdminAccount(user) || userHasAnyRole(user, [...MANAGER_ROLES, 'director', 'cto']);
+// Real accounts usually carry the actual job title in `position` ("NOC Supervisor") with
+// role/main_role left as a generic account type — a role-slug-only check silently locks real
+// NOC supervisors/managers out of managing (and, on the frontend, even seeing) shift times.
+function isNocManagerByPosition(user) {
+  const position = String(user?.position || '').trim().toLowerCase();
+  const looksLikeManager = position.includes('manager') || position.includes('supervisor');
+  return looksLikeManager && effectiveUnitsForUser(user).includes('noc');
+}
+const canManageSchedule = (user) => isSystemAdminAccount(user) || userHasAnyRole(user, [...MANAGER_ROLES, 'director', 'cto']) || isNocManagerByPosition(user);
 const requireNoc = (req, res, next) => canUseSchedule(req.user) ? next() : res.status(403).json({ error: 'NOC access is required' });
 const requireNocManager = (req, res, next) => canManageSchedule(req.user) ? next() : res.status(403).json({ error: 'Only NOC Managers or Supervisors can manage the shift schedule' });
 
@@ -232,10 +240,14 @@ router.put('/definitions/:id', requireNocManager, async (req, res) => {
 router.get('/staff-options', requireNoc, async (_req, res) => {
   try {
     const result = await pool.query(
-      `SELECT id, COALESCE(NULLIF(trim(concat_ws(' ', first_name, last_name)), ''), username) AS full_name, avatar_url
+      `SELECT id, COALESCE(NULLIF(trim(concat_ws(' ', first_name, last_name)), ''), username) AS full_name, avatar_url,
+              role, main_role, roles, unit, units
        FROM users WHERE deleted_at IS NULL ORDER BY full_name`
     );
-    res.json(result.rows.map((r) => ({ id: r.id, fullName: r.full_name, avatarUrl: r.avatar_url })));
+    // Only people actually in NOC — the old query returned every user in the system, so the
+    // "add to shift" picker showed the entire company instead of just NOC staff.
+    const nocOnly = result.rows.filter((r) => userHasAnyRole(r, STAFF_ROLES) || effectiveUnitsForUser(r).includes('noc'));
+    res.json(nocOnly.map((r) => ({ id: r.id, fullName: r.full_name, avatarUrl: r.avatar_url })));
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

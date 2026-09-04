@@ -384,6 +384,12 @@ export async function initHrSchema(pool) {
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_hr_payroll_audit_category ON hr_payroll_audit(category)`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_hr_payroll_audit_employee_id ON hr_payroll_audit(employee_id)`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_hr_payroll_audit_performed_by ON hr_payroll_audit(performed_by)`);
+
+  // Multi-tenant — 'CW' default backfills every existing employee/payroll row as C&W's.
+  const { addCompanyColumn } = await import('./tenant.js');
+  await addCompanyColumn('hr_employees');
+  await addCompanyColumn('hr_payroll');
+  await addCompanyColumn('hr_settings');
 }
 
 export async function ensureLeaveBalances(pool, employeeId, year = new Date().getFullYear()) {

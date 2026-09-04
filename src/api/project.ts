@@ -108,8 +108,12 @@ export type SignoffForm = {
   linked_record_type?: string | null; linked_record_id?: number | null; linked_record_ref?: string | null;
   created_by: number; created_by_name: string; created_at: string; updated_at: string;
 };
-export const listSignoffForms = async (params: { status?: string; search?: string } = {}): Promise<SignoffForm[]> => {
-  const q = new URLSearchParams(); if (params.status && params.status !== 'all') q.set('status', params.status); if (params.search) q.set('search', params.search);
+export const listSignoffForms = async (params: { status?: string; search?: string; linked_record_type?: string; linked_record_id?: number } = {}): Promise<SignoffForm[]> => {
+  const q = new URLSearchParams();
+  if (params.status && params.status !== 'all') q.set('status', params.status);
+  if (params.search) q.set('search', params.search);
+  if (params.linked_record_type) q.set('linked_record_type', params.linked_record_type);
+  if (params.linked_record_id != null) q.set('linked_record_id', String(params.linked_record_id));
   return (await prjFetch(`${projectRequestUrl('signoff')}${q.toString() ? `?${q}` : ''}`)).json();
 };
 export const getSignoffForm = async (id: number): Promise<SignoffForm> => (await prjFetch(projectRequestUrl('signoff', String(id)))).json();
@@ -244,6 +248,47 @@ export async function deleteDesignMaterial(id: number): Promise<void> {
   await prjFetch(projectRequestUrl('design', 'materials', String(id)), { method: 'DELETE' });
 }
 
+/** The fixed formula-driven BOM calculator's configurable ratios and unit rates — see
+ *  src/lib/designBom.ts for the formulas these numbers feed. */
+export type DesignEngineeringSettings = {
+  pole_span_m: number;
+  bracket_ratio: number;
+  tension_termination_allowance: number;
+  steel_banding_ratio: number;
+  buckle_ratio: number;
+  default_fat_allocation: number;
+  default_9m_replacement_poles: number;
+  default_11m_road_crossing_poles: number;
+  default_duc_segment_m: number;
+  rate_adss_cable: number;
+  rate_duc_ducting: number;
+  rate_drop_cable: number;
+  rate_bracket: number;
+  rate_clamp: number;
+  rate_banding: number;
+  rate_buckle: number;
+  rate_fat: number;
+  rate_pole: number;
+};
+
+export async function getDesignEngineeringSettings(): Promise<DesignEngineeringSettings> {
+  const res = await prjFetch(projectRequestUrl('design', 'settings'));
+  const data = await res.json();
+  const parsed: Record<string, number> = {};
+  for (const key of Object.keys(data)) {
+    const n = Number(data[key]);
+    if (Number.isFinite(n)) parsed[key] = n;
+  }
+  return parsed as unknown as DesignEngineeringSettings;
+}
+
+export async function updateDesignEngineeringSettings(data: Partial<DesignEngineeringSettings>): Promise<DesignEngineeringSettings> {
+  const res = await prjFetch(projectRequestUrl('design', 'settings'), {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data),
+  });
+  return res.json();
+}
+
 export async function createDesignRequest(data: Record<string, unknown>): Promise<ProjectRequest> {
   const res = await prjFetch(projectRequestUrl('design', 'requests'), {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data),
@@ -263,6 +308,13 @@ export async function listSalesRequests(): Promise<ProjectRequest[]> {
 
 export async function createSalesRequest(data: Record<string, unknown>): Promise<ProjectRequest> {
   const res = await prjFetch(projectRequestUrl('sales', 'requests'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+  return res.json();
+}
+
+/** Sales-only: rename the customer/site identity on a request that's already in flight. Every
+ *  other unit's view reads the same columns, so the change is visible everywhere immediately. */
+export async function updateSalesRequestIdentity(id: number, data: { customer_name: string; site_name: string }): Promise<ProjectRequest> {
+  const res = await prjFetch(projectRequestUrl('sales', 'requests', String(id)), { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
   return res.json();
 }
 

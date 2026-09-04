@@ -2,7 +2,7 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { getWorkflowConfig, cxApi, type TicketEscalationStage } from '../../../api';
 import { API_URL } from '@/lib/api';
-import { Search, Ticket, Clock, AlertCircle, Plus, RefreshCw } from 'lucide-react';
+import { Search, Ticket, Clock, Plus, RefreshCw } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { vobiAmbientStore } from '@/stores/vobiAmbientStore';
 import { useVobiFormState } from '@/hooks/useVobiFormState';
@@ -41,8 +41,8 @@ interface CreatedTicket {
   ticket_id: string;
   customer_name: string;
   customer_code: string;
-  project_name: string;
-  project_code: string;
+  site_name: string;
+  site_code: string;
   priority: string;
   status: string;
   created_at: string;
@@ -183,8 +183,8 @@ const CreateStaffTicketPage: React.FC = () => {
             ticket_id: t.ticket_id || t.id || 'N/A',
             customer_name: t.customer_name || t.customer?.name || 'Unknown',
             customer_code: t.customer_code || 'N/A',
-            project_name: t.project_name || t.project?.name || 'General',
-            project_code: t.project_code || 'N/A',
+            site_name: t.site_name || t.site?.name || 'No site',
+            site_code: t.site_code || 'N/A',
             priority: t.priority || 'normal',
             status: t.status || 'NEW',
             created_at: t.created_at,
@@ -302,8 +302,8 @@ const CreateStaffTicketPage: React.FC = () => {
         ticket_id: ticketId,
         customer_name: customerInfo?.customer_name || 'Unknown',
         customer_code: customerInfo?.customer_code || 'N/A',
-        project_name: siteInfo?.site_name || 'N/A',
-        project_code: siteInfo?.site_code || 'N/A',
+        site_name: siteInfo?.site_name || 'No site',
+        site_code: siteInfo?.site_code || 'N/A',
         priority,
         status: 'NEW',
         created_at: new Date().toISOString(),
@@ -617,7 +617,7 @@ const CreateStaffTicketPage: React.FC = () => {
                 <tr>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Ticket ID</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Customer</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Project</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Site name</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Created By</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Priority</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
@@ -644,7 +644,7 @@ const CreateStaffTicketPage: React.FC = () => {
                     >
                       <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-[var(--primary)]">#{ticket.ticket_id}</td>
                       <td className="px-6 py-4 text-sm text-gray-700">{ticket.customer_code} — {ticket.customer_name}</td>
-                      <td className="px-6 py-4 text-sm text-gray-700">{ticket.project_code} — {ticket.project_name}</td>
+                      <td className="px-6 py-4 text-sm text-gray-700">{ticket.site_name}</td>
                       <td className="px-6 py-4 text-sm text-gray-700 font-medium">{ticket.created_by}</td>
                       <td className="px-6 py-4">
                         <span className={`px-3 py-1 inline-flex text-xs font-semibold rounded-full ${getPriorityColor(ticket.priority)}`}>
@@ -665,12 +665,6 @@ const CreateStaffTicketPage: React.FC = () => {
               </tbody>
             </table>
           </div>
-        </div>
-
-        {/* Bottom Note */}
-        <div className="mt-8 bg-amber-50 border border-amber-200 rounded-xl p-4 text-sm text-amber-900 flex gap-3">
-          <AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5" />
-          <p>These tickets are stored in the database and visible to customers and all staff.</p>
         </div>
       </div>
     </div>

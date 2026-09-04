@@ -19,6 +19,8 @@ const REQUIREMENT_KEY_BY_TYPE = {
   transport_request: 'require_reference_link',
   fuel_request: 'require_reference_link_fuel',
   vehicle_request: 'require_reference_link_vehicle',
+  cash_request: 'require_reference_link_cash',
+  material_request: 'require_reference_link_material',
 };
 
 export function isReferenceRequiredFor(requestType, transport = {}) {

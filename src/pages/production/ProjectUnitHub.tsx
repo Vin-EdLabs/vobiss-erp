@@ -1,6 +1,6 @@
 ﻿import React, { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Search, Check, FileText } from 'lucide-react';
+import { Search, FileSignature, FileText } from 'lucide-react';
 import { ProductionPageShell } from '@/components/production/ProductionPageShell';
 import { ProductionRequestsTable } from '@/components/production/ProductionRequestsTable';
 import { UnitPageHero, PremiumStatGrid, PremiumPanel } from '@/components/production/UnitPageHero';
@@ -17,29 +17,30 @@ import {
 import {
   getProjectRequestDashboard,
   listProjectRequests,
-  projectCompleteProjectRequest,
+  listSignoffForms,
   type ProjectRequest,
+  type SignoffForm,
 } from '@/api/project';
-import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/context/AuthContext';
 import { isDirectorOrCto, resolvePrimaryRole } from '@/config/roles';
 
-function canProjectMarkComplete(r: ProjectRequest) {
-  return (
-    (r.status === 'integrated' || r.status === 'noc_approved') &&
-    r.current_stage !== 'done' &&
-    r.status !== 'completed'
-  );
+// Every stage already ran once NOC has added the circuit to monitoring — completing this
+// request now happens by filling and approving its Sign-Off Form (see POST /signoff/:id/approve
+// auto-completing the linked service request), not a direct "mark complete" shortcut.
+function needsSignOff(r: ProjectRequest) {
+  return r.status === 'noc_approved' && r.current_stage !== 'done';
 }
+const SIGNOFF_STATUS_LABEL: Record<string, string> = {
+  draft: 'Draft', pending: 'Pending Approval', approved: 'Approved', rejected: 'Rejected',
+};
 
 export default function ProjectUnitHub() {
   const navigate = useNavigate();
-  const { toast } = useToast();
   const { user } = useAuth();
   const isExecutive = isDirectorOrCto(resolvePrimaryRole(user?.main_role || user?.role));
   const [stats, setStats] = useState({ pending: 0, inProgress: 0, completed: 0, rejected: 0 });
-  const [completingId, setCompletingId] = useState<number | null>(null);
   const [requests, setRequests] = useState<ProjectRequest[]>([]);
+  const [signoffByRequest, setSignoffByRequest] = useState<Record<number, SignoffForm>>({});
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
@@ -47,12 +48,13 @@ export default function ProjectUnitHub() {
   const load = useCallback(async () => {
     try {
       setLoading(true);
-      const [dash, list] = await Promise.all([
+      const [dash, list, forms] = await Promise.all([
         getProjectRequestDashboard('project'),
         listProjectRequests('project', {
           status: statusFilter === 'all' ? undefined : statusFilter,
           search: search || undefined,
         }),
+        listSignoffForms({ linked_record_type: 'service_request' }),
       ]);
       setStats({
         pending: dash.pending,
@@ -61,6 +63,14 @@ export default function ProjectUnitHub() {
         rejected: dash.rejected,
       });
       setRequests(list);
+      // Newest form per linked request — a rejected-then-recreated form should show its latest state.
+      const byRequest: Record<number, SignoffForm> = {};
+      for (const f of forms) {
+        if (f.linked_record_id == null) continue;
+        const existing = byRequest[f.linked_record_id];
+        if (!existing || new Date(f.created_at) > new Date(existing.created_at)) byRequest[f.linked_record_id] = f;
+      }
+      setSignoffByRequest(byRequest);
     } finally {
       setLoading(false);
     }
@@ -70,26 +80,29 @@ export default function ProjectUnitHub() {
     void load();
   }, [load]);
 
-  const handleMarkComplete = async (r: ProjectRequest, e?: React.MouseEvent) => {
+  const startSignOff = (r: ProjectRequest, e?: React.MouseEvent) => {
     e?.preventDefault();
     e?.stopPropagation();
-    setCompletingId(r.id);
-    try {
-      await projectCompleteProjectRequest(r.id);
-      toast({ title: 'Request completed', description: `${r.customer_name} marked complete` });
-      await load();
-    } catch (err: unknown) {
-      toast({
-        title: 'Could not complete',
-        description: err instanceof Error ? err.message : 'Something went wrong',
-        variant: 'destructive',
-      });
-    } finally {
-      setCompletingId(null);
-    }
+    navigate('/project-unit/signoff/new', {
+      state: {
+        signoffPrefill: {
+          site_name: r.site_name || r.customer_name || '',
+          circuit_id: r.circuit_id || '',
+          linked_record_type: 'service_request',
+          linked_record_id: r.id,
+          linked_record_ref: `SR-${String(r.id).padStart(3, '0')}`,
+        },
+      },
+    });
   };
 
-  const awaitingCount = requests.filter(canProjectMarkComplete).length;
+  const goToSignOff = (form: SignoffForm, e?: React.MouseEvent) => {
+    e?.preventDefault();
+    e?.stopPropagation();
+    navigate(`/project-unit/signoff/${form.id}`);
+  };
+
+  const awaitingCount = requests.filter(needsSignOff).length;
 
   return (
     <ProductionPageShell unitSlug="project">
@@ -144,7 +157,7 @@ export default function ProjectUnitHub() {
                   <SelectItem value="pending">Pending</SelectItem>
                   <SelectItem value="ongoing">Ongoing</SelectItem>
                   <SelectItem value="integrated">Awaiting sign-off</SelectItem>
-                  <SelectItem value="noc_approved">NOC approved</SelectItem>
+                  <SelectItem value="noc_approved">Ready for sign-off</SelectItem>
                   <SelectItem value="completed">Completed</SelectItem>
                   <SelectItem value="rejected">Rejected</SelectItem>
                 </SelectContent>
@@ -166,23 +179,27 @@ export default function ProjectUnitHub() {
                 ? 'No service requests match your filters.'
                 : 'No service requests yet. New requests start with Sales.'
             }
-            highlightRow={isExecutive ? undefined : canProjectMarkComplete}
+            highlightRow={isExecutive ? undefined : needsSignOff}
             renderExtraActions={
               isExecutive
                 ? undefined
-                : (r) =>
-                    canProjectMarkComplete(r) ? (
-                      <Button
-                        type="button"
-                        size="sm"
-                        disabled={completingId === r.id}
-                        className="h-8 bg-emerald-600 hover:bg-emerald-700"
-                        onClick={(e) => void handleMarkComplete(r, e)}
-                      >
-                        <Check className="mr-1 h-3.5 w-3.5" />
-                        {completingId === r.id ? '…' : 'Complete'}
+                : (r) => {
+                    if (!needsSignOff(r)) return null;
+                    const form = signoffByRequest[r.id];
+                    if (!form) {
+                      return (
+                        <Button type="button" size="sm" className="h-8 bg-emerald-600 hover:bg-emerald-700" onClick={(e) => startSignOff(r, e)}>
+                          <FileSignature className="mr-1 h-3.5 w-3.5" />Sign Off
+                        </Button>
+                      );
+                    }
+                    return (
+                      <Button type="button" size="sm" variant="outline" className="h-8" onClick={(e) => goToSignOff(form, e)}>
+                        <FileSignature className="mr-1 h-3.5 w-3.5" />
+                        {['draft', 'rejected'].includes(form.status) ? 'Continue' : 'View'} · {SIGNOFF_STATUS_LABEL[form.status] || form.status}
                       </Button>
-                    ) : null
+                    );
+                  }
             }
           />
         </PremiumPanel>

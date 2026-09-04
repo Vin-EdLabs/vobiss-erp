@@ -32,24 +32,57 @@ function formatStageName(stageName: string | null): string {
   return stageName.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
-function StageBlock({ stage, isCurrent, now }: { stage: StageBreakdown; isCurrent: boolean; now: Date }) {
+function StageBlock({
+  stage,
+  isCurrent,
+  now,
+  currentStageApprovers,
+}: {
+  stage: StageBreakdown;
+  isCurrent: boolean;
+  now: Date;
+  currentStageApprovers?: { pending: string[]; approved: string[] } | null;
+}) {
   const liveMinutes = isCurrent ? Math.max(0, Math.round((now.getTime() - new Date(stage.startedAt).getTime()) / 60000)) : stage.minutes;
+  const isClosedPool = !stage.userId && !!stage.endedAt;
+
   return (
-    <div className="flex min-w-[160px] flex-1 flex-col gap-1.5 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3">
+    <div className="flex min-w-[180px] flex-1 flex-col gap-1.5 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3">
       <div className="flex items-center justify-between gap-2">
         <span className={cn('h-2 w-2 shrink-0 rounded-full', STAGE_TONE[stage.slaStatus], isCurrent && 'animate-pulse')} />
         <span className="min-w-0 flex-1 truncate text-xs font-bold text-[var(--text-primary)]">{formatStageName(stage.stageName)}</span>
-        {isCurrent && <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-[var(--accent-green)]">Active</span>}
+        {isCurrent ? (
+          <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-[var(--accent-green)]">Active</span>
+        ) : isClosedPool ? (
+          <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-[var(--success-text)]">Done</span>
+        ) : null}
       </div>
       <p className={cn('text-sm font-semibold', STAGE_TEXT_TONE[stage.slaStatus])}>{formatMinutes(liveMinutes)}</p>
       {stage.expectedMinutes != null && (
         <p className="text-[11px] text-[var(--text-muted)]">Expected {formatMinutes(stage.expectedMinutes)}</p>
       )}
-      {(stage.unitSlug || stage.userFullName) && (
-        <p className="truncate text-[11px] text-[var(--text-secondary)]">
-          {stage.userFullName || stage.unitSlug}
+
+      {/* Who this stage belongs to / was closed by / is still pending on. */}
+      {stage.userFullName ? (
+        <p className="truncate text-[11px] font-medium text-[var(--text-secondary)]">
+          {isClosedPool ? `Approved by ${stage.userFullName}` : stage.userFullName}
         </p>
-      )}
+      ) : isCurrent && currentStageApprovers ? (
+        <div className="space-y-0.5">
+          {currentStageApprovers.pending.length > 0 && (
+            <p className="truncate text-[11px] font-medium text-[var(--text-secondary)]">
+              Pending: {currentStageApprovers.pending.join(', ')}
+            </p>
+          )}
+          {currentStageApprovers.approved.length > 0 && (
+            <p className="truncate text-[11px] text-[var(--success-text)]">
+              Approved: {currentStageApprovers.approved.join(', ')}
+            </p>
+          )}
+        </div>
+      ) : stage.unitSlug ? (
+        <p className="truncate text-[11px] text-[var(--text-secondary)]">{stage.unitSlug}</p>
+      ) : null}
     </div>
   );
 }
@@ -81,7 +114,7 @@ export function WorkflowTimeline({ workflowType, recordId }: { workflowType: str
     return null; // no permission, or nothing recorded yet — stay quiet, this is a secondary section
   }
 
-  const { byStage, totalElapsedMinutes, isOpen } = query.data;
+  const { byStage, totalElapsedMinutes, isOpen, currentStageApprovers } = query.data;
   if (!byStage.length) return null;
 
   return (
@@ -97,7 +130,12 @@ export function WorkflowTimeline({ workflowType, recordId }: { workflowType: str
       <div className="flex items-stretch gap-2 overflow-x-auto pb-1">
         {byStage.map((stage, i) => (
           <div key={`${stage.stageName}-${stage.startedAt}`} className="flex items-center gap-2">
-            <StageBlock stage={stage} isCurrent={isOpen && i === byStage.length - 1} now={now} />
+            <StageBlock
+              stage={stage}
+              isCurrent={isOpen && i === byStage.length - 1}
+              now={now}
+              currentStageApprovers={isOpen && i === byStage.length - 1 ? currentStageApprovers : null}
+            />
             {i < byStage.length - 1 && <ArrowRight className="h-4 w-4 shrink-0 text-[var(--text-muted)]" />}
           </div>
         ))}

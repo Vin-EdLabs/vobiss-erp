@@ -66,6 +66,7 @@ export async function ensureTimeEngineTables() {
       ended_at TIMESTAMP,
       duration_minutes INTEGER,
       is_waiting BOOLEAN NOT NULL DEFAULT FALSE,
+      is_credit_only BOOLEAN NOT NULL DEFAULT FALSE,
       created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
     CREATE INDEX IF NOT EXISTS wf_time_segments_record_idx ON workflow_time_segments(workflow_type, record_id);
@@ -73,6 +74,11 @@ export async function ensureTimeEngineTables() {
     CREATE INDEX IF NOT EXISTS wf_time_segments_unit_idx ON workflow_time_segments(unit_slug, started_at);
     CREATE INDEX IF NOT EXISTS wf_time_segments_user_idx ON workflow_time_segments(user_id, started_at);
   `);
+  try {
+    await pool.query(`ALTER TABLE workflow_time_segments ADD COLUMN IF NOT EXISTS is_credit_only BOOLEAN NOT NULL DEFAULT FALSE`);
+  } catch (e) {
+    console.warn('[workflow-time-engine] is_credit_only migration:', e.message);
+  }
   tableReady = true;
 }
 
@@ -89,6 +95,16 @@ const DEFAULT_CONFIG = [
   { workflow_type: 'service_request', stage_name: 'ts_review', expected: 120, warning: 90, critical: 120 },
   { workflow_type: 'service_request', stage_name: 'ip_review', expected: 120, warning: 90, critical: 120 },
   { workflow_type: 'service_request', stage_name: 'noc_review', expected: 120, warning: 90, critical: 120 },
+  // Service Request pipeline (Design/Sales/Project) — a request can originate from either
+  // Design or Sales, so the same conceptual "Design unit" / "Project unit" stage is logged
+  // under two different workflow_type chains depending on origin (see recordTimingEvent call
+  // sites in project.routes.js). Configuration's "Service Request SLA" section edits both
+  // halves of each pair together so this duality stays invisible to the admin.
+  { workflow_type: 'design_request', stage_name: 'design', expected: 1440, warning: 1080, critical: 1440 },
+  { workflow_type: 'sales_request', stage_name: 'design', expected: 1440, warning: 1080, critical: 1440 },
+  { workflow_type: 'design_request', stage_name: 'sales', expected: 480, warning: 360, critical: 480 },
+  { workflow_type: 'sales_request', stage_name: 'project', expected: 480, warning: 360, critical: 480 },
+  { workflow_type: 'service_request', stage_name: 'project', expected: 2880, warning: 2160, critical: 2880 },
   { workflow_type: 'wip_entry', stage_name: 'in_progress', expected: 1440, warning: 1080, critical: 1440 },
   { workflow_type: 'transport_request', stage_name: 'pending_approval', expected: 30, warning: 25, critical: 30 },
   { workflow_type: 'fuel_request', stage_name: 'pending_approval', expected: 30, warning: 25, critical: 30 },
@@ -170,9 +186,14 @@ export async function recordTimingEvent(opts = {}) {
 
       if (opts.attributeToUserId) {
         const closed = openSegment.rows[0];
+        // is_credit_only = TRUE: this row exists purely so the acting user gets credit in
+        // Staff Performance (getStaffPerformance/getStaffLeaderboard) — it duplicates the
+        // pool segment above by design (same stage, same duration). It must NEVER be counted
+        // in a record's own timeline/total (getRecordTurnaround, getLiveOverview) or it shows
+        // as a second, confusing "Pending Approval" box for the same approval event.
         await pool.query(
-          `INSERT INTO workflow_time_segments (workflow_type, record_id, unit_slug, user_id, stage_name, started_at, ended_at, duration_minutes, is_waiting)
-           VALUES ($1,$2,$3,$4,$5,$6,CURRENT_TIMESTAMP,GREATEST(0, ROUND(EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - $6::timestamp)) / 60)),FALSE)`,
+          `INSERT INTO workflow_time_segments (workflow_type, record_id, unit_slug, user_id, stage_name, started_at, ended_at, duration_minutes, is_waiting, is_credit_only)
+           VALUES ($1,$2,$3,$4,$5,$6,CURRENT_TIMESTAMP,GREATEST(0, ROUND(EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - $6::timestamp)) / 60)),FALSE,TRUE)`,
           [workflowType, recordId, closed.unit_slug, opts.attributeToUserId, closed.stage_name, closed.started_at]
         );
       }
@@ -231,15 +252,27 @@ export async function getRecordTurnaround(workflowType, recordId) {
   const byStage = [];
   const exceededStages = [];
 
+  // Credit-only rows exist purely so the acting user gets turnaround credit in Staff
+  // Performance — they duplicate a real pool segment's stage/duration by design (see
+  // recordTimingEvent's attributeToUserId branch). Rendering them as their own timeline box
+  // is what made the same approval show up twice ("Pending Approval" then "Sarah Chrapah /
+  // Pending Approval" right after it) and doubled the total. Instead, pull the acting user's
+  // name from their credit row and attach it to the pool segment it duplicates.
+  const creditNameByTwin = new Map();
+  for (const seg of segments.rows) {
+    if (!seg.is_credit_only) continue;
+    const name = `${seg.first_name || ''} ${seg.last_name || ''}`.trim() || seg.username || null;
+    if (name) {
+      const key = `${seg.stage_name}|${new Date(seg.started_at).getTime()}|${seg.ended_at ? new Date(seg.ended_at).getTime() : ''}`;
+      creditNameByTwin.set(key, name);
+    }
+  }
+
   for (const seg of segments.rows) {
     const started = new Date(seg.started_at);
     const ended = seg.ended_at ? new Date(seg.ended_at) : now;
     const minutes = seg.duration_minutes != null ? seg.duration_minutes : Math.max(0, Math.round((ended.getTime() - started.getTime()) / 60000));
-    totalElapsedMinutes += minutes;
-    if (seg.is_waiting) waitingMinutes += minutes;
-    else activeMinutes += minutes;
 
-    if (seg.unit_slug) byUnit.set(seg.unit_slug, (byUnit.get(seg.unit_slug) || 0) + minutes);
     if (seg.user_id) {
       const key = seg.user_id;
       const name = `${seg.first_name || ''} ${seg.last_name || ''}`.trim() || seg.username || `User #${seg.user_id}`;
@@ -248,13 +281,26 @@ export async function getRecordTurnaround(workflowType, recordId) {
       byUser.set(key, prev);
     }
 
+    if (seg.is_credit_only) continue; // already folded into byUser above — never into the timeline/totals below
+
+    totalElapsedMinutes += minutes;
+    if (seg.is_waiting) waitingMinutes += minutes;
+    else activeMinutes += minutes;
+    if (seg.unit_slug) byUnit.set(seg.unit_slug, (byUnit.get(seg.unit_slug) || 0) + minutes);
+
     const config = seg.stage_name ? configByStage.get(seg.stage_name) : null;
     const status = slaStatusFor(minutes, config);
+    const twinName = seg.user_id
+      ? null
+      : creditNameByTwin.get(`${seg.stage_name}|${started.getTime()}|${seg.ended_at ? ended.getTime() : ''}`) || null;
     byStage.push({
       stageName: seg.stage_name,
       unitSlug: seg.unit_slug,
       userId: seg.user_id,
-      userFullName: seg.user_id ? (`${seg.first_name || ''} ${seg.last_name || ''}`.trim() || seg.username || null) : null,
+      userFullName: seg.user_id ? (`${seg.first_name || ''} ${seg.last_name || ''}`.trim() || seg.username || null) : twinName,
+      // Who closed this pool segment (only meaningful once it's closed — an OPEN pool
+      // segment has no actor yet; the frontend falls back to "pending approver(s)" there).
+      approvedByName: twinName,
       startedAt: seg.started_at,
       endedAt: seg.ended_at,
       minutes,
@@ -267,22 +313,21 @@ export async function getRecordTurnaround(workflowType, recordId) {
     }
   }
 
-  const currentSegment = segments.rows[segments.rows.length - 1].ended_at ? null : segments.rows[segments.rows.length - 1];
-  const currentConfig = currentSegment?.stage_name ? configByStage.get(currentSegment.stage_name) : null;
-  const currentMinutes = currentSegment ? byStage[byStage.length - 1].minutes : null;
+  const lastStageEntry = byStage[byStage.length - 1] || null;
+  const isOpen = !!lastStageEntry && !lastStageEntry.endedAt;
 
   return {
     workflowType,
     recordId,
     startedAt: first.started_at,
-    isOpen: !!currentSegment,
+    isOpen,
     totalElapsedMinutes,
     waitingMinutes,
     activeMinutes,
     byUnit: [...byUnit.entries()].map(([unitSlug, minutes]) => ({ unitSlug, minutes })),
     byUser: [...byUser.values()],
     byStage,
-    slaStatus: currentSegment ? slaStatusFor(currentMinutes, currentConfig) : null,
+    slaStatus: isOpen ? lastStageEntry.slaStatus : null,
     exceededStages,
   };
 }

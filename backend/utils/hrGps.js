@@ -13,8 +13,13 @@ export function haversineDistance(lat1, lon1, lat2, lon2) {
   return R * c;
 }
 
-export async function getHrSettings() {
-  const result = await pool.query(`SELECT * FROM hr_settings ORDER BY id ASC LIMIT 1`);
+export async function getHrSettings(company = null) {
+  const result = await pool.query(
+    company
+      ? `SELECT * FROM hr_settings WHERE company = $1 ORDER BY id ASC LIMIT 1`
+      : `SELECT * FROM hr_settings ORDER BY id ASC LIMIT 1`,
+    company ? [company] : []
+  );
   return result.rows[0] || null;
 }
 

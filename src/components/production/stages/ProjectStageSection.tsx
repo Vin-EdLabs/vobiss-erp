@@ -1,10 +1,25 @@
 import React, { useState } from 'react';
-import { Check, Send } from 'lucide-react';
+import { FileSignature, Send } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { DetailCard, FormField, InfoField, InfoGrid } from '@/components/production/production-ui';
 import { AttachmentZone } from '@/components/production/AttachmentZone';
 import { useToast } from '@/hooks/use-toast';
-import { projectForwardProjectRequest, projectCompleteProjectRequest, uploadProjectRequestAttachment, type ProjectRequest, type ProjectStageFields } from '@/api/project';
+import { projectForwardProjectRequest, uploadProjectRequestAttachment, type ProjectRequest, type ProjectStageFields } from '@/api/project';
+
+/** NOC has added the circuit to monitoring — every stage of the flow is done. The actual
+ *  Sign-Off Form (and completing this request) happens from the Project Unit dashboard's
+ *  "Ready for sign-off" list, not here — this card is read-only, just pointing there. */
+function AwaitingSignOffNotice() {
+  return (
+    <div className="flex items-start gap-3 rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900">
+      <FileSignature className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600" />
+      <div>
+        <p className="font-semibold">Ready for sign-off</p>
+        <p className="mt-1 text-emerald-800">Every stage of this request is done. Fill and approve its Sign-Off Form from the Project Unit dashboard to complete it.</p>
+      </div>
+    </div>
+  );
+}
 
 /** Read-only display of whatever Project already filled — used once this stage is done. Shows
  *  Project's own attachments too, same as every other card, and still lets Project add more
@@ -43,7 +58,7 @@ export function ProjectReadOnlySummary({
 /** Project fills its technical/commercial fields and routes to TX or IP in one step (fields save
  *  and the stage advances together, same shape IP's own forward already uses). Also carries the
  *  "send to NOC" hop once TX/IP have returned (status='integrated') and the final sign-off after
- *  NOC approves (status='noc_approved') — three distinct action states, one section. */
+ *  NOC confirms monitoring (status='noc_approved') — three distinct action states, one section. */
 export function ProjectStageSection({
   request, canRoute, canSendNoc, canComplete, canUpload, actionLoading, setActionLoading, onUpdated,
 }: {
@@ -90,29 +105,11 @@ export function ProjectStageSection({
     }
   };
 
-  const complete = async () => {
-    setActionLoading(true);
-    try {
-      await projectCompleteProjectRequest(request.id);
-      toast({ title: 'Request completed' });
-      await onUpdated();
-    } catch (e: unknown) {
-      toast({ title: 'Could not complete', description: e instanceof Error ? e.message : 'Try again', variant: 'destructive' });
-    } finally {
-      setActionLoading(false);
-    }
-  };
-
   if (canComplete) {
     return (
       <div className="space-y-5">
         <ProjectReadOnlySummary request={request} canUpload={canUpload} onUpdated={onUpdated} />
-        <DetailCard title="Mark as complete" icon={Check}>
-          <p className="mb-4 text-sm text-[var(--text-secondary)]">NOC has approved. Review the full package above, then mark this request complete.</p>
-          <Button disabled={actionLoading} className="w-full rounded-xl bg-emerald-600 py-6 text-base font-semibold hover:bg-emerald-700" onClick={() => void complete()}>
-            <Check className="mr-2 h-5 w-5" />{actionLoading ? 'Completing…' : 'Mark as complete'}
-          </Button>
-        </DetailCard>
+        <AwaitingSignOffNotice />
       </div>
     );
   }

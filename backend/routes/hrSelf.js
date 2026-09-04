@@ -120,7 +120,7 @@ router.get('/attendance/today', async (req, res) => {
       `SELECT * FROM hr_attendance WHERE employee_id = $1 AND date = $2 LIMIT 1`,
       [emp.id, today]
     );
-    const settings = await getHrSettings();
+    const settings = await getHrSettings(emp.company || req.user?.company || 'CW');
     const onLeave = (await leaveEmployeeIdsOn(today)).has(Number(emp.id));
     res.json({
       record: result.rows[0] || null,
@@ -157,7 +157,7 @@ router.post('/attendance/clock-in', async (req, res) => {
     const coords = parseCoords(req.body);
     if (!coords) return res.status(400).json({ error: 'Latitude and longitude are required' });
 
-    const settings = await getHrSettings();
+    const settings = await getHrSettings(emp.company || req.user?.company || 'CW');
     if (!settings?.office_latitude || !settings?.office_longitude) {
       return res.status(400).json({ error: 'HR has not set the office location yet' });
     }
@@ -257,7 +257,7 @@ router.post('/attendance/manual-clock-in', async (req, res) => {
       return res.status(400).json({ error: 'Already clocked in today' });
     }
 
-    const settings = await getHrSettings();
+    const settings = await getHrSettings(emp.company || req.user?.company || 'CW');
     const expectedMin = timeToMinutes(settings?.expected_clock_in);
     const clockMin = hh * 60 + mm;
     const lateMinutes = expectedMin == null ? 0 : Math.max(0, clockMin - expectedMin);
@@ -327,7 +327,7 @@ router.post('/attendance/clock-out', async (req, res) => {
       return res.status(400).json({ error: 'Already clocked out today' });
     }
 
-    const settings = await getHrSettings();
+    const settings = await getHrSettings(emp.company || req.user?.company || 'CW');
     const radius = Number(settings?.office_radius_meters || 100);
     let distance = 0;
     let isRemote = false;

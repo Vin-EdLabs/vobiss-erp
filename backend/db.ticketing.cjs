@@ -1113,8 +1113,10 @@ async function resolveTicketRowRef(ticketRef) {
   await loadDbModule();
   const ref = normalizeTicketRef(ticketRef);
   if (!ref) return null;
+  // Sargable on purpose: matching the bare `ticket_id`/`id` columns (instead of wrapping them in
+  // TRIM()/::text) lets Postgres use their indexes instead of scanning every row.
   const res = await pool.query(
-    `SELECT id, ticket_id FROM tickets WHERE TRIM(ticket_id) = $1 OR id::text = $1 LIMIT 1`,
+    `SELECT id, ticket_id FROM tickets WHERE ticket_id = $1 OR ($1 ~ '^[0-9]+$' AND id = $1::int) LIMIT 1`,
     [ref]
   );
   return res.rows[0] || null;
@@ -1420,7 +1422,7 @@ async function getTicketByIdForStaff(ticketId) {
     LEFT JOIN customer_sites s ON s.id = t.site_id
     LEFT JOIN users u_assigned ON t.assigned_to = u_assigned.id
     LEFT JOIN users u_creator ON t.created_by_id = u_creator.id AND t.created_by_type = 'staff'
-    WHERE TRIM(t.ticket_id) = $1 OR t.id::text = $1
+    WHERE t.ticket_id = $1 OR ($1 ~ '^[0-9]+$' AND t.id = $1::int)
   `;
   const result = await pool.query(query, [ref]);
   const row = result.rows[0];

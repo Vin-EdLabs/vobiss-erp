@@ -87,6 +87,7 @@ import UserWorkHistory from './staff/cx/UserWorkHistory';        // User Work Hi
 import TicketSearch from './staff/cx/TicketSearch';              // Ticket Search
 import TagManager from './staff/cx/TagManager';
 import TicketDetailPage from './staff/cx/TicketDetailPage';       // Full-page Ticket Details
+import TodaysTickets from './staff/TodaysTickets';
 import ReportsHub from './staff/reports/ReportsHub';
 import TicketReport from './staff/reports/TicketReport';
 import CashReport from './staff/reports/CashReport';
@@ -104,6 +105,7 @@ import FieldWorkList from './staff/field/FieldWorkList';
 import MyFieldWork from './staff/field/MyFieldWork';
 import FieldWorkDetailPage from './staff/field/FieldWorkDetailPage';
 import Archive from './Archive';
+import ArchiveFilePreviewPage from './archive/ArchiveFilePreviewPage';
 import IpUnitDashboard from './ipUnit/Dashboard';
 import CircuitInventory from './ipUnit/CircuitInventory';
 import AddCircuit from './ipUnit/AddCircuit';
@@ -145,6 +147,8 @@ import ProductionUnitsPage from './production/ProductionUnitsPage';
 import DesignUnitPage from './production/DesignUnitPage';
 import DesignConfigurationPage from './production/DesignConfigurationPage';
 import SalesUnitPage from './production/SalesUnitPage';
+import PtelSalesDashboard from './ptel/SalesDashboard';
+import PtelComingSoon from './ptel/ComingSoon';
 import HrDashboard from './hr/Dashboard';
 import HrEmployees from './hr/Employees';
 import HrEmployeeProfile from './hr/EmployeeProfile';
@@ -705,6 +709,28 @@ const Index = () => {
                   </ProtectedRoute>
                 }
               />
+              {/* PTEL */}
+              <Route
+                path="/ptel/sales/dashboard"
+                element={
+                  <ProtectedRoute allowedRoles={['ptel_sales', 'ptel_executive', 'ptel_cx_manager']}>
+                    <PtelSalesDashboard />
+                  </ProtectedRoute>
+                }
+              />
+              {['/ptel/hr', '/ptel/finance', '/ptel/transport', '/ptel/inventory', '/ptel/assets', '/ptel/audit-logs'].map((path) => (
+                <Route
+                  key={path}
+                  path={path}
+                  element={
+                    <ProtectedRoute
+                      allowedRoles={['ptel_sales', 'ptel_cx_manager', 'ptel_finance', 'ptel_hr_admin', 'ptel_data', 'ptel_service_delivery', 'ptel_executive']}
+                    >
+                      <PtelComingSoon />
+                    </ProtectedRoute>
+                  }
+                />
+              ))}
               <Route
                 path="/settings/design-configuration"
                 element={
@@ -730,8 +756,8 @@ const Index = () => {
                 }
               />
               <Route path="/project-unit/wip" element={<ProtectedRoute allowedRoles={PRODUCTION_ACCESS_ROLES} allowedUnits={['design', 'project', 'sales', 'tx', 'ts', 'ip', 'noc']} allowedPositions={['Manager', 'Supervisor', 'Director', 'CTO']}><WipPage /></ProtectedRoute>} />
-              <Route path="/project-unit/signoff" element={<ProtectedRoute allowedRoles={PRODUCTION_ACCESS_ROLES}><SignoffFormsList /></ProtectedRoute>} />
-              <Route path="/project-unit/signoff/:id" element={<ProtectedRoute allowedRoles={PRODUCTION_ACCESS_ROLES}><SignoffFormPage /></ProtectedRoute>} />
+              <Route path="/project-unit/signoff" element={<ProtectedRoute allowedRoles={PRODUCTION_ACCESS_ROLES} allowedUnits={['design', 'project', 'sales', 'tx', 'ts', 'ip', 'noc']} allowedPositions={['Manager', 'Supervisor', 'Director', 'CTO']}><SignoffFormsList /></ProtectedRoute>} />
+              <Route path="/project-unit/signoff/:id" element={<ProtectedRoute allowedRoles={PRODUCTION_ACCESS_ROLES} allowedUnits={['design', 'project', 'sales', 'tx', 'ts', 'ip', 'noc']} allowedPositions={['Manager', 'Supervisor', 'Director', 'CTO']}><SignoffFormPage /></ProtectedRoute>} />
               <Route
                 path="/project-request/:unitSlug"
                 element={
@@ -899,7 +925,7 @@ const Index = () => {
               <Route
                 path="/staff/cx/dashboard"
                 element={
-                  <ProtectedRoute allowedRoles={CX_MODULE_ROLES} allowedUnits={['cx']} allowedPositions={CX_POSITIONS}>
+                  <ProtectedRoute allowedRoles={CX_MODULE_ROLES} allowedUnits={['cx', 'sales']} allowedPositions={CX_POSITIONS}>
                     <CXDashboard />
                   </ProtectedRoute>
                 }
@@ -934,7 +960,7 @@ const Index = () => {
               />
               <Route
                 path="/workflow-performance"
-                element={<ProtectedRoute allowedRoles={WORKFLOW_TIME_ENGINE_ROLES}><WorkflowPerformance /></ProtectedRoute>}
+                element={<ProtectedRoute allowedRoles={['director', 'cto']}><WorkflowPerformance /></ProtectedRoute>}
               />
               <Route path="/my-assessment" element={<ProtectedRoute><MyAssessment /></ProtectedRoute>} />
               <Route path="/performance-reports/dashboard" element={<ProtectedRoute><PerformanceDashboard /></ProtectedRoute>} />
@@ -948,6 +974,7 @@ const Index = () => {
               <Route path="/performance-reports/periods" element={<ProtectedRoute allowedRoles={PERFORMANCE_EXEC_ROLES}><PerformanceAssessmentPeriods /></ProtectedRoute>} />
               <Route path="/performance-reports/analytics" element={<ProtectedRoute allowedRoles={['hr', 'director', 'cto']} allowedPositions={['HR', 'Director', 'CTO']}><PerformanceAnalytics /></ProtectedRoute>} />
               <Route path="/archive" element={<ProtectedRoute><Archive /></ProtectedRoute>} />
+              <Route path="/file-storage/preview/:id" element={<ProtectedRoute><ArchiveFilePreviewPage /></ProtectedRoute>} />
               <Route
                 path="/staff-assessment/:userId"
                 element={<ProtectedRoute allowedRoles={[...WORKFLOW_TIME_ENGINE_ROLES, 'hr']} allowedPositions={['Manager', 'Supervisor', 'Director', 'CTO', 'HR']}><MyAssessment /></ProtectedRoute>}
@@ -1051,7 +1078,7 @@ const Index = () => {
               <Route
                 path="/staff/cx/projects"
                 element={
-                  <ProtectedRoute allowedRoles={CX_MODULE_ROLES} allowedUnits={['cx']} allowedPositions={CX_POSITIONS}>
+                  <ProtectedRoute allowedRoles={CX_MODULE_ROLES} allowedUnits={['cx', 'sales']} allowedPositions={CX_POSITIONS}>
                     <CXProjects />
                   </ProtectedRoute>
                 }
@@ -1059,7 +1086,7 @@ const Index = () => {
               <Route
                 path="/staff/cx/sites"
                 element={
-                  <ProtectedRoute allowedRoles={CX_MODULE_ROLES} allowedUnits={['cx']} allowedPositions={CX_POSITIONS}>
+                  <ProtectedRoute allowedRoles={CX_MODULE_ROLES} allowedUnits={['cx', 'sales']} allowedPositions={CX_POSITIONS}>
                     <SitesPage />
                   </ProtectedRoute>
                 }
@@ -1075,7 +1102,7 @@ const Index = () => {
               <Route
                 path="/staff/cx/clients"
                 element={
-                  <ProtectedRoute allowedRoles={CX_MODULE_ROLES} allowedUnits={['cx']} allowedPositions={CX_POSITIONS}>
+                  <ProtectedRoute allowedRoles={CX_MODULE_ROLES} allowedUnits={['cx', 'sales']} allowedPositions={CX_POSITIONS}>
                     <ClientsPage />
                   </ProtectedRoute>
                 }
@@ -1083,7 +1110,7 @@ const Index = () => {
               <Route
                 path="/staff/cx/clients/:id"
                 element={
-                  <ProtectedRoute allowedRoles={CX_MODULE_ROLES} allowedUnits={['cx']} allowedPositions={CX_POSITIONS}>
+                  <ProtectedRoute allowedRoles={CX_MODULE_ROLES} allowedUnits={['cx', 'sales']} allowedPositions={CX_POSITIONS}>
                     <ClientDetailPage />
                   </ProtectedRoute>
                 }
@@ -1091,15 +1118,19 @@ const Index = () => {
               <Route
                 path="/staff/cx/tickets"
                 element={
-                  <ProtectedRoute allowedRoles={CX_MODULE_ROLES} allowedUnits={['cx']} allowedPositions={CX_POSITIONS}>
+                  <ProtectedRoute allowedRoles={CX_MODULE_ROLES} allowedUnits={['cx', 'sales']} allowedPositions={CX_POSITIONS}>
                     <AllTickets />
                   </ProtectedRoute>
                 }
               />
               <Route
+                path="/staff/tickets/today"
+                element={<ProtectedRoute><TodaysTickets /></ProtectedRoute>}
+              />
+              <Route
                 path="/staff/cx/tickets/:id"
                 element={
-                  <ProtectedRoute allowedRoles={CX_MODULE_ROLES} allowedUnits={['cx']} allowedPositions={CX_POSITIONS}>
+                  <ProtectedRoute allowedRoles={CX_MODULE_ROLES} allowedUnits={['cx', 'sales']} allowedPositions={CX_POSITIONS}>
                     <TicketDetailPage />
                   </ProtectedRoute>
                 }
@@ -1132,7 +1163,7 @@ const Index = () => {
               <Route
                 path="/staff/cx/create-ticket"
                 element={
-                  <ProtectedRoute allowedRoles={CX_MODULE_ROLES} allowedUnits={['cx', 'noc', 'ip', 'tx', 'ts']} allowedPositions={CX_POSITIONS}>
+                  <ProtectedRoute allowedRoles={CX_MODULE_ROLES} allowedUnits={['cx', 'noc', 'ip', 'tx', 'ts', 'sales']} allowedPositions={CX_POSITIONS}>
                     <CreateStaffTicket />
                   </ProtectedRoute>
                 }
@@ -1142,7 +1173,7 @@ const Index = () => {
               <Route
                 path="/staff/cx/escalate"
                 element={
-                  <ProtectedRoute allowedRoles={CX_MODULE_ROLES} allowedUnits={['cx', 'noc', 'ip', 'tx', 'ts']} allowedPositions={CX_POSITIONS}>
+                  <ProtectedRoute allowedRoles={CX_MODULE_ROLES} allowedUnits={['cx', 'noc', 'ip', 'tx', 'ts', 'sales']} allowedPositions={CX_POSITIONS}>
                     <EscalateTicket />
                   </ProtectedRoute>
                 }
@@ -1150,7 +1181,7 @@ const Index = () => {
               <Route
                 path="/staff/cx/escalate/:ticketId"
                 element={
-                  <ProtectedRoute allowedRoles={CX_MODULE_ROLES} allowedUnits={['cx', 'noc', 'ip', 'tx', 'ts']} allowedPositions={CX_POSITIONS}>
+                  <ProtectedRoute allowedRoles={CX_MODULE_ROLES} allowedUnits={['cx', 'noc', 'ip', 'tx', 'ts', 'sales']} allowedPositions={CX_POSITIONS}>
                     <EscalateTicket />
                   </ProtectedRoute>
                 }
@@ -1165,11 +1196,11 @@ const Index = () => {
                 }
               />
 
-              {/* USER WORK HISTORY */}
+              {/* USER WORK HISTORY — System Admin only, hidden from the sidebar for everyone else */}
               <Route
                 path="/staff/cx/user-work-history"
                 element={
-                  <ProtectedRoute allowedRoles={CX_MODULE_ROLES} allowedUnits={['cx']} allowedPositions={CX_POSITIONS}>
+                  <ProtectedRoute adminOnly>
                     <UserWorkHistory />
                   </ProtectedRoute>
                 }
@@ -1179,7 +1210,7 @@ const Index = () => {
               <Route
                 path="/staff/cx/ticket-search"
                 element={
-                  <ProtectedRoute allowedRoles={CX_MODULE_ROLES} allowedUnits={['cx']} allowedPositions={CX_POSITIONS}>
+                  <ProtectedRoute allowedRoles={CX_MODULE_ROLES} allowedUnits={['cx', 'sales']} allowedPositions={CX_POSITIONS}>
                     <TicketSearch />
                   </ProtectedRoute>
                 }
@@ -1187,7 +1218,7 @@ const Index = () => {
               <Route
                 path="/staff/cx/tags"
                 element={
-                  <ProtectedRoute allowedRoles={CX_MODULE_ROLES} allowedUnits={['cx']} allowedPositions={CX_POSITIONS}>
+                  <ProtectedRoute allowedRoles={CX_MODULE_ROLES} allowedUnits={['cx', 'sales']} allowedPositions={CX_POSITIONS}>
                     <TagManager />
                   </ProtectedRoute>
                 }

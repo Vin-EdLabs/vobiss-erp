@@ -81,7 +81,33 @@ router.get('/record/:workflowType/:recordId', async (req, res) => {
 
     const turnaround = await getRecordTurnaround(workflowType, id);
     if (!turnaround) return res.json({ workflowType, recordId: id, notStarted: true });
-    res.json(turnaround);
+
+    // The current pending-approval stage has no single owner (it's a pool, not an assignee) —
+    // name the specific people it's actually pending on, and mark whoever's already acted as
+    // done, instead of a bare "Pending Approval" box with no one to point to.
+    let currentStageApprovers = null;
+    if (turnaround.isOpen && ['cash_request', 'material_request', 'item_return'].includes(workflowType)) {
+      const last = turnaround.byStage[turnaround.byStage.length - 1];
+      if (last && !last.userFullName) {
+        const assignedRes = await pool.query(
+          `SELECT u.id, COALESCE(NULLIF(TRIM(CONCAT(COALESCE(u.first_name,''),' ',COALESCE(u.last_name,''))),''), u.username) AS full_name
+           FROM request_approvers ra JOIN users u ON u.id = ra.approver_id
+           WHERE ra.request_id = $1 ORDER BY ra.assigned_at ASC`,
+          [id]
+        );
+        const approvedRes = await pool.query(
+          `SELECT DISTINCT approver_id FROM approvals WHERE request_id = $1 AND approval_stage = 'supervisor' AND approver_id IS NOT NULL`,
+          [id]
+        );
+        const approvedIds = new Set(approvedRes.rows.map((r) => Number(r.approver_id)).filter(Boolean));
+        currentStageApprovers = {
+          pending: assignedRes.rows.filter((r) => !approvedIds.has(Number(r.id))).map((r) => r.full_name),
+          approved: assignedRes.rows.filter((r) => approvedIds.has(Number(r.id))).map((r) => r.full_name),
+        };
+      }
+    }
+
+    res.json({ ...turnaround, currentStageApprovers });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

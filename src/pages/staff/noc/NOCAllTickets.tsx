@@ -190,11 +190,15 @@ const NOCAllTickets: React.FC = () => {
       if (!response.ok) throw new Error('Failed to load team members');
       const data = await response.json();
 
-      // Filter for NOC members only
-      const nocMembers = data.filter((m: any) =>
-        m.role?.toLowerCase() === 'noc' ||
-        m.role?.toLowerCase().includes('noc')
-      );
+      // Filter for NOC members only — real accounts are tagged via unit/position (e.g. a NOC
+      // Supervisor's `role` is often just 'user'), so unit/position must be checked too, not
+      // just the role slug.
+      const nocMembers = data.filter((m: any) => {
+        const role = m.role?.toLowerCase() || '';
+        const position = m.position?.toLowerCase() || '';
+        const units: string[] = Array.isArray(m.units) ? m.units.map((u: string) => u?.toLowerCase()) : [];
+        return role === 'noc' || role.includes('noc') || units.includes('noc') || m.unit?.toLowerCase() === 'noc' || position.includes('noc');
+      });
 
       setTeamMembers(nocMembers);
       return nocMembers;
@@ -211,8 +215,7 @@ const NOCAllTickets: React.FC = () => {
       setLoading(true);
       setError(null);
 
-      const nocMembers = await fetchTeamMembers();
-      const nocMemberNames = new Set(nocMembers.map((m: any) => m.fullName));
+      await fetchTeamMembers();
 
       const data = await cxApi.getAllTickets();
       let ticketList: any[] = [];
@@ -220,15 +223,12 @@ const NOCAllTickets: React.FC = () => {
       else if (Array.isArray(data)) ticketList = data;
       else if (data?.tickets) ticketList = data.tickets;
 
-      // NOC unit queue: tickets at escalation stage "noc" (unassigned until someone claims)
+      // NOC unit queue: every ticket at escalation stage "noc" — claimed or not. Used to also
+      // additionally require the assignee's raw `role` column to read "noc", but real NOC staff
+      // are tagged via unit/position (role is often just 'user'), so a ticket assigned to a real
+      // NOC Supervisor/Manager silently vanished from this queue the moment they claimed it.
       const processed = ticketList
-        .filter((t: any) => {
-          const stage = String(t.escalation_stage || 'noc').toLowerCase();
-          if (stage !== 'noc') return false;
-          const assignee = t.assignee_name || t.assigned_to?.name || '';
-          const assigneeRole = t.assignee_role?.toLowerCase() || '';
-          return !assignee || assigneeRole === 'noc' || assigneeRole.includes('noc') || nocMemberNames.has(assignee);
-        })
+        .filter((t: any) => String(t.escalation_stage || 'noc').toLowerCase() === 'noc')
         .map((t: any) => ({
           ...t,
           ticket_id: t.ticket_id || t.id || `TKT-${Date.now()}`,

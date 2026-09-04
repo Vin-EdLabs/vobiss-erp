@@ -559,7 +559,9 @@ const TicketDetailPage: React.FC = () => {
     });
   };
 
-  if (loading || loadingTeam) {
+  {/* Team members (for the Assign To dropdown) load in the background — they're secondary to
+      the ticket itself and shouldn't hold up the whole page behind two sequential round trips. */}
+  if (loading) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-[#f5ebe0]/40 flex items-center justify-center">
         <div className="text-center">
@@ -592,6 +594,14 @@ const TicketDetailPage: React.FC = () => {
     ? (Array.isArray(ticket.attachments) ? ticket.attachments : [ticket.attachments])
     : [];
 
+  // Sales gets read access to every ticket (see backend canViewTicket) so they can see what's
+  // going on with customers, but reply/assign/escalate/close all still 403 for them — the
+  // backend guards those separately. No hidden-button "viewer mode" exists on this page yet, so
+  // this banner sets expectations up front instead of letting them discover it via an error
+  // after clicking something.
+  const userUnits = [user?.unit, ...(Array.isArray(user?.units) ? user.units : [])].map((u) => String(u || '').trim().toLowerCase());
+  const isSalesViewer = userUnits.includes('sales') && !userUnits.includes('cx');
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-[#f5ebe0]/40">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
@@ -603,6 +613,13 @@ const TicketDetailPage: React.FC = () => {
             <ArrowLeft className="w-4 h-4 group-hover:-translate-x-1 transition-transform" />
             {backLabel}
           </button>
+
+          {isSalesViewer && (
+            <div className="mb-4 flex items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+              <Eye className="h-4 w-4 shrink-0" />
+              <span>View-only access — you can see this ticket because you're in Sales, but replying, assigning, and closing are handled by CX/support.</span>
+            </div>
+          )}
 
           <div className="bg-white rounded-2xl shadow-[var(--shadow-md)] border border-slate-200 p-6">
             <div className="flex items-start justify-between flex-wrap gap-4">
@@ -735,22 +752,22 @@ const TicketDetailPage: React.FC = () => {
                     <p className="text-base font-semibold text-slate-900 font-mono">{ticket.customer_code}</p>
                   </div>
                 )}
-                {ticket.customer_email && (
-                  <div>
-                    <p className="text-sm text-slate-500 mb-1 flex items-center gap-1">
-                      <Mail className="w-4 h-4" /> Email
-                    </p>
-                    <p className="text-base font-semibold text-slate-900">{ticket.customer_email}</p>
-                  </div>
-                )}
-                {ticket.customer_phone && (
-                  <div>
-                    <p className="text-sm text-slate-500 mb-1 flex items-center gap-1">
-                      <Phone className="w-4 h-4" /> Phone
-                    </p>
-                    <p className="text-base font-semibold text-slate-900">{ticket.customer_phone}</p>
-                  </div>
-                )}
+                <div>
+                  <p className="text-sm text-slate-500 mb-1 flex items-center gap-1">
+                    <Mail className="w-4 h-4" /> Email
+                  </p>
+                  <p className={ticket.customer_email ? 'text-base font-semibold text-slate-900' : 'text-base font-medium text-slate-400 italic'}>
+                    {ticket.customer_email || 'Not on file'}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-sm text-slate-500 mb-1 flex items-center gap-1">
+                    <Phone className="w-4 h-4" /> Phone
+                  </p>
+                  <p className={ticket.customer_phone ? 'text-base font-semibold text-slate-900' : 'text-base font-medium text-slate-400 italic'}>
+                    {ticket.customer_phone || 'Not on file'}
+                  </p>
+                </div>
                 <div>
                   <p className="text-sm text-slate-500 mb-1">Site</p>
                   <p className="text-base font-semibold text-slate-900">
@@ -966,12 +983,12 @@ const TicketDetailPage: React.FC = () => {
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-2">Assign To</label>
                   <select
-                    disabled={assigningTicketId === ticket.ticket_id}
+                    disabled={assigningTicketId === ticket.ticket_id || loadingTeam}
                     onChange={(e) => assignTicket(parseInt(e.target.value) || '')}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-[var(--primary)]/40 focus:border-[var(--primary)] outline-none"
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-[var(--primary)]/40 focus:border-[var(--primary)] outline-none disabled:opacity-60"
                     defaultValue=""
                   >
-                    <option value="" disabled>Select team member</option>
+                    <option value="" disabled>{loadingTeam ? 'Loading team…' : 'Select team member'}</option>
                     {teamMembers.map(m => (
                       <option key={m.id} value={m.id}>
                         {m.fullName}

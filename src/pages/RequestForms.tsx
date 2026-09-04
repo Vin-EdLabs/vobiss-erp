@@ -1,7 +1,9 @@
 // src/pages/RequestForms.tsx
 import React, { useState, useEffect, useRef } from 'react';
 import { Plus, Search, Clock, CheckCircle, XCircle, Users } from 'lucide-react';
-import { getRequests, getItems, createRequest, getApprovers, cxApi } from '../api';
+import { getRequests, getItems, createRequest, getApprovers, cxApi, getWorkflowConfig } from '../api';
+import { ReferenceLinkPicker } from '@/components/references/ReferenceLinkPicker';
+import type { ReferenceSummary } from '@/lib/referenceRegistry';
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -189,8 +191,12 @@ const RequestForms: React.FC = () => {
     selectedApproverIds: number[];
     ticket_id?: number | null;
     linked_cash_request_id?: number | null;
+    linked_references?: ReferenceSummary[];
   }) => {
     try {
+      const mergedLinkedReferences = formData.linked_references?.length
+        ? formData.linked_references
+        : fieldWorkLinks;
       await createRequest({
         createdBy: formData.createdBy,
         teamLeaderName: formData.teamLeaderName,
@@ -204,7 +210,7 @@ const RequestForms: React.FC = () => {
         items: formData.items,
         ticket_id: formData.ticket_id,
         linked_cash_request_id: formData.linked_cash_request_id,
-        ...(fieldWorkLinks?.length ? { linked_references: fieldWorkLinks } : {}),
+        ...(mergedLinkedReferences?.length ? { linked_references: mergedLinkedReferences } : {}),
       }, formData.selectedApproverIds, 'material_request');
 
       setIsFormOpen(false);
@@ -404,6 +410,7 @@ interface RequestFormProps {
     selectedApproverIds: number[];
     ticket_id?: number | null;
     linked_cash_request_id?: number | null;
+    linked_references?: ReferenceSummary[];
   }) => void;
   onCancel: () => void;
   items: Item[];
@@ -433,7 +440,15 @@ const RequestForm: React.FC<RequestFormProps> = ({ onSave, onCancel, items, appr
   const [searchedCashRequests, setSearchedCashRequests] = useState<any[]>([]);
   const [selectedCashRequest, setSelectedCashRequest] = useState<any | null>(null);
   const [searchingLink, setSearchingLink] = useState(false);
+  const [linkedReferences, setLinkedReferences] = useState<ReferenceSummary[]>([]);
+  const [requireReference, setRequireReference] = useState(false);
   const { toast } = useToast();
+
+  useEffect(() => {
+    getWorkflowConfig()
+      .then((workflow: any) => setRequireReference(Boolean(workflow?.transport?.require_reference_link_material)))
+      .catch(() => {});
+  }, []);
 
   useVobiSection({
     id: 'material-request-form',
@@ -637,6 +652,22 @@ const RequestForm: React.FC<RequestFormProps> = ({ onSave, onCancel, items, appr
       return;
     }
 
+    if (requireReference && linkedReferences.length === 0) {
+      vobiAmbientStore.getState().setExactIssue({
+        title: 'Reference link is required',
+        body: 'This material request needs at least one linked reference before it can be submitted.',
+        formKey: 'material-request',
+        fieldErrors: [{
+          field: 'linkedReferences',
+          label: 'Linked Reference',
+          message: 'Link a ticket, project, or other request before submitting.',
+        }],
+        action: 'Show me',
+      });
+      setSubmitting(false);
+      return;
+    }
+
     if (selectedApproverIds.length === 0) {
       vobiAmbientStore.getState().setExactIssue({
         title: 'Approver is required',
@@ -679,6 +710,7 @@ const RequestForm: React.FC<RequestFormProps> = ({ onSave, onCancel, items, appr
       selectedApproverIds,
       ticket_id: linkType === 'ticket' ? selectedTicket?.id : null,
       linked_cash_request_id: null,
+      linked_references: linkedReferences.map((ref) => ({ type: ref.type, id: ref.id })),
     });
 
     setFormData({
@@ -694,6 +726,7 @@ const RequestForm: React.FC<RequestFormProps> = ({ onSave, onCancel, items, appr
     setTicketSearchTerm('');
     setSearchedTickets([]);
     setSearchedCashRequests([]);
+    setLinkedReferences([]);
     clearDraft();
     setSubmitting(false);
   };
@@ -702,6 +735,15 @@ const RequestForm: React.FC<RequestFormProps> = ({ onSave, onCancel, items, appr
 
   return (
     <form onSubmit={handleSubmit} className="space-y-6 w-full">
+      <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface-secondary)] p-4">
+        <ReferenceLinkPicker
+          value={linkedReferences}
+          onChange={setLinkedReferences}
+          required={requireReference}
+          hint="Link this material request to a Ticket, Project, or other request."
+        />
+      </div>
+
       {/* Request Link */}
       <div className="space-y-3">
         <div>

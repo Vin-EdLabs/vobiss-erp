@@ -31,6 +31,16 @@ export const SYSTEM_ROLES = [
   'approver', // legacy — maps to supervisor-style approvals
   'stock_admin',
   'customer',
+  // PTEL (multi-tenant) — distinct slugs only where the brief actually asked for role-gating
+  // (the new PTEL Sales Dashboard); day-to-day access still flows through unit/position like
+  // every other account, see defaultUnitsForRole below.
+  'ptel_sales',
+  'ptel_cx_manager',
+  'ptel_finance',
+  'ptel_hr_admin',
+  'ptel_data',
+  'ptel_service_delivery',
+  'ptel_executive',
 ];
 
 /** Drop legacy CHECK so new roles can be saved (idempotent). */
@@ -93,6 +103,16 @@ export function defaultUnitsForRole(role) {
     cx: ['cx'],
     finance: ['finance'],
     hr: ['hr'],
+    // PTEL — mapped only where a real unit slug already exists; ptel_data/ptel_service_delivery/
+    // ptel_executive have no equivalent unit today, so those three rely on the unit/position set
+    // directly on the user record (see backend/seeds/ptel-users.js) rather than a default here.
+    // Deliberately NOT given director/cto's broad ['project','ts','ip','noc'] bypass — that would
+    // leak a PTEL account into C&W's cross-unit data, which is exactly what company-scoping is
+    // supposed to prevent.
+    ptel_sales: ['sales'],
+    ptel_cx_manager: ['cx'],
+    ptel_finance: ['finance'],
+    ptel_hr_admin: ['hr'],
   };
   return map[r] ? [...map[r]] : [];
 }

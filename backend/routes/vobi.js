@@ -1,6 +1,7 @@
 import express from 'express';
 import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import { authenticateToken } from '../middleware/auth.js';
+import { attachTenant } from '../middleware/tenant.js';
 import {
   getVobiOverview,
   getVobiSummary,
@@ -36,6 +37,7 @@ import { searchVobiDocs } from '../services/vobiDocs.js';
 
 const router = express.Router();
 router.use(authenticateToken);
+router.use(attachTenant);
 
 const vobiLimiter = rateLimit({
   windowMs: 60 * 1000,
@@ -98,7 +100,7 @@ async function persistReply(userId, reply, extra = {}) {
 
 async function askFor(req, message, history, pageContext = null) {
   const { role, position } = vobiIdentity(req);
-  return askVobi(message, req.user.id, role, position, history || [], pageContext);
+  return askVobi(message, req.user.id, role, position, history || [], pageContext, req.company);
 }
 
 async function historyFor(req, options = {}) {

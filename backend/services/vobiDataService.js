@@ -63,7 +63,7 @@ function withTicketLinks(rows = []) {
 async function resolveUserContext(userId, role, position) {
   const uid = Number.parseInt(String(userId), 10) || 0;
   const rows = await safeQuery(
-    `SELECT first_name, last_name, role, main_role, position, units, unit, username
+    `SELECT first_name, last_name, role, main_role, position, units, unit, username, company
        FROM users WHERE id = $1 AND deleted_at IS NULL`,
     [uid]
   );
@@ -71,6 +71,14 @@ async function resolveUserContext(userId, role, position) {
   const first = String(u.first_name || '').trim();
   const last = String(u.last_name || '').trim();
   const fullName = [first, last].filter(Boolean).join(' ') || u.username || 'Colleague';
+  const isSystemAdmin = isSystemAdminAccount({
+    username: u.username,
+    full_name: fullName,
+    first_name: first,
+    last_name: last,
+    role: u.role,
+    main_role: u.main_role,
+  });
   return {
     userId: uid,
     role: role || u.main_role || u.role || 'user',
@@ -82,23 +90,29 @@ async function resolveUserContext(userId, role, position) {
     last_name: last || null,
     full_name: fullName,
     preferred_name: first || fullName.split(' ')[0] || 'there',
-    is_system_admin: isSystemAdminAccount({
-      username: u.username,
-      full_name: fullName,
-      first_name: first,
-      last_name: last,
-      role: u.role,
-      main_role: u.main_role,
-    }),
+    is_system_admin: isSystemAdmin,
+    // A true System Admin sees every company's data (null, same convention as
+    // middleware/tenant.js's attachTenant); everyone else — including a company-scoped
+    // 'admin' — is locked to their own company so Vobi never narrates another tenant's HR,
+    // finance, or ops data into a chat answer.
+    company: isSystemAdmin ? null : (u.company || 'CW'),
   };
 }
 
-async function fetchGlobalData() {
-  const cached = getCached('global');
+async function fetchGlobalData(company = null) {
+  // A true System Admin (company === null) gets one shared cross-tenant cache entry; every
+  // other caller gets their own company's cache slot — otherwise the first person to warm the
+  // cache (either company) would serve their company's inventory/finance/HR/audit numbers to
+  // everyone else for the next 5 minutes, regardless of tenant.
+  const cacheKey = `global_${company || 'ALL'}`;
+  const cached = getCached(cacheKey);
   if (cached) return cached;
 
+  const companyParams = company ? [company] : [];
   const data = {};
 
+  const itemsCompanyClause = company ? 'AND company = $1' : '';
+  const requestsCompanyClause = company ? 'AND r.company = $1' : '';
   const [
     items,
     lowStock,
@@ -109,11 +123,11 @@ async function fetchGlobalData() {
     pendingReturns,
     lowStockItems,
   ] = await Promise.all([
-    safeCount(`SELECT COUNT(*) FROM items WHERE deleted_at IS NULL`),
-    safeCount(`SELECT COUNT(*) FROM items WHERE deleted_at IS NULL AND quantity > 0 AND quantity <= COALESCE(low_stock_threshold, 5)`),
-    safeCount(`SELECT COUNT(*) FROM items WHERE deleted_at IS NULL AND quantity = 0`),
-    safeCount(`SELECT COUNT(*) FROM requests WHERE deleted_at IS NULL AND type = 'material_request' AND status = 'pending'`),
-    safeCount(`SELECT COUNT(*) FROM requests WHERE deleted_at IS NULL AND type = 'material_request' AND status IN ('supervisor_approved', 'finance_approved', 'completed')`),
+    safeCount(`SELECT COUNT(*) FROM items WHERE deleted_at IS NULL ${itemsCompanyClause}`, companyParams),
+    safeCount(`SELECT COUNT(*) FROM items WHERE deleted_at IS NULL AND quantity > 0 AND quantity <= COALESCE(low_stock_threshold, 5) ${itemsCompanyClause}`, companyParams),
+    safeCount(`SELECT COUNT(*) FROM items WHERE deleted_at IS NULL AND quantity = 0 ${itemsCompanyClause}`, companyParams),
+    safeCount(`SELECT COUNT(*) FROM requests r WHERE r.deleted_at IS NULL AND r.type = 'material_request' AND r.status = 'pending' ${requestsCompanyClause}`, companyParams),
+    safeCount(`SELECT COUNT(*) FROM requests r WHERE r.deleted_at IS NULL AND r.type = 'material_request' AND r.status IN ('supervisor_approved', 'finance_approved', 'completed') ${requestsCompanyClause}`, companyParams),
     safeQuery(`
       SELECT r.id,
              COALESCE(NULLIF(TRIM(COALESCE(u.first_name, '') || ' ' || COALESCE(u.last_name, '')), ''), r.created_by, 'Unknown') AS requested_by,
@@ -126,19 +140,19 @@ async function fetchGlobalData() {
              ) AS items
         FROM requests r
         LEFT JOIN users u ON r.created_by_id = u.id
-       WHERE r.deleted_at IS NULL AND r.type = 'material_request' AND r.status = 'pending'
+       WHERE r.deleted_at IS NULL AND r.type = 'material_request' AND r.status = 'pending' ${requestsCompanyClause}
        ORDER BY r.created_at DESC
        LIMIT 10
-    `),
-    safeCount(`SELECT COUNT(*) FROM requests WHERE deleted_at IS NULL AND type = 'item_return' AND status = 'pending'`),
+    `, companyParams),
+    safeCount(`SELECT COUNT(*) FROM requests r WHERE r.deleted_at IS NULL AND r.type = 'item_return' AND r.status = 'pending' ${requestsCompanyClause}`, companyParams),
     safeQuery(`
       SELECT i.name, i.quantity, COALESCE(i.low_stock_threshold, 5) AS reorder_level, c.name AS category
         FROM items i
         LEFT JOIN categories c ON c.id = i.category_id
-       WHERE i.deleted_at IS NULL AND i.quantity <= COALESCE(i.low_stock_threshold, 5)
+       WHERE i.deleted_at IS NULL AND i.quantity <= COALESCE(i.low_stock_threshold, 5) ${company ? 'AND i.company = $1' : ''}
        ORDER BY i.quantity ASC
        LIMIT 10
-    `),
+    `, companyParams),
   ]);
 
   data.inventory = {
@@ -160,20 +174,20 @@ async function fetchGlobalData() {
   };
 
   const [pendingCash, pendingFinance, cashDetails, monthCashTotal, monthCashApproved] = await Promise.all([
-    safeCount(`SELECT COUNT(*) FROM requests WHERE deleted_at IS NULL AND type = 'cash_request' AND status = 'pending'`),
-    safeCount(`SELECT COUNT(*) FROM requests WHERE deleted_at IS NULL AND type = 'cash_request' AND ${CASH_PENDING_FINANCE}`),
+    safeCount(`SELECT COUNT(*) FROM requests r WHERE r.deleted_at IS NULL AND r.type = 'cash_request' AND r.status = 'pending' ${requestsCompanyClause}`, companyParams),
+    safeCount(`SELECT COUNT(*) FROM requests r WHERE r.deleted_at IS NULL AND r.type = 'cash_request' AND ${CASH_PENDING_FINANCE.replace(/^status/, 'r.status')} ${requestsCompanyClause}`, companyParams),
     safeQuery(`
       SELECT r.id,
              COALESCE(NULLIF(TRIM(COALESCE(u.first_name, '') || ' ' || COALESCE(u.last_name, '')), ''), r.created_by, 'Unknown') AS requested_by,
              r.total_amount AS amount, r.purpose, r.status, r.created_at, r.department
         FROM requests r
         LEFT JOIN users u ON r.created_by_id = u.id
-       WHERE r.deleted_at IS NULL AND r.type = 'cash_request' AND r.status IN ('pending', 'supervisor_approved')
+       WHERE r.deleted_at IS NULL AND r.type = 'cash_request' AND r.status IN ('pending', 'supervisor_approved') ${requestsCompanyClause}
        ORDER BY r.created_at DESC
        LIMIT 10
-    `),
-    safeQuery(`SELECT COALESCE(SUM(COALESCE(total_amount, 0)), 0) AS total FROM requests WHERE deleted_at IS NULL AND type = 'cash_request' AND created_at >= date_trunc('month', NOW())`),
-    safeQuery(`SELECT COALESCE(SUM(COALESCE(total_amount, 0)), 0) AS total FROM requests WHERE deleted_at IS NULL AND type = 'cash_request' AND status IN ('supervisor_approved', 'finance_approved', 'completed') AND created_at >= date_trunc('month', NOW())`),
+    `, companyParams),
+    safeQuery(`SELECT COALESCE(SUM(COALESCE(total_amount, 0)), 0) AS total FROM requests r WHERE r.deleted_at IS NULL AND r.type = 'cash_request' AND r.created_at >= date_trunc('month', NOW()) ${requestsCompanyClause}`, companyParams),
+    safeQuery(`SELECT COALESCE(SUM(COALESCE(total_amount, 0)), 0) AS total FROM requests r WHERE r.deleted_at IS NULL AND r.type = 'cash_request' AND r.status IN ('supervisor_approved', 'finance_approved', 'completed') AND r.created_at >= date_trunc('month', NOW()) ${requestsCompanyClause}`, companyParams),
   ]);
 
   data.finance = {
@@ -293,15 +307,15 @@ async function fetchGlobalData() {
   };
 
   const [totalAssets, maintenance, dueSoon] = await Promise.all([
-    safeCount(`SELECT COUNT(*) FROM assets WHERE deleted_at IS NULL AND status NOT IN ('retired', 'lost')`),
+    safeCount(`SELECT COUNT(*) FROM assets WHERE deleted_at IS NULL AND status NOT IN ('retired', 'lost') ${company ? 'AND company = $1' : ''}`, companyParams),
     safeQuery(`
       SELECT a.id, a.name, a.tag, a.status, ac.name AS category, l.name AS location
         FROM assets a
         LEFT JOIN asset_categories ac ON ac.id = a.category_id
         LEFT JOIN asset_locations l ON l.id = a.location_id
-       WHERE a.deleted_at IS NULL AND a.status IN ('in_repair', 'damaged')
+       WHERE a.deleted_at IS NULL AND a.status IN ('in_repair', 'damaged') ${company ? 'AND a.company = $1' : ''}
        LIMIT 10
-    `),
+    `, companyParams),
     safeQuery(`
       SELECT a.name, a.tag, am.start_date AS next_maintenance_date, am.type, am.status, ac.name AS category
         FROM asset_maintenance am
@@ -310,9 +324,10 @@ async function fetchGlobalData() {
        WHERE am.deleted_at IS NULL
          AND am.status IN ('pending', 'in_progress')
          AND am.start_date <= CURRENT_DATE + INTERVAL '7 days'
+         ${company ? 'AND a.company = $1' : ''}
        ORDER BY am.start_date ASC
        LIMIT 10
-    `),
+    `, companyParams),
   ]);
 
   data.assets = {
@@ -337,6 +352,7 @@ async function fetchGlobalData() {
     links: MODULE_LINKS.field,
   };
 
+  const empClause = company ? 'AND company = $1' : '';
   const [
     totalEmp,
     empByDept,
@@ -352,23 +368,23 @@ async function fetchGlobalData() {
     lateToday,
     absentToday,
   ] = await Promise.all([
-    safeCount(`SELECT COUNT(*) FROM hr_employees WHERE status = 'active'`),
-    safeQuery(`SELECT COALESCE(department, 'Unassigned') AS department, COUNT(*)::int AS count FROM hr_employees WHERE status = 'active' GROUP BY 1 ORDER BY count DESC`),
+    safeCount(`SELECT COUNT(*) FROM hr_employees WHERE status = 'active' ${empClause}`, companyParams),
+    safeQuery(`SELECT COALESCE(department, 'Unassigned') AS department, COUNT(*)::int AS count FROM hr_employees WHERE status = 'active' ${empClause} GROUP BY 1 ORDER BY count DESC`, companyParams),
     safeQuery(`
       SELECT full_name, position, department, start_date
         FROM hr_employees
        WHERE DATE_TRUNC('month', start_date) = DATE_TRUNC('month', NOW())
-         AND status = 'active'
-    `),
+         AND status = 'active' ${empClause}
+    `, companyParams),
     safeQuery(`
       SELECT full_name, position, department, contract_end_date,
              (contract_end_date - CURRENT_DATE) AS days_remaining
         FROM hr_employees
        WHERE contract_end_date BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '60 days'
-         AND status = 'active'
+         AND status = 'active' ${empClause}
        ORDER BY contract_end_date ASC
-    `),
-    safeCount(`SELECT COUNT(*) FROM hr_leave_requests WHERE LOWER(status) = 'pending'`),
+    `, companyParams),
+    safeCount(`SELECT COUNT(*) FROM hr_leave_requests r JOIN hr_employees e ON e.id = r.employee_id WHERE LOWER(r.status) = 'pending' ${company ? 'AND e.company = $1' : ''}`, companyParams),
     safeQuery(`
       SELECT COALESCE(e.full_name, TRIM(u.first_name || ' ' || u.last_name)) AS full_name,
              e.department, e.position, r.leave_type, r.start_date, r.end_date,
@@ -376,9 +392,9 @@ async function fetchGlobalData() {
         FROM hr_leave_requests r
         LEFT JOIN hr_employees e ON r.employee_id = e.id
         LEFT JOIN users u ON r.user_id = u.id
-       WHERE LOWER(r.status) = 'pending'
+       WHERE LOWER(r.status) = 'pending' ${company ? 'AND e.company = $1' : ''}
        ORDER BY r.created_at DESC
-    `),
+    `, companyParams),
     safeQuery(`
       SELECT COALESCE(e.full_name, TRIM(u.first_name || ' ' || u.last_name)) AS full_name,
              e.department, r.leave_type, r.end_date
@@ -386,9 +402,9 @@ async function fetchGlobalData() {
         LEFT JOIN hr_employees e ON r.employee_id = e.id
         LEFT JOIN users u ON r.user_id = u.id
        WHERE LOWER(r.status) = 'approved'
-         AND CURRENT_DATE BETWEEN r.start_date AND r.end_date
-    `),
-    safeCount(`SELECT COUNT(*) FROM hr_form_requests WHERE LOWER(status) = 'pending'`),
+         AND CURRENT_DATE BETWEEN r.start_date AND r.end_date ${company ? 'AND e.company = $1' : ''}
+    `, companyParams),
+    safeCount(`SELECT COUNT(*) FROM hr_form_requests r JOIN hr_employees e ON e.id = r.employee_id WHERE LOWER(r.status) = 'pending' ${company ? 'AND e.company = $1' : ''}`, companyParams),
     safeQuery(`
       SELECT COALESCE(e.full_name, e2.full_name, TRIM(u.first_name || ' ' || u.last_name)) AS full_name,
              COALESCE(e.department, e2.department) AS department,
@@ -398,9 +414,9 @@ async function fetchGlobalData() {
         LEFT JOIN hr_employees e ON e.id = r.employee_id
         LEFT JOIN hr_employees e2 ON e2.user_id = r.user_id AND r.employee_id IS NULL
         LEFT JOIN users u ON r.user_id = u.id
-       WHERE LOWER(r.status) = 'pending'
+       WHERE LOWER(r.status) = 'pending' ${company ? 'AND (e.company = $1 OR e2.company = $1)' : ''}
        ORDER BY r.created_at DESC
-    `),
+    `, companyParams),
     safeQuery(`
       SELECT p.status, p.generated_at AS created_at,
              COALESCE(SUM(pi.gross), 0) AS gross,
@@ -410,9 +426,10 @@ async function fetchGlobalData() {
         LEFT JOIN hr_payroll_items pi ON pi.payroll_id = p.id
        WHERE p.month = EXTRACT(MONTH FROM NOW())::int
          AND p.year = EXTRACT(YEAR FROM NOW())::int
+         ${company ? 'AND p.company = $1' : ''}
        GROUP BY p.status, p.generated_at
        LIMIT 1
-    `),
+    `, companyParams),
     safeQuery(`
       SELECT e.full_name, e.department,
              COALESCE(a.clock_in_time::text, a.clock_in::text) AS clock_in_time,
@@ -420,14 +437,14 @@ async function fetchGlobalData() {
              COALESCE(a.late_minutes, 0) AS late_minutes
         FROM hr_attendance a
         JOIN hr_employees e ON a.employee_id = e.id
-       WHERE a.date = CURRENT_DATE
+       WHERE a.date = CURRENT_DATE ${company ? 'AND e.company = $1' : ''}
        ORDER BY a.clock_in ASC NULLS LAST
-    `),
-    safeCount(`SELECT COUNT(*) FROM hr_attendance WHERE date = CURRENT_DATE AND (is_late = true OR status = 'Late')`),
+    `, companyParams),
+    safeCount(`SELECT COUNT(*) FROM hr_attendance a JOIN hr_employees e ON e.id = a.employee_id WHERE a.date = CURRENT_DATE AND (a.is_late = true OR a.status = 'Late') ${company ? 'AND e.company = $1' : ''}`, companyParams),
     safeQuery(`
       SELECT e.full_name, e.department
         FROM hr_employees e
-       WHERE e.status = 'active'
+       WHERE e.status = 'active' ${empClause}
          AND e.id NOT IN (SELECT employee_id FROM hr_attendance WHERE date = CURRENT_DATE AND employee_id IS NOT NULL)
          AND e.id NOT IN (
            SELECT employee_id FROM hr_leave_requests
@@ -435,7 +452,7 @@ async function fetchGlobalData() {
               AND CURRENT_DATE BETWEEN start_date AND end_date
               AND employee_id IS NOT NULL
          )
-    `),
+    `, companyParams),
   ]);
 
   data.hr = {
@@ -498,17 +515,18 @@ async function fetchGlobalData() {
   };
 
   const [totalUsers, activeUsers, recentAudit] = await Promise.all([
-    safeCount(`SELECT COUNT(*) FROM users WHERE deleted_at IS NULL AND COALESCE(status, 'active') = 'active'`),
-    safeCount(`SELECT COUNT(DISTINCT user_id) FROM audit_logs WHERE LOWER(action) LIKE '%login%' AND timestamp >= NOW() - INTERVAL '24 hours'`),
+    safeCount(`SELECT COUNT(*) FROM users WHERE deleted_at IS NULL AND COALESCE(status, 'active') = 'active' ${company ? 'AND company = $1' : ''}`, companyParams),
+    safeCount(`SELECT COUNT(DISTINCT al.user_id) FROM audit_logs al ${company ? 'JOIN users u2 ON u2.id = al.user_id' : ''} WHERE LOWER(al.action) LIKE '%login%' AND al.timestamp >= NOW() - INTERVAL '24 hours' ${company ? 'AND u2.company = $1' : ''}`, companyParams),
     safeQuery(`
       SELECT al.id, al.action, al.timestamp AS created_at, al.details,
              TRIM(BOTH FROM COALESCE(NULLIF(TRIM(COALESCE(u.first_name, '') || ' ' || COALESCE(u.last_name, '')), ''), u.username, 'System')) AS user_name,
              u.username
         FROM audit_logs al
         LEFT JOIN users u ON al.user_id = u.id
+       WHERE 1=1 ${company ? 'AND al.company = $1' : ''}
        ORDER BY al.timestamp DESC
        LIMIT 25
-    `),
+    `, companyParams),
   ]);
 
   data.system = {
@@ -540,7 +558,7 @@ async function fetchGlobalData() {
   };
 
   data.generated_at = new Date().toISOString();
-  setCached('global', data);
+  setCached(cacheKey, data);
   return data;
 }
 
@@ -817,12 +835,18 @@ function filterDataByRole(globalData, role, position, ctx = {}) {
   return filtered;
 }
 
-export async function getVobiSystemData(userId, role, position) {
+export async function getVobiSystemData(userId, role, position, company) {
   const ctx = await resolveUserContext(userId, role, position);
+  // The passed-in `company` is req.company from attachTenant, which — for a true System Admin —
+  // reflects their "View as Company" override (x-view-as-company header) when one is set. It
+  // takes priority over ctx.company (resolveUserContext's own DB-derived value, which is always
+  // null for a System Admin with no override) precisely so that override can narrow what a
+  // System Admin sees; for every non-admin user the two values already agree.
+  const effectiveCompany = company !== undefined ? company : (ctx.company ?? null);
   const access = getRoleAccess(ctx.role, ctx.position, accessOptsFromCtx(ctx));
 
   const [globalData, userData] = await Promise.all([
-    fetchGlobalData(),
+    fetchGlobalData(effectiveCompany),
     fetchUserData(ctx.userId),
   ]);
 
@@ -848,6 +872,7 @@ export async function getVobiSystemData(userId, role, position) {
       access_note: access.scoped_to_units
         ? 'This admin is limited to assigned units/departments — not company-wide Vobi access.'
         : null,
+      company: effectiveCompany,
     },
     system: roleFilteredData,
     my_work: userData,
@@ -855,8 +880,9 @@ export async function getVobiSystemData(userId, role, position) {
 }
 
 /** Fast path for greetings / small talk — no global ERP snapshot. */
-export async function getVobiLightSystemData(userId, role, position) {
+export async function getVobiLightSystemData(userId, role, position, company) {
   const ctx = await resolveUserContext(userId, role, position);
+  const effectiveCompany = ctx.company !== undefined ? ctx.company : (company ?? null);
   const access = getRoleAccess(ctx.role, ctx.position, accessOptsFromCtx(ctx));
   return {
     generated_at: new Date().toISOString(),
@@ -879,6 +905,7 @@ export async function getVobiLightSystemData(userId, role, position) {
       access_note: access.scoped_to_units
         ? 'This admin is limited to assigned units/departments — not company-wide Vobi access.'
         : null,
+      company: effectiveCompany,
     },
     system: { note: 'Light mode — full ERP snapshot not loaded for this short message.' },
     my_work: null,

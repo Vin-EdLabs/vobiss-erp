@@ -210,7 +210,7 @@ router.get('/my-activity', async (req, res) => {
 router.get('/hr-access', async (req, res) => {
   try {
     if (!isHrStaff(req.user)) return res.status(403).json({ error: 'HR Access is available to HR staff only' });
-    res.json(await listHrAccessible({ status: req.query.status, period_id: req.query.period_id, unit: req.query.unit }));
+    res.json(await listHrAccessible({ status: req.query.status, period_id: req.query.period_id, unit: req.query.unit }, req.user));
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

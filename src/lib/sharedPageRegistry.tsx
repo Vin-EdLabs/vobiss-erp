@@ -10,6 +10,7 @@ import IncidentNotes from '@/pages/staff/noc/IncidentNotes';
 import SignoffFormPage from '@/pages/production/SignoffForms';
 import WipPage from '@/pages/production/WipPage';
 import NetworkAssets from '@/pages/NetworkAssets';
+import ArchiveFilePreviewPage from '@/pages/archive/ArchiveFilePreviewPage';
 
 export type SharedPageEntry = { pattern: string; Component: ComponentType };
 
@@ -41,4 +42,5 @@ export const SHARED_PAGE_REGISTRY: SharedPageEntry[] = [
   { pattern: '/project-unit/wip', Component: WipPage },
   { pattern: '/network-assets/:view', Component: NetworkAssets },
   { pattern: '/network-assets', Component: NetworkAssets },
+  { pattern: '/file-storage/preview/:id', Component: ArchiveFilePreviewPage },
 ];

@@ -13,10 +13,12 @@ function hoursFromRow(r) {
   return Math.round(((b.getTime() - a.getTime()) / 3600000) * 100) / 100;
 }
 
-export async function monthlySummaryReport(year, month) {
+export async function monthlySummaryReport(year, month, company = null) {
   const { start, end } = monthBounds(year, month);
   const working = workingDaysInMonth(year, month);
   const dates = workingDatesInMonth(year, month, end);
+  const empClause = company ? 'AND company = $1' : '';
+  const empParams = company ? [company] : [];
   const [
     employees,
     hires,
@@ -31,26 +33,29 @@ export async function monthlySummaryReport(year, month) {
     expiring,
   ] = await Promise.all([
     pool.query(
-      `SELECT id, full_name, department, employment_type, status FROM hr_employees WHERE status = 'active' ORDER BY full_name`
+      `SELECT id, full_name, department, employment_type, status FROM hr_employees WHERE status = 'active' ${empClause} ORDER BY full_name`,
+      empParams
     ),
     pool.query(
-      `SELECT COUNT(*)::int AS n FROM hr_employees WHERE start_date >= $1 AND start_date <= $2`,
-      [start, end]
+      `SELECT COUNT(*)::int AS n FROM hr_employees WHERE start_date >= $1 AND start_date <= $2 ${company ? 'AND company = $3' : ''}`,
+      company ? [start, end, company] : [start, end]
     ),
     pool.query(
       `SELECT COUNT(*)::int AS n FROM hr_employees
        WHERE status IN ('inactive','suspended')
          AND COALESCE(suspended_at::date, created_at::date) >= $1
-         AND COALESCE(suspended_at::date, created_at::date) <= $2`,
-      [start, end]
+         AND COALESCE(suspended_at::date, created_at::date) <= $2 ${company ? 'AND company = $3' : ''}`,
+      company ? [start, end, company] : [start, end]
     ),
     pool.query(
       `SELECT COALESCE(employment_type, 'unspecified') AS employment_type, COUNT(*)::int AS count
-       FROM hr_employees WHERE status = 'active' GROUP BY 1`
+       FROM hr_employees WHERE status = 'active' ${empClause} GROUP BY 1`,
+      empParams
     ),
     pool.query(
       `SELECT COALESCE(NULLIF(TRIM(department), ''), 'Unassigned') AS department, COUNT(*)::int AS count
-       FROM hr_employees WHERE status = 'active' GROUP BY 1 ORDER BY count DESC`
+       FROM hr_employees WHERE status = 'active' ${empClause} GROUP BY 1 ORDER BY count DESC`,
+      empParams
     ),
     pool.query(
       `SELECT employee_id, date, status, is_late FROM hr_attendance WHERE date >= $1 AND date <= $2`,
@@ -58,13 +63,15 @@ export async function monthlySummaryReport(year, month) {
     ),
     pool.query(
       `SELECT leave_type, COUNT(*)::int AS requests, COALESCE(SUM(days),0)::int AS days FROM (
-         SELECT leave_type, days FROM hr_leave_applications
-         WHERE LOWER(TRIM(status)) = 'approved' AND start_date <= $2 AND end_date >= $1
+         SELECT l.leave_type, l.days FROM hr_leave_applications l
+         JOIN hr_employees e ON e.id = l.employee_id
+         WHERE LOWER(TRIM(l.status)) = 'approved' AND l.start_date <= $2 AND l.end_date >= $1 ${company ? 'AND e.company = $3' : ''}
          UNION ALL
-         SELECT leave_type, days FROM hr_leave_requests
-         WHERE LOWER(TRIM(status)) = 'approved' AND start_date <= $2 AND end_date >= $1
+         SELECT r.leave_type, r.days FROM hr_leave_requests r
+         JOIN hr_employees e ON e.id = r.employee_id
+         WHERE LOWER(TRIM(r.status)) = 'approved' AND r.start_date <= $2 AND r.end_date >= $1 ${company ? 'AND e.company = $3' : ''}
        ) x GROUP BY leave_type ORDER BY days DESC`,
-      [start, end]
+      company ? [start, end, company] : [start, end]
     ),
     pool.query(
       `SELECT DISTINCT e.full_name FROM (
@@ -73,9 +80,13 @@ export async function monthlySummaryReport(year, month) {
          UNION
          SELECT employee_id FROM hr_leave_requests
          WHERE LOWER(TRIM(status)) = 'approved' AND start_date <= CURRENT_DATE AND end_date >= CURRENT_DATE AND employee_id IS NOT NULL
-       ) x JOIN hr_employees e ON e.id = x.employee_id ORDER BY 1`
+       ) x JOIN hr_employees e ON e.id = x.employee_id ${company ? 'WHERE e.company = $1' : ''} ORDER BY 1`,
+      empParams
     ),
-    pool.query(`SELECT COUNT(*)::int AS n FROM hr_leave_requests WHERE status = 'pending'`),
+    pool.query(
+      `SELECT COUNT(*)::int AS n FROM hr_leave_requests r JOIN hr_employees e ON e.id = r.employee_id WHERE r.status = 'pending' ${company ? 'AND e.company = $1' : ''}`,
+      empParams
+    ),
     pool.query(
       `SELECT p.status, p.generated_at,
               COALESCE(SUM(i.gross),0)::numeric AS gross,
@@ -85,15 +96,16 @@ export async function monthlySummaryReport(year, month) {
               COALESCE(SUM(i.net_pay),0)::numeric AS net
        FROM hr_payroll p
        LEFT JOIN hr_payroll_items i ON i.payroll_id = p.id
-       WHERE p.year = $1 AND p.month = $2
+       WHERE p.year = $1 AND p.month = $2 ${company ? 'AND p.company = $3' : ''}
        GROUP BY p.id`,
-      [year, month]
+      company ? [year, month, company] : [year, month]
     ),
     pool.query(
       `SELECT full_name FROM hr_employees
        WHERE status = 'active' AND contract_end_date IS NOT NULL
-         AND contract_end_date <= CURRENT_DATE + INTERVAL '60 days'
-       ORDER BY contract_end_date`
+         AND contract_end_date <= CURRENT_DATE + INTERVAL '60 days' ${empClause}
+       ORDER BY contract_end_date`,
+      empParams
     ),
   ]);
 
@@ -194,12 +206,16 @@ export async function monthlySummaryReport(year, month) {
   };
 }
 
-export async function attendanceReport(year, month, department, employeeId) {
+export async function attendanceReport(year, month, department, employeeId, company = null) {
   const { start, end } = monthBounds(year, month);
   const working = workingDaysInMonth(year, month);
   const dates = workingDatesInMonth(year, month, end);
   const params = [];
   const clauses = [`e.status = 'active'`];
+  if (company) {
+    params.push(company);
+    clauses.push(`e.company = $${params.length}`);
+  }
   if (department) {
     params.push(department);
     clauses.push(`e.department = $${params.length}`);
@@ -330,7 +346,7 @@ export async function attendanceReport(year, month, department, employeeId) {
   };
 }
 
-export async function payrollReport(year, month) {
+export async function payrollReport(year, month, company = null) {
   const result = await pool.query(
     `SELECT e.full_name, e.department, e.position, e.bank_name, e.bank_account, e.ssnit_number, i.*,
             p.status AS payroll_status, p.generated_at, p.approved_at, p.paid_at,
@@ -341,9 +357,9 @@ export async function payrollReport(year, month) {
      JOIN hr_employees e ON e.id = i.employee_id
      LEFT JOIN users gb ON gb.id = p.generated_by
      LEFT JOIN users ab ON ab.id = p.approved_by
-     WHERE p.year = $1 AND p.month = $2
+     WHERE p.year = $1 AND p.month = $2 ${company ? 'AND p.company = $3' : ''}
      ORDER BY e.full_name`,
-    [year, month]
+    company ? [year, month, company] : [year, month]
   );
   const items = result.rows;
   const header = items[0]
@@ -380,9 +396,13 @@ export async function payrollReport(year, month) {
   };
 }
 
-export async function leaveReport(year, leaveType, department) {
+export async function leaveReport(year, leaveType, department, company = null) {
   const params = [year];
   let extra = '';
+  if (company) {
+    params.push(company);
+    extra += ` AND e.company = $${params.length}`;
+  }
   if (department) {
     params.push(department);
     extra += ` AND e.department = $${params.length}`;
@@ -406,6 +426,10 @@ export async function leaveReport(year, leaveType, department) {
     takenParams.push(department);
     takenExtra += ` AND e.department = $${takenParams.length}`;
   }
+  if (company) {
+    takenParams.push(company);
+    takenExtra += ` AND e.company = $${takenParams.length}`;
+  }
   const taken = await pool.query(
     `SELECT e.id AS employee_id, e.full_name, e.department, x.leave_type, SUM(x.days)::int AS days_taken, COUNT(*)::int AS requests
      FROM (
@@ -423,11 +447,15 @@ export async function leaveReport(year, leaveType, department) {
     `SELECT EXTRACT(MONTH FROM start_date)::int AS month, COUNT(*)::int AS requests, COALESCE(SUM(days),0)::int AS days,
             COUNT(DISTINCT employee_id)::int AS employees
      FROM (
-       SELECT employee_id, days, start_date FROM hr_leave_applications WHERE LOWER(TRIM(status)) = 'approved' AND EXTRACT(YEAR FROM start_date) = $1
+       SELECT l.employee_id, l.days, l.start_date FROM hr_leave_applications l
+       JOIN hr_employees e ON e.id = l.employee_id
+       WHERE LOWER(TRIM(l.status)) = 'approved' AND EXTRACT(YEAR FROM l.start_date) = $1 ${company ? 'AND e.company = $2' : ''}
        UNION ALL
-       SELECT employee_id, days, start_date FROM hr_leave_requests WHERE LOWER(TRIM(status)) = 'approved' AND EXTRACT(YEAR FROM start_date) = $1 AND employee_id IS NOT NULL
+       SELECT r.employee_id, r.days, r.start_date FROM hr_leave_requests r
+       JOIN hr_employees e ON e.id = r.employee_id
+       WHERE LOWER(TRIM(r.status)) = 'approved' AND EXTRACT(YEAR FROM r.start_date) = $1 AND r.employee_id IS NOT NULL ${company ? 'AND e.company = $2' : ''}
      ) x GROUP BY 1`,
-    [year]
+    company ? [year, company] : [year]
   );
   const pendingParams = [];
   let pendingExtra = '';
@@ -438,6 +466,10 @@ export async function leaveReport(year, leaveType, department) {
   if (department) {
     pendingParams.push(department);
     pendingExtra += ` AND e.department = $${pendingParams.length}`;
+  }
+  if (company) {
+    pendingParams.push(company);
+    pendingExtra += ` AND e.company = $${pendingParams.length}`;
   }
   const pending = await pool.query(
     `SELECT r.*, e.full_name, e.department
@@ -521,9 +553,13 @@ export async function leaveReport(year, leaveType, department) {
   };
 }
 
-export async function directoryReport(department, employmentType, status) {
+export async function directoryReport(department, employmentType, status, company = null) {
   const params = [];
   const clauses = [];
+  if (company) {
+    params.push(company);
+    clauses.push(`company = $${params.length}`);
+  }
   if (status && status !== 'all') {
     params.push(status);
     clauses.push(`status = $${params.length}`);

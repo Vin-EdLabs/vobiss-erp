@@ -1,5 +1,5 @@
 import type { LucideIcon } from 'lucide-react';
-import { Network, Radio, Server, FolderKanban } from 'lucide-react';
+import { Network, Radio, Server, FolderKanban, Users2 } from 'lucide-react';
 
 export type UnitSlug = 'project' | 'ts' | 'ip' | 'noc' | string;
 
@@ -58,6 +58,12 @@ export const UNIT_THEMES: Record<string, UnitTheme> = {
     subtitle: 'Review IP integration submissions before Project Unit sign-off.',
     ...NOC_LOOK,
     Icon: Server,
+  },
+  sales: {
+    label: 'Sales Unit',
+    subtitle: 'Send feasibility requests to Design and track every one of them end to end.',
+    ...NOC_LOOK,
+    Icon: Users2,
   },
 };
 

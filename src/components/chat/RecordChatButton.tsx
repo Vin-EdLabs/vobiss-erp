@@ -33,10 +33,11 @@ export function RecordChatButton({
   };
 
   const handleClick = async () => {
-    if (chatChannelId) {
-      openChat(chatChannelId);
-      return;
-    }
+    // Always call ensureChatThread, even when chatChannelId is already known — the channel may
+    // already exist from someone else opening it first, but this viewer (e.g. Sales opening a
+    // ticket CX already chatted on) was never added as a member, and just navigating to an
+    // existing channel they're not in renders a blank chat page. ensureChatThread both creates
+    // the channel if needed AND adds the caller as a member either way, so it's always safe.
     setLoading(true);
     try {
       const { channelId } = await ensureChatThread(recordType, recordId);

@@ -8,6 +8,8 @@ interface ProtectedRouteProps {
   allowedRoles?: string[];
   allowedUnits?: string[];
   allowedPositions?: string[];
+  /** Locks the route to System Admin only — even Directors/CTO (who otherwise bypass every restriction below) are turned away. */
+  adminOnly?: boolean;
 }
 
 const norm = (value?: string | null) => String(value || '').trim().toLowerCase();
@@ -60,7 +62,7 @@ const STAFF_HOME_PATHS = [
   '/hr-self',
 ];
 
-const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children, allowedRoles, allowedUnits, allowedPositions }) => {
+const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children, allowedRoles, allowedUnits, allowedPositions, adminOnly }) => {
   const { user, isAdminSuper } = useAuth();
   const location = useLocation();
 
@@ -70,6 +72,10 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children, allowedRoles,
 
   if (isAdminSuper) {
     return <>{children}</>;
+  }
+
+  if (adminOnly) {
+    return <Navigate to={POST_LOGIN_PATH} replace />;
   }
 
   if (pathMatches(location.pathname, STAFF_HOME_PATHS)) {

@@ -141,7 +141,7 @@ const displayPositionForUser = (user: any) => {
 };
 
 const UsersPage: React.FC = () => {
-  const { user: currentUser, updateUser: updateAuthUser } = useAuth();
+  const { user: currentUser, updateUser: updateAuthUser, isAdminSuper } = useAuth();
   const { toast } = useToast();
   const [users, setUsers] = useState<any[]>([]);
   const [formData, setFormData] = useState({
@@ -152,6 +152,7 @@ const UsersPage: React.FC = () => {
     unit: '',
     unit2: '',
     position: '',
+    company: 'CW',
   });
   const [createPassword, setCreatePassword] = useState('');
   const [createPasswordConfirm, setCreatePasswordConfirm] = useState('');
@@ -188,6 +189,7 @@ const UsersPage: React.FC = () => {
     units: [] as string[],
   });
   const [searchQuery, setSearchQuery] = useState('');
+  const [selectedCompany, setSelectedCompany] = useState('All');
   const [createOpen, setCreateOpen] = useState(false);
 
   const showPageError = useCallback(
@@ -234,7 +236,7 @@ const UsersPage: React.FC = () => {
   };
 
   const resetCreateForm = () => {
-    setFormData({ first_name: '', last_name: '', email: '', role: 'user', unit: '', unit2: '', position: '' });
+    setFormData({ first_name: '', last_name: '', email: '', role: 'user', unit: '', unit2: '', position: '', company: 'CW' });
     setCreatePassword('');
     setCreatePasswordConfirm('');
     setCreateUseAuto(false);
@@ -288,6 +290,7 @@ const UsersPage: React.FC = () => {
           unit: units[0] || undefined,
           position: formData.position,
           units,
+          company: isAdminSuper ? formData.company : undefined,
         }
       );
       await loadUsers();
@@ -490,6 +493,34 @@ const UsersPage: React.FC = () => {
     }
   };
 
+  // Additive, unlike the Role dropdown above (which replaces a user's whole role list) —
+  // grants/revokes admin access on top of whatever job role they already have (e.g. a PTEL
+  // account keeps ptel_hr_admin/ptel_executive, so they don't lose PTEL-specific access like the
+  // Sales Dashboard just because they were also made a company admin).
+  const isCompanyAdmin = (u: any) => {
+    const roles = Array.isArray(u.roles) ? u.roles.map((r: string) => String(r).toLowerCase()) : [];
+    return roles.includes('admin');
+  };
+
+  const toggleCompanyAdmin = async (u: any) => {
+    clearPageError();
+    const grant = !isCompanyAdmin(u);
+    try {
+      const currentRoles: string[] = Array.isArray(u.roles) && u.roles.length
+        ? u.roles.map((r: string) => String(r).toLowerCase())
+        : [actualRoleOf(u)];
+      const nextRoles = grant
+        ? [...new Set([...currentRoles, 'admin'])]
+        : currentRoles.filter((r) => r !== 'admin');
+      await updateUser(u.id, { roles: nextRoles });
+      await loadUsers();
+      setSuccess(grant ? 'Company Admin access granted' : 'Company Admin access removed');
+      setTimeout(() => setSuccess(''), 3000);
+    } catch (err: any) {
+      showPageError(err.message || 'Failed to update admin access');
+    }
+  };
+
   const getRoleBadgeColor = (role: SystemAccessRole) => {
     const colors: Record<SystemAccessRole, string> = {
       user: 'bg-gray-100 text-gray-800 border-gray-200',
@@ -511,9 +542,13 @@ const UsersPage: React.FC = () => {
   };
 
   const filteredUsers = useMemo(() => {
+    let base = users;
+    if (isAdminSuper && selectedCompany !== 'All') {
+      base = base.filter((u: any) => (u.company || 'CW') === selectedCompany);
+    }
     const q = searchQuery.trim().toLowerCase();
-    if (!q) return users;
-    return users.filter((u: any) => {
+    if (!q) return base;
+    return base.filter((u: any) => {
       const name = `${u.first_name || ''} ${u.last_name || ''}`;
       const role = actualRoleOf(u);
       const unit = formatUnitsLabel(u);
@@ -528,11 +563,11 @@ const UsersPage: React.FC = () => {
         displayPositionForUser(u),
       ].some((v) => String(v || '').toLowerCase().includes(q));
     });
-  }, [users, searchQuery]);
+  }, [users, searchQuery, selectedCompany, isAdminSuper]);
 
   const adminCount = users.filter((u: any) => {
     const role = actualRoleOf(u);
-    return role === 'admin' || role === 'superadmin';
+    return role === 'admin' || role === 'superadmin' || isCompanyAdmin(u);
   }).length;
   const hrCount = users.filter((u: any) => {
     const units = pairFromUser(u);
@@ -687,6 +722,20 @@ const UsersPage: React.FC = () => {
                     User or Admin only. Admin can manage roles, settings, and system tools.
                   </p>
                 </div>
+                {isAdminSuper && (
+                  <div>
+                    <label className="block text-xs font-medium text-[var(--text-secondary)] mb-1">Company</label>
+                    <select
+                      value={formData.company}
+                      onChange={(e) => setFormData({ ...formData, company: e.target.value })}
+                      className="w-full px-3 py-2 border rounded-md outline-none transition bg-[var(--surface)]"
+                    >
+                      <option value="CW">C&amp;W</option>
+                      <option value="PTEL">PTEL</option>
+                    </select>
+                    <p className="mt-1 text-xs text-[var(--text-muted)]">Which company this user belongs to.</p>
+                  </div>
+                )}
                 <div>
                   <label className="block text-xs font-medium text-[var(--text-secondary)] mb-1">Position</label>
                   <select
@@ -832,6 +881,17 @@ const UsersPage: React.FC = () => {
             onChange={(e) => setSearchQuery(e.target.value)}
           />
         </div>
+        {isAdminSuper && (
+          <select
+            className="h-10 rounded-[var(--radius-sm)] border px-3 text-sm outline-none"
+            value={selectedCompany}
+            onChange={(e) => setSelectedCompany(e.target.value)}
+          >
+            <option value="All">All Companies</option>
+            <option value="CW">C&W</option>
+            <option value="PTEL">PTEL</option>
+          </select>
+        )}
         <p className="px-1 text-xs text-[var(--text-muted)] md:px-2">{filteredUsers.length} of {users.length}</p>
       </div>
 
@@ -910,6 +970,15 @@ const UsersPage: React.FC = () => {
                       </td>
                       <td className="px-4 py-3 whitespace-nowrap text-sm">
                         <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => toggleCompanyAdmin(u)}
+                            disabled={isMainSuperadmin(u)}
+                            title="Grants/revokes admin access (Users, Audit Logs) without changing this person's job role or unit access"
+                            className={`${isMainSuperadmin(u) ? 'text-[var(--text-muted)] cursor-not-allowed' : isCompanyAdmin(u) ? 'text-[var(--success-text)]' : 'text-[var(--text-secondary)]'} font-medium transition flex items-center gap-1 text-xs`}
+                          >
+                            <Shield className="w-3 h-3" />
+                            {isCompanyAdmin(u) ? 'Company Admin' : 'Make Admin'}
+                          </button>
                           <button
                             onClick={() => openEditModal(u)}
                             disabled={isMainSuperadmin(u)}

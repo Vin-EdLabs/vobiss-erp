@@ -37,7 +37,7 @@ router.get('/:id', authenticateOrShareToken('incident_note', requireNocAuth), as
     const id = req.isSharedView ? req.shareLink.record_id : req.params.id;
     const note = await getNote(id);
     if (!note) return res.status(404).json({ error: 'Incident note not found' });
-    res.json({ ...note, reference_no: noteRef(note.id), read_only: String(note.note_date).slice(0, 10) !== new Date().toISOString().slice(0, 10) });
+    res.json({ ...note, reference_no: noteRef(note.id), read_only: note.status === 'Resolved' });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -91,8 +91,11 @@ router.get('/options', requireNoc, async (_req, res) => {
 router.get('/', requireNoc, async (req, res) => {
   try {
     const date = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.date || '')) ? req.query.date : new Date().toISOString().slice(0, 10);
-    const rows = await pool.query(`SELECT n.*, ${withPeople} FROM noc_incident_notes n LEFT JOIN users creator ON creator.id=n.created_by LEFT JOIN users editor ON editor.id=n.updated_by WHERE n.note_date=$1 AND n.deleted_at IS NULL ORDER BY n.updated_at DESC, n.id DESC`, [date]);
-    res.json({ date, notes: rows.rows.map((row) => ({ ...row, reference_no: noteRef(row.id), read_only: date !== new Date().toISOString().slice(0, 10) })) });
+    // An unresolved note carries forward onto every day's view (not just its own note_date)
+    // until someone marks it Resolved — otherwise it silently vanishes once its shift day
+    // passes, and (per the PUT gate below) becomes impossible to ever resolve.
+    const rows = await pool.query(`SELECT n.*, ${withPeople} FROM noc_incident_notes n LEFT JOIN users creator ON creator.id=n.created_by LEFT JOIN users editor ON editor.id=n.updated_by WHERE n.deleted_at IS NULL AND (n.note_date=$1 OR n.status <> 'Resolved') ORDER BY (n.status <> 'Resolved') DESC, n.updated_at DESC, n.id DESC`, [date]);
+    res.json({ date, notes: rows.rows.map((row) => ({ ...row, reference_no: noteRef(row.id), read_only: row.status === 'Resolved', carried_over: String(row.note_date).slice(0, 10) !== date })) });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -120,7 +123,9 @@ router.post('/', requireNoc, async (req, res) => {
 router.put('/:id', requireNoc, async (req, res) => {
   try {
     const existing = await getNote(req.params.id); if (!existing) return res.status(404).json({ error: 'Incident note not found' });
-    if (String(existing.note_date).slice(0, 10) !== new Date().toISOString().slice(0, 10)) return res.status(403).json({ error: 'Past days are read only' });
+    // Read-only means "resolved," not "not today" — an open incident must stay editable
+    // (and resolvable) across shift changes for as long as it's actually unresolved.
+    if (existing.status === 'Resolved') return res.status(403).json({ error: 'This incident note has been resolved and is now read only.' });
     const data = normalizeBody({ ...existing, ...req.body }); const publish = !!req.body?.is_published; const newlyPublished = publish && !existing.is_published;
     await pool.query(`UPDATE noc_incident_notes SET ${fields.map((f, i) => `${f}=$${i + 1}`).join(',')},is_published=$${fields.length + 1},updated_by=$${fields.length + 2},updated_at=CURRENT_TIMESTAMP WHERE id=$${fields.length + 3}`, [...fields.map((f) => data[f]), publish || existing.is_published, req.user.id, existing.id]);
     for (const field of fields) await recordHistory(existing.id, field.replace(/_/g, ' '), existing[field], data[field], req.user);

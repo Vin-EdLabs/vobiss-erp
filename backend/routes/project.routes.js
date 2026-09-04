@@ -6,6 +6,7 @@ import { fileURLToPath } from 'url';
 import { dirname } from 'path';
 import { authenticateToken } from '../middleware/auth.js';
 import { authenticateOrShareToken } from '../middleware/shareAuth.js';
+import { attachTenant } from '../middleware/tenant.js';
 import { invalidateOnMutation } from '../services/vobiCache.js';
 import {
   initProjectRequestTables,
@@ -30,6 +31,8 @@ import {
   getDesignMaterials,
   saveDesignMaterial,
   deleteDesignMaterial,
+  getDesignEngineeringSettings,
+  updateDesignEngineeringSettings,
   createDesignRequest,
   listDesignRequests,
   listDesignUnitMembers,
@@ -37,6 +40,7 @@ import {
   assignDesignRequest,
   releaseDesignRequest,
   createSalesRequest,
+  updateSalesRequestIdentity,
   submitDesignRequest,
   confirmDesignRequest,
   rejectSalesReview,
@@ -125,6 +129,24 @@ router.get('/requests/detail/:id', authenticateOrShareToken(['project_request', 
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
+});
+
+// Must be registered before '/signoff/:id' below — Express matches route patterns in
+// registration order, and ':id' would otherwise swallow this literal path (trying to parse
+// "link-options" as the numeric id and failing with a Postgres type error). Also needs its own
+// explicit authenticateToken (like '/signoff/:id' below already does) since this sits before the
+// router-level `router.use(authenticateToken)` further down the file.
+router.get('/signoff/link-options', authenticateToken, requireProjectSignoffAccess, async (_req, res) => {
+  try {
+    const [requests, wip] = await Promise.all([
+      pool.query(`SELECT id, site_name, customer_name, circuit_id FROM project_requests ORDER BY updated_at DESC LIMIT 250`),
+      pool.query(`SELECT id, site_name, customer_name FROM project_wip_entries WHERE deleted_at IS NULL ORDER BY updated_at DESC LIMIT 250`),
+    ]);
+    res.json({
+      service_requests: requests.rows.map((r) => ({ id: r.id, label: `Service Request #${r.id} · ${r.site_name || r.customer_name || 'Unnamed site'}`, reference: r.circuit_id || `SR-${String(r.id).padStart(3, '0')}` })),
+      wip_entries: wip.rows.map((r) => ({ id: r.id, label: `WIP #${r.id} · ${r.site_name || r.customer_name || 'Unnamed customer'}`, reference: `WIP-${String(r.id).padStart(3, '0')}` })),
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 router.get('/signoff/:id', authenticateOrShareToken('signoff_form', (req, res, next) => authenticateToken(req, res, () => requireProjectSignoffAccess(req, res, next))), async (req, res) => {
@@ -247,7 +269,11 @@ async function requireSalesAccess(req, res, next) {
   const accessUser = databaseUser || req.user;
   const role = String(accessUser?.main_role || accessUser?.role || '').toLowerCase();
   const units = effectiveUnitsForUser(accessUser);
-  if (!isSystemAdmin(accessUser) && !['admin', 'superadmin', 'system_admin', 'sales'].includes(role) && !units.includes('sales')) {
+  // ptel_executive and ptel_cx_manager have no 'sales' unit (Foster/Sabina) but the PTEL Sales
+  // Dashboard is explicitly meant to be visible to them — keep this allow-list in sync with the
+  // dashboard's own allowedRoles in src/pages/Index.tsx.
+  const salesRoles = ['admin', 'superadmin', 'system_admin', 'sales', 'ptel_sales', 'ptel_executive', 'ptel_cx_manager'];
+  if (!isSystemAdmin(accessUser) && !salesRoles.includes(role) && !units.includes('sales')) {
     return res.status(403).json({ error: 'Sales access required' });
   }
   next();
@@ -255,7 +281,7 @@ async function requireSalesAccess(req, res, next) {
 
 async function loadFullUser(req) {
   const { rows } = await pool.query(
-    'SELECT id, username, first_name, last_name, role, main_role, units, unit, position FROM users WHERE id = $1 AND deleted_at IS NULL',
+    'SELECT id, username, first_name, last_name, role, main_role, units, unit, position, company FROM users WHERE id = $1 AND deleted_at IS NULL',
     [req.user.id]
   );
   const u = rows[0];
@@ -302,21 +328,10 @@ router.get('/signoff', requireProjectSignoffAccess, async (req, res) => {
     const params = []; const where = ['1=1'];
     if (status !== 'all') { params.push(status); where.push(`status=$${params.length}`); }
     if (term) { params.push(`%${term}%`); where.push(`(site_name ILIKE $${params.length} OR COALESCE(circuit_id,'') ILIKE $${params.length} OR COALESCE(client_name,'') ILIKE $${params.length})`); }
+    if (req.query.linked_record_type) { params.push(String(req.query.linked_record_type)); where.push(`linked_record_type=$${params.length}`); }
+    if (req.query.linked_record_id) { params.push(parseInt(req.query.linked_record_id, 10)); where.push(`linked_record_id=$${params.length}`); }
     const result = await pool.query(`SELECT * FROM project_signoff_forms WHERE ${where.join(' AND ')} ORDER BY created_at DESC`, params);
     res.json(result.rows);
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-router.get('/signoff/link-options', requireProjectSignoffAccess, async (_req, res) => {
-  try {
-    const [requests, wip] = await Promise.all([
-      pool.query(`SELECT id, site_name, customer_name, circuit_id FROM project_requests ORDER BY updated_at DESC LIMIT 250`),
-      pool.query(`SELECT id, site_name, customer_name FROM project_wip_entries WHERE deleted_at IS NULL ORDER BY updated_at DESC LIMIT 250`),
-    ]);
-    res.json({
-      service_requests: requests.rows.map((r) => ({ id: r.id, label: `Service Request #${r.id} · ${r.site_name || r.customer_name || 'Unnamed site'}`, reference: r.circuit_id || `SR-${String(r.id).padStart(3, '0')}` })),
-      wip_entries: wip.rows.map((r) => ({ id: r.id, label: `WIP #${r.id} · ${r.site_name || r.customer_name || 'Unnamed customer'}`, reference: `WIP-${String(r.id).padStart(3, '0')}` })),
-    });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -365,6 +380,20 @@ router.post('/signoff/:id/approve', requireProjectSignoffAccess, async (req, res
     await createNotification('Sign-off form approved', `Your sign-off form for ${form.site_name} has been approved`, user.id, { targetUserId: form.created_by, linkUrl: `/project-unit/signoff/${form.id}`, notificationType: 'project_signoff' });
     await logUserAction(user, { actionType: 'approve', recordType: 'signoff_form', recordId: form.id, recordRef: form.reference_no, description: `${signoffDisplayName(user)} approved the sign-off form for ${form.site_name}` });
     recordTimingEvent({ workflowType: 'signoff_form', recordId: form.id, eventType: 'completed', stageName: 'pending_approval', triggeredByUserId: user.id, attributeToUserId: user.id }).catch(() => {});
+    // A sign-off form linked to a Service Request is the real completion step for that request —
+    // approving it here is what finally marks the SR done, instead of a separate manual click.
+    // Not eligible (e.g. NOC hasn't approved yet) just means it stays open; never block the
+    // sign-off approval itself over that.
+    if (form.linked_record_type === 'service_request' && form.linked_record_id) {
+      try {
+        const completed = await projectCompleteRequest(form.linked_record_id, user);
+        await logUserAction(user, { actionType: 'complete', recordType: 'service_request', recordId: form.linked_record_id });
+        recordTimingEvent({ workflowType: 'service_request', recordId: form.linked_record_id, eventType: 'completed', stageName: 'project', triggeredByUserId: user.id }).catch(() => {});
+        void completed;
+      } catch (e) {
+        console.warn('[signoff] could not auto-complete linked service request:', e.message);
+      }
+    }
     res.json(form);
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
@@ -422,6 +451,16 @@ router.put('/design/materials/:id', requireDesignAccess, async (req, res) => {
 
 router.delete('/design/materials/:id', requireDesignAccess, async (req, res) => {
   try { await deleteDesignMaterial(parseInt(req.params.id, 10)); res.status(204).end(); } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+// Fixed formula-driven BOM calculator settings (Pole Span, Bracket Ratio, unit rates, etc) — see
+// getDesignEngineeringSettings/updateDesignEngineeringSettings in db/project.js.
+router.get('/design/settings', requireDesignAccess, attachTenant, async (req, res) => {
+  try { res.json(await getDesignEngineeringSettings(req.company)); } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.put('/design/settings', requireDesignAccess, attachTenant, async (req, res) => {
+  try { res.json(await updateDesignEngineeringSettings(req.company, req.body)); } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
 router.post('/design/requests', requireDesignAccess, async (req, res) => {
@@ -501,8 +540,8 @@ router.post('/design/requests/:id/release', requireDesignAccess, async (req, res
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
-router.get('/sales/requests', requireSalesAccess, async (_req, res) => {
-  try { res.json(await listDesignRequests()); } catch (e) { res.status(500).json({ error: e.message }); }
+router.get('/sales/requests', requireSalesAccess, attachTenant, async (req, res) => {
+  try { res.json(await listDesignRequests(req.company)); } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 router.post('/sales/requests', requireSalesAccess, async (req, res) => {
@@ -517,6 +556,15 @@ router.post('/sales/requests', requireSalesAccess, async (req, res) => {
     recordTimingEvent({ workflowType: 'sales_request', recordId: created.id, eventType: 'created', stageName: 'design', toUnitSlug: 'design', triggeredByUserId: req.user.id }).catch(() => {});
     notifySrStage('design', { requestId: created.id, actingUserId: req.user.id, refLabel: `SR-${String(created.id).padStart(3, '0')}` });
     res.status(201).json(created);
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+router.put('/sales/requests/:id', requireSalesAccess, async (req, res) => {
+  try {
+    const user = await loadFullUser(req);
+    const id = parseInt(req.params.id, 10);
+    const updated = await updateSalesRequestIdentity(id, req.body, user);
+    res.json(updated);
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
@@ -907,13 +955,13 @@ router.post('/requests/:id/ip/forward', async (req, res) => {
       recordId: updated?.id || parseInt(req.params.id, 10),
       statusText: 'forwarded',
     });
-    const ipTarget = req.body?.route_to_stage === 'ts' ? 'ts' : 'project';
+    const ipTarget = req.body?.route_to_stage === 'ts' ? 'ts' : req.body?.route_to_stage === 'noc' ? 'noc' : 'project';
     recordTimingEvent({
       workflowType: 'service_request', recordId: updated?.id || parseInt(req.params.id, 10),
-      eventType: 'started', stageName: ipTarget === 'ts' ? 'ts_review' : 'noc_review', toUnitSlug: ipTarget,
+      eventType: 'started', stageName: ipTarget === 'ts' ? 'ts_review' : ipTarget === 'noc' ? 'noc_review' : 'project_review', toUnitSlug: ipTarget,
       triggeredByUserId: req.user.id,
     }).catch(() => {});
-    notifySrStage(ipTarget === 'ts' ? 'ts' : 'noc', { requestId: updated?.id || parseInt(req.params.id, 10), actingUserId: req.user.id, refLabel: `SR-${String(updated?.id || req.params.id).padStart(3, '0')}` });
+    notifySrStage(ipTarget, { requestId: updated?.id || parseInt(req.params.id, 10), actingUserId: req.user.id, refLabel: `SR-${String(updated?.id || req.params.id).padStart(3, '0')}` });
     res.json(updated);
   } catch (e) {
     res.status(400).json({ error: e.message });

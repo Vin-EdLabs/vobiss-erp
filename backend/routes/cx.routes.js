@@ -50,7 +50,7 @@ import { ensureTicketThread, syncTicketThreadAssignee } from '../services/chatRe
 import { isSystemAdminAccount, effectiveUnitsForUser } from '../roles.js';
 import { getTicketEscalationConfig, markTicketStageAccepted } from '../ticketEscalation.js';
 import { invalidateOnMutation } from '../services/vobiCache.js';
-import { logUserAction } from '../services/activityLog.js';
+import { logUserAction, ensureActivityLogsTable } from '../services/activityLog.js';
 import { recordTimingEvent } from '../services/workflowTimeEngine.js';
 
 const TICKET_TERMINAL_STATUSES = new Set(['CLOSED', 'RESOLVED']);
@@ -135,6 +135,11 @@ function canViewTicket(user, ticket) {
   const ticketStage = canonicalizeTicketUnit(ticket.escalation_stage);
   const units = getUserUnitSlugs(user).map(canonicalizeTicketUnit);
   if (ticketStage && units.includes(ticketStage)) return true;
+  // Sales unit gets read visibility into every ticket (not just ones staged in their own
+  // "unit", which doesn't exist as an escalation_stage) so they can see what's going on with
+  // customers — this only ever grants viewing; isTicketManager/canEscalateTicket below are
+  // separate, untouched gates, so a sales account still can't assign, escalate, or reassign.
+  if (getUserUnitSlugs(user).includes('sales')) return true;
 
   const roleToStage = {
     cx: 'cx',
@@ -174,6 +179,36 @@ function canEscalateTicket(user, ticket) {
   return false;
 }
 
+// Registered before /tickets/:id below so "my-day" is never swallowed as a ticket id —
+// Express matches routes in registration order, not by static-vs-param specificity.
+// "Today's Tickets" — every ticket the caller has personally touched today (viewed,
+// commented, changed status/assigned/closed), deduped to one row per ticket. This is
+// deliberately a filtered PERSONAL view on the same activity_logs the rest of the ticket
+// flow already writes to — not a separate queue or its own tracking system.
+router.get('/tickets/my-day', authenticateToken, async (req, res) => {
+  try {
+    await ensureActivityLogsTable();
+    const startOfDay = new Date();
+    startOfDay.setHours(0, 0, 0, 0);
+    const result = await pool.query(
+      `SELECT * FROM (
+         SELECT DISTINCT ON (t.id) t.id, t.ticket_id, t.title, t.status, t.priority,
+                t.escalation_stage, t.category, t.created_at, t.updated_at,
+                MAX(a.created_at) OVER (PARTITION BY t.id) AS last_touched_at
+         FROM tickets t
+         JOIN activity_logs a ON a.record_type = 'ticket' AND a.record_id = t.id
+         WHERE a.user_id = $1 AND a.created_at >= $2
+         ORDER BY t.id
+       ) x ORDER BY last_touched_at DESC`,
+      [req.authUser.id, startOfDay.toISOString()]
+    );
+    res.json({ success: true, count: result.rows.length, data: result.rows });
+  } catch (err) {
+    console.error('GET /tickets/my-day error:', err);
+    res.status(500).json({ error: "Failed to fetch today's tickets" });
+  }
+});
+
 // Registered before the router-wide auth gate below so a valid share token can serve
 // this one read-only detail route without a user session; every other route in this
 // file (including mutations) still requires full authentication.
@@ -185,7 +220,14 @@ router.get('/tickets/:id', authenticateOrShareToken('ticket', authenticateToken)
         error: 'Use GET /api/reports/tickets for the ticket report (this path is a ticket ID).',
       });
     }
-    const ticket = await getTicketByIdForStaff(id);
+    // Timeline and tags only depend on the ticket ref, not on the ticket row itself — running
+    // all three lookups concurrently instead of one after another cuts this endpoint's latency
+    // roughly to the slowest single query instead of the sum of all of them.
+    const [ticket, timeline, tags] = await Promise.all([
+      getTicketByIdForStaff(id),
+      getTicketTimeline(id),
+      getTagsForTicket(id),
+    ]);
     if (!ticket) return res.status(404).json({ error: 'Ticket not found' });
     if (!req.isSharedView && !canViewTicket(req.authUser, ticket)) {
       return res.status(403).json({ error: 'This ticket is not assigned to you.' });
@@ -237,10 +279,9 @@ router.get('/tickets/:id', authenticateOrShareToken('ticket', authenticateToken)
       }
     }
 
-    const timeline = await getTicketTimeline(id);
-    const tags = await getTagsForTicket(id);
     if (!req.isSharedView) {
-      await logUserAction(req.authUser, { actionType: 'ticket_viewed', recordType: 'ticket', recordId: ticket.id || ticket.row_id, recordRef: ticket.ticket_id, description: `${req.authUser.full_name || req.authUser.username} viewed Ticket #${ticket.ticket_id}` });
+      // Audit log write — doesn't gate the response the viewer is waiting on.
+      logUserAction(req.authUser, { actionType: 'ticket_viewed', recordType: 'ticket', recordId: ticket.id || ticket.row_id, recordRef: ticket.ticket_id, description: `${req.authUser.full_name || req.authUser.username} viewed Ticket #${ticket.ticket_id}` }).catch((e) => console.warn('[CX Route] ticket_viewed log failed:', e.message));
     }
     res.json({ success: true, data: { ticket: { ...ticket, tags }, timeline } });
   } catch (err) {
