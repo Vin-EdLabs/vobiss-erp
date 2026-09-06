@@ -1378,7 +1378,7 @@ const Sidebar = ({
       >
         <div className="flex h-full min-h-0 flex-col">
           <div
-            className={`relative flex h-14 shrink-0 items-center border-b border-[var(--sidebar-border)] pt-[max(0.25rem,env(safe-area-inset-top))] ${
+            className={`relative flex min-h-14 shrink-0 items-center border-b border-[var(--sidebar-border)] pt-[max(0.25rem,env(safe-area-inset-top))] ${
               compact ? 'justify-center px-2' : 'justify-between gap-2.5 px-4'
             }`}
           >

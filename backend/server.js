@@ -259,6 +259,9 @@ const UPLOAD_MIME = {
   '.m4v': 'video/mp4',
   '.mp3': 'audio/mpeg',
   '.wav': 'audio/wav',
+  '.m4a': 'audio/mp4',
+  '.ogg': 'audio/ogg',
+  '.aac': 'audio/aac',
   '.doc': 'application/msword',
   '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   '.xls': 'application/vnd.ms-excel',
@@ -288,8 +291,14 @@ app.use('/uploads', express.static(uploadsStaticPath, {
   acceptRanges: true,
   setHeaders: (res, filePath) => {
     const ext = path.extname(filePath).toLowerCase();
+    // .webm is ambiguous — screen/video attachments and chat voice recordings both use it,
+    // but only the recorder actually produces audio-only content, and it always names its
+    // files "voice-<timestamp>.webm" (see ChatVoiceRecorder.tsx). Serving those as the
+    // default video/webm mapping below made Safari (which checks Content-Type strictly
+    // before it will even attempt to decode) refuse to play them at all.
+    const isVoiceRecording = ext === '.webm' && path.basename(filePath).startsWith('voice-');
     const sniffed = sniffUploadMime(filePath);
-    const mime = UPLOAD_MIME[ext] || sniffed;
+    const mime = isVoiceRecording ? 'audio/webm' : (UPLOAD_MIME[ext] || sniffed);
     if (mime) {
       res.setHeader('Content-Type', mime);
       res.setHeader('X-Content-Type-Options', 'nosniff');
