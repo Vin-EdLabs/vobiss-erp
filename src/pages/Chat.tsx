@@ -27,6 +27,8 @@ import {
   Menu,
   Globe,
   Play,
+  MoreVertical,
+  Trash2,
 } from 'lucide-react';
 import '@/styles/chat-theme.css';
 import '@/styles/chat-mobile.css';
@@ -80,6 +82,8 @@ import {
   getMessageThread,
   editChatMessage,
   deleteChatMessage,
+  clearChannelMessages,
+  clearDmMessages,
   getChatRecordContext,
   performChatAction,
   getMessageById,
@@ -119,6 +123,12 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 
 function emitChatUnreadChanged() {
   window.dispatchEvent(new CustomEvent('chat:unread-changed'));
@@ -723,6 +733,8 @@ const Chat: React.FC<{
     dmId?: string | null;
   } | null>(null);
   const [deletingMessageId, setDeletingMessageId] = useState<string | null>(null);
+  const [pendingClearChat, setPendingClearChat] = useState(false);
+  const [clearingChat, setClearingChat] = useState(false);
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
   const [mentionIndex, setMentionIndex] = useState(0);
   const [sending, setSending] = useState(false);
@@ -1554,6 +1566,19 @@ const Chat: React.FC<{
       }
     );
 
+    // Fires when this same user clears a chat from another open tab/device — keeps them in sync
+    // with each other. Other participants never receive this event (see backend/routes/chat.js's
+    // DELETE .../messages routes, which emit only to `user:${userId}`, never the shared room).
+    socket.on('chat_cleared', ({ channelId, dmId }: { channelId?: string; dmId?: string }) => {
+      if ((channelId && channelId === activeChannelId) || (dmId && dmId === activeDmId)) {
+        setMessages([]);
+        setBookmarkedMessageIds(new Set());
+        setBookmarkIdByMessageId(new Map());
+      }
+      queryClient.invalidateQueries({ queryKey: ['chat-channels'] });
+      queryClient.invalidateQueries({ queryKey: ['chat-dms'] });
+    });
+
     const refreshChannels = () => {
       queryClient.invalidateQueries({ queryKey: ['chat-channels'] });
     };
@@ -1750,6 +1775,34 @@ const Chat: React.FC<{
       });
     } finally {
       setDeletingMessageId(null);
+    }
+  };
+
+  const handleConfirmClearChat = async () => {
+    if (!activeChannelId && !activeDmId) return;
+    try {
+      setClearingChat(true);
+      if (activeChannelId) {
+        await clearChannelMessages(activeChannelId);
+      } else {
+        await clearDmMessages(activeDmId!);
+      }
+      setMessages([]);
+      setBookmarkedMessageIds(new Set());
+      setBookmarkIdByMessageId(new Map());
+      toast({ title: 'Chat cleared', description: 'Only your view was cleared — nobody else is affected.' });
+      await queryClient.invalidateQueries({ queryKey: ['chat-channels'] });
+      await queryClient.invalidateQueries({ queryKey: ['chat-dms'] });
+      await queryClient.invalidateQueries({ queryKey: ['chat-pins', activeChannelId, activeDmId] });
+      setPendingClearChat(false);
+    } catch (e) {
+      toast({
+        title: 'Could not clear chat',
+        description: e instanceof Error ? e.message : 'Please try again.',
+        variant: 'destructive',
+      });
+    } finally {
+      setClearingChat(false);
     }
   };
 
@@ -2936,6 +2989,29 @@ const Chat: React.FC<{
             >
               {isLight ? <Moon className="h-4 w-4" /> : <Sun className="h-4 w-4" />}
             </button>
+            {(activeChannelId || activeDmId) && !isVobiChannel && !isCategoryHubView && (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    type="button"
+                    className="chat-icon-btn rounded-lg p-2"
+                    title="More options"
+                    aria-label="More options"
+                  >
+                    <MoreVertical className="h-4 w-4" />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="border-gray-700 bg-[#13151c] text-gray-100">
+                  <DropdownMenuItem
+                    onClick={() => setPendingClearChat(true)}
+                    className="cursor-pointer text-red-300 focus:bg-red-500/10 focus:text-red-200"
+                  >
+                    <Trash2 className="mr-2 h-4 w-4" />
+                    Clear chat
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
             {isMobile && (
               <button
                 type="button"
@@ -3976,6 +4052,44 @@ const Chat: React.FC<{
               className="bg-red-600 text-white hover:bg-red-500 focus:ring-red-500"
             >
               {deletingMessageId ? 'Deleting...' : 'Delete message'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog
+        open={pendingClearChat}
+        onOpenChange={(open) => {
+          if (!open && !clearingChat) setPendingClearChat(false);
+        }}
+      >
+        <AlertDialogContent className="border border-gray-700 bg-[#13151c] text-gray-100 shadow-2xl shadow-black/40">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-white">Clear this chat?</AlertDialogTitle>
+            <AlertDialogDescription className="text-gray-400">
+              This clears every message from your view only.{' '}
+              {activeDm?.other_user?.name
+                ? `${activeDm.other_user.name} will still see the full conversation.`
+                : 'Everyone else in this conversation will still see every message.'}{' '}
+              This can't be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel
+              disabled={clearingChat}
+              className="border-gray-700 bg-transparent text-gray-300 hover:bg-gray-800 hover:text-white"
+            >
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              disabled={clearingChat}
+              onClick={(event) => {
+                event.preventDefault();
+                void handleConfirmClearChat();
+              }}
+              className="bg-red-600 text-white hover:bg-red-500 focus:ring-red-500"
+            >
+              {clearingChat ? 'Clearing...' : 'Clear chat'}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

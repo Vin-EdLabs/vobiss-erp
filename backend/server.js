@@ -284,36 +284,51 @@ function sniffUploadMime(filePath) {
   }
 }
 
+const uploadSetHeaders = (res, filePath) => {
+  const ext = path.extname(filePath).toLowerCase();
+  // .webm is ambiguous — screen/video attachments and chat voice recordings both use it,
+  // but only the recorder actually produces audio-only content, and it always names its
+  // files "voice-<timestamp>.webm" (see ChatVoiceRecorder.tsx). Serving those as the
+  // default video/webm mapping below made Safari (which checks Content-Type strictly
+  // before it will even attempt to decode) refuse to play them at all.
+  const isVoiceRecording = ext === '.webm' && path.basename(filePath).startsWith('voice-');
+  const sniffed = sniffUploadMime(filePath);
+  const mime = isVoiceRecording ? 'audio/webm' : (UPLOAD_MIME[ext] || sniffed);
+  if (mime) {
+    res.setHeader('Content-Type', mime);
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+  }
+  res.setHeader('Cache-Control', 'public, max-age=31536000');
+  const q = res.req?.query || {};
+  const origin = res.req?.headers?.origin;
+  if (origin) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Vary', 'Origin');
+  }
+  const rawName = String(q.name || path.basename(filePath)).replace(/["\r\n\\]/g, '');
+  const disposition = q.download ? 'attachment' : 'inline';
+  res.setHeader('Content-Disposition', `${disposition}; filename="${rawName}"`);
+};
+
 app.use('/uploads', express.static(uploadsStaticPath, {
   // express.static/send already defaults acceptRanges to true — stated explicitly so video
   // seeking (range requests, required by <video> playback in every browser) is guaranteed
   // rather than left to an implicit library default.
   acceptRanges: true,
-  setHeaders: (res, filePath) => {
-    const ext = path.extname(filePath).toLowerCase();
-    // .webm is ambiguous — screen/video attachments and chat voice recordings both use it,
-    // but only the recorder actually produces audio-only content, and it always names its
-    // files "voice-<timestamp>.webm" (see ChatVoiceRecorder.tsx). Serving those as the
-    // default video/webm mapping below made Safari (which checks Content-Type strictly
-    // before it will even attempt to decode) refuse to play them at all.
-    const isVoiceRecording = ext === '.webm' && path.basename(filePath).startsWith('voice-');
-    const sniffed = sniffUploadMime(filePath);
-    const mime = isVoiceRecording ? 'audio/webm' : (UPLOAD_MIME[ext] || sniffed);
-    if (mime) {
-      res.setHeader('Content-Type', mime);
-      res.setHeader('X-Content-Type-Options', 'nosniff');
-    }
-    res.setHeader('Cache-Control', 'public, max-age=31536000');
-    const q = res.req?.query || {};
-    const origin = res.req?.headers?.origin;
-    if (origin) {
-      res.setHeader('Access-Control-Allow-Origin', origin);
-      res.setHeader('Vary', 'Origin');
-    }
-    const rawName = String(q.name || path.basename(filePath)).replace(/["\r\n\\]/g, '');
-    const disposition = q.download ? 'attachment' : 'inline';
-    res.setHeader('Content-Disposition', `${disposition}; filename="${rawName}"`);
-  }
+  setHeaders: uploadSetHeaders,
+}));
+
+// Chat attachments (images/videos/audio/files) are written into archive-storage — the same
+// directory the File Storage (Archive) feature already writes into and that's confirmed working
+// in production — instead of backend/uploads/chat. Whatever made plain uploads/ unreliable in
+// that environment (a volume mount or permission scoped to archive-storage specifically, most
+// likely) doesn't affect this path, since it's the identical directory Archive already proves
+// out. See backend/routes/chat.js's chatUploadsDir.
+const chatUploadsStaticPath = path.join(__dirname, 'archive-storage', 'chat');
+if (!fs.existsSync(chatUploadsStaticPath)) fs.mkdirSync(chatUploadsStaticPath, { recursive: true });
+app.use('/chat-uploads', express.static(chatUploadsStaticPath, {
+  acceptRanges: true,
+  setHeaders: uploadSetHeaders,
 }));
 app.use('/api/profile', profileRoutes);
 app.use('/api/field', fieldRoutes);
@@ -2968,7 +2983,7 @@ app.get('/api/field/users', authenticateToken, async (req, res) => {
 
 // SPA FALLBACK
 app.use((req, res, next) => {
-  if (req.path.startsWith('/api') || req.path.startsWith('/uploads') || req.path === '/firebase-messaging-sw.js' || req.path === '/push-sw.js') {
+  if (req.path.startsWith('/api') || req.path.startsWith('/uploads') || req.path.startsWith('/chat-uploads') || req.path === '/firebase-messaging-sw.js' || req.path === '/push-sw.js') {
     return next();
   }
   if (req.method !== 'GET') {

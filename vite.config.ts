@@ -27,6 +27,11 @@ export default defineConfig(({ mode }) => {
           changeOrigin: true,
           secure: false,
         },
+        "/chat-uploads": {
+          target: backend,
+          changeOrigin: true,
+          secure: false,
+        },
         "/manifest.json": {
           target: backend,
           changeOrigin: true,
@@ -83,7 +88,7 @@ export default defineConfig(({ mode }) => {
           maximumFileSizeToCacheInBytes: 10 * 1024 * 1024,
           globPatterns: ["**/*.{js,css,html,png,svg,ico,woff2}"],
           navigateFallback: "/index.html",
-          navigateFallbackDenylist: [/^\/api/, /^\/socket\.io/, /^\/uploads/, /^\/firebase-messaging-sw\.js/, /^\/push-sw\.js/],
+          navigateFallbackDenylist: [/^\/api/, /^\/socket\.io/, /^\/uploads/, /^\/chat-uploads/, /^\/firebase-messaging-sw\.js/, /^\/push-sw\.js/],
           runtimeCaching: [
             {
               urlPattern: /^https:\/\/fonts\.googleapis\.com\/.*/i,

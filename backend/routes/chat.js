@@ -35,7 +35,10 @@ import {
 import { sendPushToUserIds } from '../push/sendPush.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const chatUploadsDir = path.join(__dirname, '../uploads/chat');
+// Lives under archive-storage (the File Storage feature's own directory, confirmed working in
+// production) rather than backend/uploads/chat — see backend/server.js's /chat-uploads static
+// route for why. Served at the matching /chat-uploads public path, not /uploads.
+const chatUploadsDir = path.join(__dirname, '../archive-storage/chat');
 if (!fs.existsSync(chatUploadsDir)) {
   fs.mkdirSync(chatUploadsDir, { recursive: true });
 }
@@ -369,7 +372,7 @@ async function insertMessageWithAttachments({
 
     const attachments = [];
     for (const file of files || []) {
-      const url = `/uploads/chat/${file.filename}`;
+      const url = `/chat-uploads/${file.filename}`;
       const ins = await client.query(
         `INSERT INTO chat_attachments (message_id, file_name, file_url, file_size, mime_type)
          VALUES ($1, $2, $3, $4, $5)
@@ -590,6 +593,70 @@ router.delete('/messages/:messageId', async (req, res) => {
       channel_id: channelId || undefined,
       dm_id: dmId || undefined,
     });
+  } catch (e) {
+    res.status(e.status || 500).json({ error: e.message });
+  }
+});
+
+// DELETE /api/chat/channels/:channelId/messages — "Clear chat" for the current user only.
+// Reuses the same chat_message_deletions "hide for me" mechanism as deleting a single message
+// someone else sent, just applied to every message in the channel at once — every other member
+// keeps their own copy untouched, and the channel list preview naturally goes blank for this
+// user too, since it already filters through the same table.
+router.delete('/channels/:channelId/messages', async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { channelId } = req.params;
+    await assertChannelMember(channelId, userId);
+    await ensureMessageDeletionTableReady();
+
+    await pool.query(
+      `DELETE FROM chat_bookmarks WHERE user_id = $1
+       AND message_id IN (SELECT id FROM chat_messages WHERE channel_id = $2)`,
+      [userId, channelId]
+    );
+    await pool.query(
+      `INSERT INTO chat_message_deletions (message_id, user_id)
+       SELECT id, $2 FROM chat_messages WHERE channel_id = $1
+       ON CONFLICT (message_id, user_id) DO NOTHING`,
+      [channelId, userId]
+    );
+
+    const io = getRealtimeIo();
+    if (io) io.to(`user:${userId}`).emit('chat_cleared', { channelId });
+
+    res.json({ ok: true });
+    logChatAudit(req, 'chat_clear_all_self', { channel_id: channelId });
+  } catch (e) {
+    res.status(e.status || 500).json({ error: e.message });
+  }
+});
+
+// DELETE /api/chat/dms/:dmId/messages — same "Clear chat" behavior for a direct message.
+router.delete('/dms/:dmId/messages', async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { dmId } = req.params;
+    await assertDmParticipant(dmId, userId);
+    await ensureMessageDeletionTableReady();
+
+    await pool.query(
+      `DELETE FROM chat_bookmarks WHERE user_id = $1
+       AND message_id IN (SELECT id FROM chat_messages WHERE dm_id = $2)`,
+      [userId, dmId]
+    );
+    await pool.query(
+      `INSERT INTO chat_message_deletions (message_id, user_id)
+       SELECT id, $2 FROM chat_messages WHERE dm_id = $1
+       ON CONFLICT (message_id, user_id) DO NOTHING`,
+      [dmId, userId]
+    );
+
+    const io = getRealtimeIo();
+    if (io) io.to(`user:${userId}`).emit('chat_cleared', { dmId });
+
+    res.json({ ok: true });
+    logChatAudit(req, 'chat_clear_all_self', { dm_id: dmId });
   } catch (e) {
     res.status(e.status || 500).json({ error: e.message });
   }

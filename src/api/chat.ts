@@ -209,6 +209,11 @@ export async function sendChannelMessage(
   return chatFetch(`/channels/${channelId}/messages`, { method: 'POST', body: form });
 }
 
+/** Clears the chat from the current user's view only — other members' copies are untouched. */
+export async function clearChannelMessages(channelId: string): Promise<void> {
+  await chatFetch(`/channels/${channelId}/messages`, { method: 'DELETE' });
+}
+
 export async function reactToMessage(
   channelId: string,
   messageId: string,
@@ -285,6 +290,11 @@ export async function sendDmMessage(
   if (replyTo) form.append('reply_to', replyTo);
   for (const f of files || []) form.append('files', f);
   return chatFetch(`/dms/${dmId}/messages`, { method: 'POST', body: form });
+}
+
+/** Clears the chat from the current user's view only — the other participant's copy is untouched. */
+export async function clearDmMessages(dmId: string): Promise<void> {
+  await chatFetch(`/dms/${dmId}/messages`, { method: 'DELETE' });
 }
 
 export async function getChatUsers(): Promise<ChatUser[]> {
