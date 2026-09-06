@@ -2,6 +2,7 @@ import pool from '../db.js';
 import { createNotification } from '../db.js';
 import { isSystemAdminAccount, userHasAnyRole, effectiveUnitsForUser, MANAGER_ROLES, SUPERVISOR_ROLES } from '../roles.js';
 import { formatRecordLabel, recordViewPath } from './activityLog.js';
+import { sendPushToUserIds } from '../push/sendPush.js';
 
 /**
  * Central, workflow-agnostic time-tracking engine. Every existing workflow route calls
@@ -606,18 +607,32 @@ export async function checkSlaThresholdsAndNotify() {
     const managerIds = await resolveUnitManagerIds(seg.unitSlug);
 
     if (seg.slaStatus === 'warning') {
+      const title = 'SLA Warning';
       const message = `${label} is approaching its SLA limit — currently in ${seg.stageName || 'progress'} for ${formatMinutes(seg.elapsedMinutes)}`;
       await Promise.all(managerIds.map((userId) =>
-        createNotification('SLA Warning', message, null, { targetUserId: userId, linkUrl, notificationType: 'workflow_sla_warning' }).catch(() => {})
+        createNotification(title, message, null, { targetUserId: userId, linkUrl, notificationType: 'workflow_sla_warning' }).catch(() => {})
       ));
+      if (managerIds.length) {
+        await sendPushToUserIds(managerIds, {
+          title, body: message,
+          data: { url: linkUrl, type: 'workflow_sla_warning', tag: `sla-${seg.segmentId}` },
+        }).catch(() => {});
+      }
     } else {
       const overdueBy = formatMinutes(seg.elapsedMinutes - (seg.criticalThresholdMinutes || seg.elapsedMinutes));
+      const title = 'SLA Breach';
       const message = `${label} has breached its SLA in ${seg.stageName || 'progress'} — ${overdueBy} overdue`;
       const adminIds = await resolveSystemAdminIds();
       const recipients = [...new Set([...managerIds, ...adminIds])];
       await Promise.all(recipients.map((userId) =>
-        createNotification('SLA Breach', message, null, { targetUserId: userId, linkUrl, notificationType: 'workflow_sla_breach' }).catch(() => {})
+        createNotification(title, message, null, { targetUserId: userId, linkUrl, notificationType: 'workflow_sla_breach' }).catch(() => {})
       ));
+      if (recipients.length) {
+        await sendPushToUserIds(recipients, {
+          title, body: message,
+          data: { url: linkUrl, type: 'workflow_sla_breach', tag: `sla-${seg.segmentId}` },
+        }).catch(() => {});
+      }
     }
     notified += 1;
   }

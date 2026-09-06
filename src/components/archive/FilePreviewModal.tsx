@@ -60,6 +60,12 @@ export function FilePreviewModal({ file, onClose }: { file: ArchiveFile | null; 
           </div>
         ) : blob && blob.mimeType.startsWith('image/') ? (
           <img src={blob.url} alt={file.display_name} className="mx-auto max-h-[70vh] rounded-lg object-contain" />
+        ) : blob && blob.mimeType.startsWith('video/') ? (
+          <video src={blob.url} controls playsInline className="mx-auto max-h-[70vh] w-full rounded-lg bg-black">
+            <track kind="captions" />
+          </video>
+        ) : blob && blob.mimeType.startsWith('audio/') ? (
+          <audio src={blob.url} controls className="w-full" />
         ) : blob ? (
           <iframe src={blob.url} title={file.display_name} className="h-[70vh] w-full rounded-lg border border-[var(--border)]" />
         ) : null}

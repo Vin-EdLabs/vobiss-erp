@@ -126,8 +126,20 @@ CHAT FUNCTION
   item returns, and service requests.
 - Supports messages, mentions, reactions, attachments, voice notes, pins,
   bookmarks, forwarding, unread counts, context panels, and system messages.
+- Chat attachments support images, video, audio, PDF, office documents, text
+  files, and common HEIC/HEIF phone photos up to 200 MB per file.
 - System messages can be generated when records are created, approved, rejected,
   escalated, completed, or changed.
+
+FILE STORAGE / ARCHIVE
+- File Storage is available at /archive for organizing files in folders.
+- Users can upload individual files or an entire folder from the browser.
+- File Storage accepts general file types up to 2 GB per file, including
+  documents, images, video, audio, compressed archives, and map files.
+- Supported media previews include images, PDF, video, and audio. Other files
+  remain available for download according to access permissions.
+- Files can be searched, renamed, moved, deleted, downloaded, previewed, and
+  shared through the existing archive access controls.
 
 
 4. DASHBOARDS
@@ -871,7 +883,10 @@ UPLOADS
 - Backend uploads are stored under backend/uploads or domain-specific storage
   folders such as archive-storage and performance-report-storage.
 - Express serves approved uploaded files with detected MIME types.
-- Upload size and accepted file types are restricted by backend configuration.
+- File Storage accepts any file extension up to 2 GB; Chat attachments are
+  limited to 200 MB per file and use MIME type or supported extension checks.
+- Large uploads are supported without the default five-minute Node request
+  timeout; available disk space and deployment limits still apply.
 
 EMAIL
 - SMTP sends outbound workflow or notification email when configured.
@@ -1022,7 +1037,8 @@ A CUSTOMER CANNOT SEE A TICKET
 - Do not use a staff route to test a customer record.
 
 UPLOADS FAIL
-- Check file type and size limits.
+- Check the relevant limit: 2 GB for File Storage or 200 MB for Chat
+  attachments. File Storage is not restricted to a fixed extension allowlist.
 - Check backend/uploads permissions and available disk space.
 - Check the backend log for Multer or MIME errors.
 

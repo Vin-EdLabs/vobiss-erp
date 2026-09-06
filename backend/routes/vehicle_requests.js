@@ -9,6 +9,7 @@ import { resolveReferenceInput, attachReference, isReferenceRequired, isReferenc
 import { getRecordSummary } from '../services/referenceRegistry.js';
 import { logUserAction } from '../services/activityLog.js';
 import { recordTimingEvent } from '../services/workflowTimeEngine.js';
+import { sendPushToUserIds } from '../push/sendPush.js';
 
 async function persistLinkedReferences(sourceType, sourceId, links, userId) {
   if (!Array.isArray(links) || !links.length) return;
@@ -279,6 +280,12 @@ async function notifyUsers(title, message, createdBy, userIds, linkUrl) {
   const unique = [...new Set(userIds.map(Number).filter((id) => Number.isInteger(id) && id > 0))];
   for (const targetUserId of unique) {
     await createNotification(title, message, createdBy, { targetUserId, linkUrl, notificationType: 'vehicle_rental' });
+  }
+  if (unique.length) {
+    await sendPushToUserIds(unique, {
+      title, body: message,
+      data: { url: linkUrl, type: 'vehicle_rental', action: 'request_created', tag: `vehicle-rental-${linkUrl}` },
+    }).catch(() => {});
   }
 }
 

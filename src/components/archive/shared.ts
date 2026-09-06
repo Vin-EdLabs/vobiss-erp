@@ -1,14 +1,16 @@
-import { FileText, FileSpreadsheet, FileImage, MapPinned, FileArchive, File } from 'lucide-react';
+import { FileText, FileSpreadsheet, FileImage, MapPinned, FileArchive, FileVideo, FileAudio, File } from 'lucide-react';
 
-export const PREVIEWABLE_EXTENSIONS = new Set(['pdf', 'png', 'jpg', 'jpeg', 'gif', 'webp']);
+export const PREVIEWABLE_EXTENSIONS = new Set(['pdf', 'png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'mp4', 'webm', 'mov', 'mp3', 'wav', 'm4a']);
 
 export function fileIconFor(extension: string | null | undefined) {
   const ext = String(extension || '').toLowerCase();
-  if (['xls', 'xlsx', 'csv'].includes(ext)) return FileSpreadsheet;
-  if (['pdf', 'doc', 'docx'].includes(ext)) return FileText;
-  if (['png', 'jpg', 'jpeg', 'gif', 'webp'].includes(ext)) return FileImage;
+  if (['xls', 'xlsx', 'csv', 'ods'].includes(ext)) return FileSpreadsheet;
+  if (['pdf', 'doc', 'docx', 'ppt', 'pptx', 'txt', 'rtf', 'odt', 'odp'].includes(ext)) return FileText;
+  if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'heic'].includes(ext)) return FileImage;
+  if (['mp4', 'mov', 'avi', 'mkv', 'webm', 'm4v'].includes(ext)) return FileVideo;
+  if (['mp3', 'wav', 'm4a'].includes(ext)) return FileAudio;
   if (['kmz', 'kml'].includes(ext)) return MapPinned;
-  if (ext === 'zip') return FileArchive;
+  if (['zip', 'rar', '7z', 'tar', 'gz'].includes(ext)) return FileArchive;
   return File;
 }
 

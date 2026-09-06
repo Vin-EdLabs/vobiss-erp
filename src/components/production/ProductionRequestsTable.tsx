@@ -66,78 +66,133 @@ export function ProductionRequestsTable({
   }
 
   return (
-    <div className="vobiss-table-wrap overflow-x-auto">
-      <Table>
-        <TableHeader>
-          <TableRow className="bg-[var(--surface-secondary)] hover:bg-[var(--surface-secondary)]">
-            <TableHead className="w-16 font-semibold text-[var(--text-body)]">ID</TableHead>
-            <TableHead className="font-semibold text-[var(--text-body)]">Customer</TableHead>
-            <TableHead className="font-semibold text-[var(--text-body)]">Site</TableHead>
-            <TableHead className="hidden font-semibold text-[var(--text-body)] md:table-cell">Region</TableHead>
-            {showStage ? (
-              <TableHead className="hidden font-semibold text-[var(--text-body)] sm:table-cell">Stage</TableHead>
-            ) : null}
-            <TableHead className="font-semibold text-[var(--text-body)]">Status</TableHead>
-            <TableHead className="hidden font-semibold text-[var(--text-body)] lg:table-cell">Updated</TableHead>
-            <TableHead className="w-[240px] text-right font-semibold text-[var(--text-body)]">Actions</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {requests.map((r) => {
-            const highlight = highlightRow?.(r);
-            return (
-              <TableRow
-                key={r.id}
-                className={
-                  highlight
-                    ? 'bg-[var(--accent-green-light)] hover:bg-[var(--surface-hover)]'
-                    : 'hover:bg-[var(--surface-hover)]'
-                }
-              >
-                <TableCell className="font-mono text-sm text-[var(--text-secondary)]">#{r.id}</TableCell>
-                <TableCell className="font-medium text-[var(--text-primary)]">{r.customer_name}</TableCell>
-                <TableCell className="text-[var(--text-body)]">{r.site_name}</TableCell>
-                <TableCell className="hidden text-[var(--text-secondary)] md:table-cell">{r.region || '—'}</TableCell>
-                {showStage ? (
-                  <TableCell className="hidden uppercase text-xs font-medium text-[var(--text-secondary)] sm:table-cell">
-                    {r.current_stage || '—'}
+    <>
+      {/* Desktop/tablet — unchanged table, now explicitly md+ only (a w-[240px] Actions column
+          alone is wider than most phones, so no amount of hidden md:table-cell on the other
+          columns keeps this from overflowing horizontally below that breakpoint). */}
+      <div className="vobiss-table-wrap hidden overflow-x-auto md:block">
+        <Table>
+          <TableHeader>
+            <TableRow className="bg-[var(--surface-secondary)] hover:bg-[var(--surface-secondary)]">
+              <TableHead className="w-16 font-semibold text-[var(--text-body)]">ID</TableHead>
+              <TableHead className="font-semibold text-[var(--text-body)]">Customer</TableHead>
+              <TableHead className="font-semibold text-[var(--text-body)]">Site</TableHead>
+              <TableHead className="hidden font-semibold text-[var(--text-body)] md:table-cell">Region</TableHead>
+              {showStage ? (
+                <TableHead className="hidden font-semibold text-[var(--text-body)] sm:table-cell">Stage</TableHead>
+              ) : null}
+              <TableHead className="font-semibold text-[var(--text-body)]">Status</TableHead>
+              <TableHead className="hidden font-semibold text-[var(--text-body)] lg:table-cell">Updated</TableHead>
+              <TableHead className="w-[240px] text-right font-semibold text-[var(--text-body)]">Actions</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {requests.map((r) => {
+              const highlight = highlightRow?.(r);
+              return (
+                <TableRow
+                  key={r.id}
+                  className={
+                    highlight
+                      ? 'bg-[var(--accent-green-light)] hover:bg-[var(--surface-hover)]'
+                      : 'hover:bg-[var(--surface-hover)]'
+                  }
+                >
+                  <TableCell className="font-mono text-sm text-[var(--text-secondary)]">#{r.id}</TableCell>
+                  <TableCell className="font-medium text-[var(--text-primary)]">{r.customer_name}</TableCell>
+                  <TableCell className="text-[var(--text-body)]">{r.site_name}</TableCell>
+                  <TableCell className="hidden text-[var(--text-secondary)] md:table-cell">{r.region || '—'}</TableCell>
+                  {showStage ? (
+                    <TableCell className="hidden uppercase text-xs font-medium text-[var(--text-secondary)] sm:table-cell">
+                      {r.current_stage || '—'}
+                    </TableCell>
+                  ) : null}
+                  <TableCell>
+                    <StatusBadge status={r.status} />
                   </TableCell>
-                ) : null}
-                <TableCell>
-                  <StatusBadge status={r.status} />
-                </TableCell>
-                <TableCell className="hidden whitespace-nowrap text-sm text-[var(--text-muted)] lg:table-cell">
-                  {formatProjectRequestUpdated(r.updated_at)}
-                </TableCell>
-                <TableCell className="text-right">
-                  <div className="flex justify-end gap-2">
-                    <span
-                      className="inline-flex"
-                      onClick={(e) => e.stopPropagation()}
-                      onKeyDown={(e) => e.stopPropagation()}
-                    >
-                      <RecordChatButton
-                        recordType="project_request"
-                        recordId={r.id}
-                        chatChannelId={r.chat_channel_id}
-                        size="sm"
-                        className="h-8 border-[var(--border)]"
-                      />
-                    </span>
-                    <Button asChild size="sm" variant="outline" className="h-8 border-[var(--border)]">
-                      <Link to={`/project-request/${r.id}`}>
-                        <Eye className="mr-1 h-3.5 w-3.5" />
-                        View
-                      </Link>
-                    </Button>
-                    {renderExtraActions?.(r)}
-                  </div>
-                </TableCell>
-              </TableRow>
-            );
-          })}
-        </TableBody>
-      </Table>
-    </div>
+                  <TableCell className="hidden whitespace-nowrap text-sm text-[var(--text-muted)] lg:table-cell">
+                    {formatProjectRequestUpdated(r.updated_at)}
+                  </TableCell>
+                  <TableCell className="text-right">
+                    <div className="flex justify-end gap-2">
+                      <span
+                        className="inline-flex"
+                        onClick={(e) => e.stopPropagation()}
+                        onKeyDown={(e) => e.stopPropagation()}
+                      >
+                        <RecordChatButton
+                          recordType="project_request"
+                          recordId={r.id}
+                          chatChannelId={r.chat_channel_id}
+                          size="sm"
+                          className="h-8 border-[var(--border)]"
+                        />
+                      </span>
+                      <Button asChild size="sm" variant="outline" className="h-8 border-[var(--border)]">
+                        <Link to={`/project-request/${r.id}`}>
+                          <Eye className="mr-1 h-3.5 w-3.5" />
+                          View
+                        </Link>
+                      </Button>
+                      {renderExtraActions?.(r)}
+                    </div>
+                  </TableCell>
+                </TableRow>
+              );
+            })}
+          </TableBody>
+        </Table>
+      </div>
+
+      {/* Phone — every column stacked into one card per request instead of squeezed into a
+          horizontally-scrolling row; actions get their own full-width row at the bottom. */}
+      <div className="space-y-3 p-3 md:hidden">
+        {requests.map((r) => {
+          const highlight = highlightRow?.(r);
+          return (
+            <div
+              key={r.id}
+              className={`rounded-xl border p-3 ${
+                highlight
+                  ? 'border-[var(--primary)]/30 bg-[var(--accent-green-light)]'
+                  : 'border-[var(--border)] bg-[var(--surface)]'
+              }`}
+            >
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="font-mono text-xs text-[var(--text-secondary)]">#{r.id}</p>
+                  <p className="truncate font-semibold text-[var(--text-primary)]">{r.customer_name}</p>
+                  <p className="truncate text-sm text-[var(--text-body)]">{r.site_name}</p>
+                </div>
+                <StatusBadge status={r.status} />
+              </div>
+              <div className="mt-2 flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-[var(--text-muted)]">
+                {r.region && <span>{r.region}</span>}
+                {showStage && r.current_stage && <span className="uppercase">{r.current_stage}</span>}
+                <span>{formatProjectRequestUpdated(r.updated_at)}</span>
+              </div>
+              <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-[var(--border)] pt-2.5">
+                <span onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+                  <RecordChatButton
+                    recordType="project_request"
+                    recordId={r.id}
+                    chatChannelId={r.chat_channel_id}
+                    size="sm"
+                    className="h-8 border-[var(--border)]"
+                  />
+                </span>
+                <Button asChild size="sm" variant="outline" className="h-8 flex-1 border-[var(--border)]">
+                  <Link to={`/project-request/${r.id}`}>
+                    <Eye className="mr-1 h-3.5 w-3.5" />
+                    View
+                  </Link>
+                </Button>
+                {renderExtraActions?.(r)}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </>
   );
 }

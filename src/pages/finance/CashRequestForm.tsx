@@ -381,25 +381,26 @@ const CashRequestForm: React.FC = () => {
   const hasAnyRequests = requests.length > 0;
 
   return (
-    <div className="p-6 max-w-7xl mx-auto">
-      <div className="mb-8">
-        <h1 className="text-4xl font-bold text-gray-900 mb-2">My Cash Requests</h1>
+    <div className="p-4 max-w-7xl mx-auto sm:p-6">
+      <div className="mb-6 sm:mb-8">
+        <h1 className="text-2xl font-bold text-gray-900 mb-2 sm:text-4xl">My Cash Requests</h1>
         <p className="text-gray-600">Submit and track your personal cash requests</p>
       </div>
 
-      <div className="bg-white rounded-xl shadow-[var(--shadow-md)] border border-gray-200 p-6 mb-6">
-        <div className="flex items-center gap-4 justify-between">
-          <div className="flex items-center gap-4 flex-1">
-            <Search className="h-5 w-5 text-gray-400" />
+      <div className="bg-white rounded-xl shadow-[var(--shadow-md)] border border-gray-200 p-4 mb-6 sm:p-6">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+          <div className="flex items-center gap-3 flex-1">
+            <Search className="h-5 w-5 shrink-0 text-gray-400" />
             <Input
               placeholder="Search by requestor, department..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="max-w-md"
+              className="w-full sm:max-w-md"
             />
           </div>
           <Button
             onClick={() => setIsFormOpen(!isFormOpen)}
+            className="w-full sm:w-auto"
           >
             <Plus className="h-5 w-5 mr-2" />
             {isFormOpen ? 'Close Form' : 'New Cash Request'}
@@ -562,12 +563,15 @@ const CashRequestForm: React.FC = () => {
 
       {/* Tabs and Table - unchanged */}
       <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as any)}>
-        <TabsList className="grid grid-cols-5 w-full mb-6">
-          <TabsTrigger value="pending">Pending Approver ({getCount('pending')})</TabsTrigger>
-          <TabsTrigger value="supervisor_approved">Approved – Waiting Finance ({getCount('supervisor_approved')})</TabsTrigger>
-          <TabsTrigger value="finance_approved">Released ({getCount('finance_approved')})</TabsTrigger>
-          <TabsTrigger value="completed">Completed ({getCount('completed')})</TabsTrigger>
-          <TabsTrigger value="rejected">Rejected ({getCount('rejected')})</TabsTrigger>
+        {/* 5 tabs forced into equal grid columns left each one truncated to a sliver on a
+            phone — a horizontally-scrollable strip below sm keeps every label fully readable,
+            same equal-width grid as before once there's room for it. */}
+        <TabsList className="flex w-full justify-start gap-1 overflow-x-auto mb-6 sm:grid sm:grid-cols-5 sm:justify-center sm:gap-0 sm:overflow-visible">
+          <TabsTrigger value="pending" className="shrink-0 sm:shrink">Pending Approver ({getCount('pending')})</TabsTrigger>
+          <TabsTrigger value="supervisor_approved" className="shrink-0 sm:shrink">Approved – Waiting Finance ({getCount('supervisor_approved')})</TabsTrigger>
+          <TabsTrigger value="finance_approved" className="shrink-0 sm:shrink">Released ({getCount('finance_approved')})</TabsTrigger>
+          <TabsTrigger value="completed" className="shrink-0 sm:shrink">Completed ({getCount('completed')})</TabsTrigger>
+          <TabsTrigger value="rejected" className="shrink-0 sm:shrink">Rejected ({getCount('rejected')})</TabsTrigger>
         </TabsList>
 
         <TabsContent value={activeTab}>
@@ -587,65 +591,95 @@ const CashRequestForm: React.FC = () => {
                 </p>
               </div>
             ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full">
-                  <thead className="bg-gradient-to-r from-gray-50 to-gray-100">
-                    <tr>
-                      <th className="px-6 py-4 text-left text-sm font-bold text-gray-700 uppercase tracking-wider">ID</th>
-                      <th className="px-6 py-4 text-left text-sm font-bold text-gray-700 uppercase tracking-wider">Requestor</th>
-                      <th className="px-6 py-4 text-left text-sm font-bold text-gray-700 uppercase tracking-wider">Department</th>
-                      <th className="px-6 py-4 text-left text-sm font-bold text-gray-700 uppercase tracking-wider">Amount (GHS)</th>
-                      <th className="px-6 py-4 text-left text-sm font-bold text-gray-700 uppercase tracking-wider">Approver</th>
-                      <th className="px-6 py-4 text-left text-sm font-bold text-gray-700 uppercase tracking-wider">Finance</th>
-                      <th className="px-6 py-4 text-left text-sm font-bold text-gray-700 uppercase tracking-wider">Status</th>
-                      <th className="px-6 py-4 text-left text-sm font-bold text-gray-700 uppercase tracking-wider">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-200">
-                    {filtered.map((request) => (
-                      <tr key={request.id} className="hover:bg-gray-50 transition">
-                        <td className="px-6 py-4">
-                          <Link to={`/cash-details/${request.id}`} className="text-blue-600 hover:underline font-medium">
-                            #{request.id}
-                          </Link>
-                        </td>
-                        <td className="px-6 py-4 font-medium">
-                          {request.created_by || '—'}
-                        </td>
-                        <td className="px-6 py-4">
-                          {request.department || '—'}
-                        </td>
-                        <td className="px-6 py-4">
-                          <span className="text-2xl font-bold text-green-700">
-                            GHS {formatAmount(request.total_amount)}
-                          </span>
-                        </td>
-                        <td className="px-6 py-4 text-sm">
-                          {request.supervisor_approved_by || '—'}
-                        </td>
-                        <td className="px-6 py-4 text-sm">
-                          {request.finance_approved_by || '—'}
-                        </td>
-                        <td className="px-6 py-4">
-                          <span className={`inline-flex items-center px-4 py-2 rounded-full text-sm font-medium ${getStatusColor(request.status)}`}>
-                            {request.status === 'pending' && <Clock className="h-4 w-4 mr-2" />}
-                            {request.status === 'supervisor_approved' && <CheckCircle className="h-4 w-4 mr-2" />}
-                            {request.status === 'finance_approved' && <DollarSign className="h-4 w-4 mr-2" />}
-                            {request.status === 'completed' && <CheckCircle className="h-4 w-4 mr-2" />}
-                            {request.status === 'rejected' && <XCircle className="h-4 w-4 mr-2" />}
-                            {getStatusLabel(request.status)}
-                          </span>
-                        </td>
-                        <td className="px-6 py-4">
-                          <Link to={`/cash-details/${request.id}`} className="text-blue-600 hover:underline text-sm">
-                            View Details
-                          </Link>
-                        </td>
+              <>
+                {/* Desktop/tablet table — 8 columns, needs real width */}
+                <div className="hidden overflow-x-auto sm:block">
+                  <table className="w-full">
+                    <thead className="bg-gradient-to-r from-gray-50 to-gray-100">
+                      <tr>
+                        <th className="px-6 py-4 text-left text-sm font-bold text-gray-700 uppercase tracking-wider">ID</th>
+                        <th className="px-6 py-4 text-left text-sm font-bold text-gray-700 uppercase tracking-wider">Requestor</th>
+                        <th className="px-6 py-4 text-left text-sm font-bold text-gray-700 uppercase tracking-wider">Department</th>
+                        <th className="px-6 py-4 text-left text-sm font-bold text-gray-700 uppercase tracking-wider">Amount (GHS)</th>
+                        <th className="px-6 py-4 text-left text-sm font-bold text-gray-700 uppercase tracking-wider">Approver</th>
+                        <th className="px-6 py-4 text-left text-sm font-bold text-gray-700 uppercase tracking-wider">Finance</th>
+                        <th className="px-6 py-4 text-left text-sm font-bold text-gray-700 uppercase tracking-wider">Status</th>
+                        <th className="px-6 py-4 text-left text-sm font-bold text-gray-700 uppercase tracking-wider">Actions</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+                    </thead>
+                    <tbody className="divide-y divide-gray-200">
+                      {filtered.map((request) => (
+                        <tr key={request.id} className="hover:bg-gray-50 transition">
+                          <td className="px-6 py-4">
+                            <Link to={`/cash-details/${request.id}`} className="text-blue-600 hover:underline font-medium">
+                              #{request.id}
+                            </Link>
+                          </td>
+                          <td className="px-6 py-4 font-medium">
+                            {request.created_by || '—'}
+                          </td>
+                          <td className="px-6 py-4">
+                            {request.department || '—'}
+                          </td>
+                          <td className="px-6 py-4">
+                            <span className="text-2xl font-bold text-green-700">
+                              GHS {formatAmount(request.total_amount)}
+                            </span>
+                          </td>
+                          <td className="px-6 py-4 text-sm">
+                            {request.supervisor_approved_by || '—'}
+                          </td>
+                          <td className="px-6 py-4 text-sm">
+                            {request.finance_approved_by || '—'}
+                          </td>
+                          <td className="px-6 py-4">
+                            <span className={`inline-flex items-center px-4 py-2 rounded-full text-sm font-medium ${getStatusColor(request.status)}`}>
+                              {request.status === 'pending' && <Clock className="h-4 w-4 mr-2" />}
+                              {request.status === 'supervisor_approved' && <CheckCircle className="h-4 w-4 mr-2" />}
+                              {request.status === 'finance_approved' && <DollarSign className="h-4 w-4 mr-2" />}
+                              {request.status === 'completed' && <CheckCircle className="h-4 w-4 mr-2" />}
+                              {request.status === 'rejected' && <XCircle className="h-4 w-4 mr-2" />}
+                              {getStatusLabel(request.status)}
+                            </span>
+                          </td>
+                          <td className="px-6 py-4">
+                            <Link to={`/cash-details/${request.id}`} className="text-blue-600 hover:underline text-sm">
+                              View Details
+                            </Link>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Phone — one card per request instead of an 8-column table squeezed sideways */}
+                <div className="space-y-3 p-4 sm:hidden">
+                  {filtered.map((request) => (
+                    <Link
+                      key={request.id}
+                      to={`/cash-details/${request.id}`}
+                      className="block rounded-xl border border-gray-200 p-4 active:bg-gray-50"
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="font-medium text-blue-600">#{request.id}</p>
+                          <p className="truncate font-semibold text-gray-900">{request.created_by || '—'}</p>
+                          <p className="truncate text-sm text-gray-500">{request.department || '—'}</p>
+                        </div>
+                        <span className={`inline-flex shrink-0 items-center px-2.5 py-1 rounded-full text-xs font-medium ${getStatusColor(request.status)}`}>
+                          {getStatusLabel(request.status)}
+                        </span>
+                      </div>
+                      <p className="mt-2 text-xl font-bold text-green-700">GHS {formatAmount(request.total_amount)}</p>
+                      <div className="mt-2 flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-gray-500">
+                        {request.supervisor_approved_by && <span>Approver: {request.supervisor_approved_by}</span>}
+                        {request.finance_approved_by && <span>Finance: {request.finance_approved_by}</span>}
+                      </div>
+                    </Link>
+                  ))}
+                </div>
+              </>
             )}
           </div>
         </TabsContent>

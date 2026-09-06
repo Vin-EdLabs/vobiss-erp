@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
-  HardDrive, Search, Plus, Folder, FolderOpen, Upload, Download, Eye,
+  HardDrive, Search, Plus, Folder, FolderOpen, Upload, FolderUp, Download, Eye,
   Trash2, Pencil, FolderInput, ChevronLeft, ChevronRight, FolderX, Lock, ShieldCheck,
 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
@@ -57,6 +57,7 @@ export default function Archive() {
   const [fileToShare, setFileToShare] = useState<ArchiveFile | null>(null);
   const [folderToRename, setFolderToRename] = useState<ArchiveFolder | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const folderInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => { const t = window.setTimeout(() => setDebouncedFolderSearch(folderSearch), 300); return () => window.clearTimeout(t); }, [folderSearch]);
   useEffect(() => { const t = window.setTimeout(() => setDebouncedFileSearch(fileSearch), 300); return () => window.clearTimeout(t); }, [fileSearch]);
@@ -210,13 +211,13 @@ export default function Archive() {
           )}
         </div>
 
-        <div className="min-w-0 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4 shadow-[var(--shadow-sm)]">
-          {!selectedFolder ? (
-            <div className="flex flex-col items-center justify-center gap-2 py-24 text-center">
-              <FolderX className="h-8 w-8 text-[var(--text-muted)]" />
-              <p className="text-sm text-[var(--text-muted)]">Select a folder to view its files.</p>
-            </div>
-          ) : (
+        {!selectedFolder ? (
+          <div className="flex min-w-0 items-center gap-2 px-1 py-2 text-[var(--text-muted)]">
+            <FolderX className="h-4 w-4 shrink-0" />
+            <p className="text-xs">Select a folder to view its files.</p>
+          </div>
+        ) : (
+          <div className="min-w-0 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4 shadow-[var(--shadow-sm)]">
             <>
               <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
                 <div>
@@ -236,6 +237,15 @@ export default function Archive() {
                     ref={fileInputRef} type="file" multiple className="hidden"
                     onChange={(e) => { if (e.target.files) doUpload(e.target.files); e.target.value = ''; }}
                   />
+                  <input
+                    ref={folderInputRef} type="file" multiple className="hidden"
+                    // @ts-expect-error — non-standard attributes, but supported by every major browser for picking a whole folder
+                    webkitdirectory="" directory=""
+                    onChange={(e) => { if (e.target.files) doUpload(e.target.files); e.target.value = ''; }}
+                  />
+                  <Button type="button" variant="outline" onClick={() => folderInputRef.current?.click()} disabled={uploading} title="Upload every file in a folder">
+                    <FolderUp className="mr-1.5 h-4 w-4" /> Upload Folder
+                  </Button>
                   <Button type="button" onClick={() => fileInputRef.current?.click()} disabled={uploading}>
                     <Upload className="mr-1.5 h-4 w-4" /> {uploading ? `Uploading… ${uploadProgress}%` : 'Upload'}
                   </Button>
@@ -311,8 +321,8 @@ export default function Archive() {
                 </div>
               )}
             </>
-          )}
-        </div>
+          </div>
+        )}
       </div>
 
       <NewFolderModal open={newFolderOpen} onClose={() => setNewFolderOpen(false)} onCreated={loadFolders} />
@@ -359,7 +369,9 @@ function FileCard({ file, onPreview, onDownload, onDelete, onRename, onShareToFo
           <p className="text-[11px] text-[var(--text-muted)]">{new Date(file.created_at).toLocaleDateString()}</p>
         </div>
       </div>
-      <div className="flex flex-wrap items-center gap-1.5 opacity-0 transition group-hover:opacity-100">
+      {/* Always visible on touch devices (no :hover there — opacity-0 would just leave a
+          permanent blank gap the size of this row); still hover-to-reveal on desktop pointers. */}
+      <div className="flex flex-wrap items-center gap-1.5 opacity-100 transition md:opacity-0 md:group-hover:opacity-100">
         <Button type="button" size="sm" variant="outline" className="h-7 flex-1 text-xs" onClick={onPreview}><Eye className="mr-1 h-3.5 w-3.5" /> Preview</Button>
         <Button type="button" size="sm" variant="outline" className="h-7 flex-1 text-xs" onClick={onDownload}><Download className="mr-1 h-3.5 w-3.5" /> Download</Button>
         <ShareButton

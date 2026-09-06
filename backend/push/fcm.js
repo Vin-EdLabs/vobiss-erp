@@ -6,7 +6,16 @@
 import {
   getFcmTokensForUserIds,
   getAllFcmTokens,
+  removeFcmTokenByToken,
 } from '../db.js';
+
+// Firebase's own signal that a token is permanently dead — the app was uninstalled, the
+// registration expired, or the token was never valid. Any other error (rate limit, transient
+// network issue, quota) must NOT delete the token — only these two mean "never retry this one".
+const DEAD_TOKEN_CODES = new Set([
+  'messaging/registration-token-not-registered',
+  'messaging/invalid-registration-token',
+]);
 
 let adminApp = null;
 
@@ -19,7 +28,13 @@ async function getAdmin() {
   }
   if (adminApp) return adminApp;
   try {
-    const admin = await import('firebase-admin');
+    // firebase-admin ships as CJS; under this project's "type": "module" Node's interop only
+    // hoists a `default` + `module.exports` from it (no named exports get detected), so
+    // `admin.credential`/`admin.apps`/`admin.initializeApp` are all undefined unless you reach
+    // through `.default` — without this, initialization always threw and was silently swallowed
+    // below, meaning FCM never actually sent anything even when configured correctly.
+    const mod = await import('firebase-admin');
+    const admin = mod.default ?? mod;
     if (!admin.apps.length) {
       admin.initializeApp({
         credential: admin.credential.cert(JSON.parse(raw)),
@@ -62,6 +77,13 @@ async function sendMulticast(tokens, { title, body, data = {} }) {
       sent += res.successCount;
       if (res.failureCount) {
         console.warn('[FCM] partial failures:', res.failureCount);
+        const deadTokens = res.responses
+          .map((r, idx) => (!r.success && DEAD_TOKEN_CODES.has(r.error?.code) ? chunk[idx] : null))
+          .filter(Boolean);
+        if (deadTokens.length) {
+          await Promise.all(deadTokens.map((t) => removeFcmTokenByToken(t).catch(() => {})));
+          console.warn(`[FCM] removed ${deadTokens.length} dead token(s)`);
+        }
       }
     } catch (e) {
       console.error('[FCM] sendEachForMulticast error:', e.message);

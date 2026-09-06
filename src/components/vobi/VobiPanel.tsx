@@ -208,7 +208,11 @@ export function VobiPanel({ theme: _theme }: VobiPanelProps) {
             isOpen ? 'translate-y-0 opacity-100' : 'translate-y-[110%] opacity-0'
           )}
         >
-          <header className="flex h-[58px] shrink-0 items-center justify-between bg-[#111827] px-3">
+          {/* On mobile the panel is fullscreen (inset-0, see above), so this header sits right
+              at the physical top edge — without safe-area padding, a notch/status bar can cover
+              the close button entirely, same class of bug the sidebar's own header already
+              accounts for (see Sidebar.tsx's pt-[max(...,env(safe-area-inset-top))]). */}
+          <header className="flex min-h-[58px] shrink-0 items-center justify-between bg-[#111827] px-3 pt-[max(0px,env(safe-area-inset-top))]">
             <div className="flex items-center gap-2">
               <span
                 className={cn(

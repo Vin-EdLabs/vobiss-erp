@@ -4452,6 +4452,13 @@ export async function removeFcmToken(userId, token) {
   await pool.query('DELETE FROM fcm_tokens WHERE user_id = $1 AND token = $2', [userId, token]);
 }
 
+/** Cleanup path for tokens Firebase itself reports as dead (uninstalled app, expired
+ *  registration, etc.) — see push/fcm.js's sendMulticast, which calls this per-token instead of
+ *  by (userId, token) since at send time we only have the bare token string. */
+export async function removeFcmTokenByToken(token) {
+  await pool.query('DELETE FROM fcm_tokens WHERE token = $1', [token]);
+}
+
 export async function getFcmTokensForUserIds(userIds) {
   if (!Array.isArray(userIds) || userIds.length === 0) return [];
   const r = await pool.query(

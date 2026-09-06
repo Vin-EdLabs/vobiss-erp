@@ -295,16 +295,16 @@ const CXDashboard: React.FC = () => {
 
           {/* Sidebar – glass + depth */}
           <aside className="space-y-8">
-            <div className="bg-gradient-to-br from-[#5c3a1e] to-[#3c2210] rounded-3xl p-10 text-white shadow-2xl shadow-[#3c2210]/30 relative overflow-hidden group">
+            <div className="bg-gradient-to-br from-[#5c3a1e] to-[#3c2210] rounded-3xl p-5 sm:p-10 text-white shadow-2xl shadow-[#3c2210]/30 relative overflow-hidden group">
               <div className="relative z-10">
-                <Users className="w-12 h-12 text-[#e8d5bc] mb-6 opacity-90" />
-                <h3 className="text-2xl font-bold mb-3">Quick Actions</h3>
-                <p className="text-slate-300 mb-8 leading-relaxed">
+                <Users className="w-8 h-8 sm:w-12 sm:h-12 text-[#e8d5bc] mb-3 sm:mb-6 opacity-90" />
+                <h3 className="text-lg sm:text-2xl font-bold mb-1.5 sm:mb-3">Quick Actions</h3>
+                <p className="text-sm sm:text-base text-slate-300 mb-4 sm:mb-8 leading-relaxed">
                   Managing {projects.length} projects • Stay in control
                 </p>
                 <Link
                   to="/staff/cx/projects"
-                  className="block w-full py-4 bg-[var(--primary)] hover:bg-[var(--primary-hover)] rounded-2xl font-bold text-center transition shadow-lg shadow-[#5c3a1e]/30"
+                  className="block w-full py-3 sm:py-4 bg-[var(--primary)] hover:bg-[var(--primary-hover)] rounded-2xl font-bold text-center transition shadow-lg shadow-[#5c3a1e]/30"
                 >
                   Go to Projects →
                 </Link>
@@ -312,18 +312,18 @@ const CXDashboard: React.FC = () => {
               <div className="absolute inset-0 bg-[var(--primary)]/5 group-hover:bg-[var(--primary)]/10 transition-all duration-500"></div>
             </div>
 
-            <div className="bg-white/80 backdrop-blur-md rounded-3xl border border-slate-100 p-8 shadow-[var(--shadow-md)]">
-              <div className="flex items-center justify-between mb-6">
-                <h3 className="text-xl font-bold text-slate-800">Recent Projects</h3>
-                <Building2 className="w-6 h-6 text-slate-400" />
+            <div className="bg-white/80 backdrop-blur-md rounded-3xl border border-slate-100 p-4 sm:p-8 shadow-[var(--shadow-md)]">
+              <div className="flex items-center justify-between mb-3 sm:mb-6">
+                <h3 className="text-lg sm:text-xl font-bold text-slate-800">Recent Projects</h3>
+                <Building2 className="w-5 h-5 sm:w-6 sm:h-6 text-slate-400" />
               </div>
-              <div className="space-y-5">
+              <div className="space-y-2 sm:space-y-5">
                 {projects.slice(0, 5).map((project) => (
                   <div
                     key={project.id}
-                    className="flex items-center gap-5 p-4 rounded-2xl hover:bg-slate-50 transition-all border border-transparent hover:border-slate-200 group"
+                    className="flex items-center gap-3 sm:gap-5 p-2.5 sm:p-4 rounded-2xl hover:bg-slate-50 transition-all border border-transparent hover:border-slate-200 group"
                   >
-                    <div className="h-14 w-14 bg-gradient-to-br from-slate-100 to-slate-200 rounded-2xl flex items-center justify-center font-bold text-slate-600 text-lg shadow-sm group-hover:scale-105 transition">
+                    <div className="h-10 w-10 sm:h-14 sm:w-14 shrink-0 bg-gradient-to-br from-slate-100 to-slate-200 rounded-2xl flex items-center justify-center font-bold text-slate-600 text-sm sm:text-lg shadow-sm group-hover:scale-105 transition">
                       {project.project_name?.slice(0, 2).toUpperCase() || 'PJ'}
                     </div>
                     <div>

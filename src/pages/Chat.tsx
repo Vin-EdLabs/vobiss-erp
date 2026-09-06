@@ -104,6 +104,8 @@ import { staffCxTicketPath, toFullTicketNumber } from '@/lib/ticketPaths';
 import { useIsMobile } from '@/hooks/useIsMobile';
 import { UserAvatar } from '@/components/UserAvatar';
 import { useChatMobileNav } from '@/hooks/useChatMobileNav';
+import { useSwipeBack } from '@/hooks/useSwipeBack';
+import { fileIconFor, formatFileSize } from '@/components/archive/shared';
 import { MobileWorkspaceNavDrawer } from '@/components/chat/mobile/MobileWorkspaceNavDrawer';
 import { MobileChatToasts } from '@/components/chat/mobile/MobileChatToasts';
 import {
@@ -468,9 +470,30 @@ function groupMessages(messages: ChatMessage[]) {
   return groups;
 }
 
+/** A data: URL instead of URL.createObjectURL — the latter needs a matching revoke() on
+ *  cleanup, and under React 18 StrictMode's dev-only double-invoke of effects (mount → effect →
+ *  cleanup → effect again), an effect whose body is nothing but `return () => revoke(url)` gets
+ *  its cleanup fired immediately, permanently revoking the URL with nothing left to recreate it
+ *  — the preview goes blank and stays blank. A data: URL has no such lifecycle to manage. */
+function useFileDataUrl(file: File): string | null {
+  const [url, setUrl] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (!cancelled) setUrl(reader.result as string);
+    };
+    reader.readAsDataURL(file);
+    return () => {
+      cancelled = true;
+    };
+  }, [file]);
+  return url;
+}
+
 function PendingAudioPreview({ file, onRemove }: { file: File; onRemove: () => void }) {
-  const [url] = useState(() => URL.createObjectURL(file));
-  useEffect(() => () => URL.revokeObjectURL(url), [url]);
+  const url = useFileDataUrl(file);
+  if (!url) return null;
   return (
     <div className="flex items-start gap-2">
       <div className="min-w-0 flex-1">
@@ -481,6 +504,49 @@ function PendingAudioPreview({ file, onRemove }: { file: File; onRemove: () => v
         onClick={onRemove}
         className="mt-2 rounded p-1 text-gray-400 hover:bg-gray-800 hover:text-white"
         title="Remove voice message"
+      >
+        <X className="h-3.5 w-3.5" />
+      </button>
+    </div>
+  );
+}
+
+/** Actual thumbnail before sending — matches how the message itself will render the image
+ *  once sent (see ChatAttachment), so what you see here is what the recipient will see. */
+function PendingImagePreview({ file, onRemove }: { file: File; onRemove: () => void }) {
+  const url = useFileDataUrl(file);
+  return (
+    <div className="chat-pending-image group relative h-16 w-16 shrink-0 overflow-hidden rounded-lg border border-gray-700 bg-black/30">
+      {url && <img src={url} alt={file.name} className="h-full w-full object-cover" />}
+      <button
+        type="button"
+        onClick={onRemove}
+        title="Remove image"
+        className="absolute right-0.5 top-0.5 rounded-full bg-black/70 p-0.5 text-white opacity-90 hover:bg-black/90"
+      >
+        <X className="h-3 w-3" />
+      </button>
+    </div>
+  );
+}
+
+/** Same file-type icon set the File Storage page uses (fileIconFor) — a PDF, a spreadsheet,
+ *  a video all look distinct here instead of every non-image file being a plain text chip. */
+function PendingFileChip({ file, onRemove }: { file: File; onRemove: () => void }) {
+  const ext = file.name.split('.').pop() || '';
+  const Icon = fileIconFor(ext);
+  return (
+    <div className="chat-pending-file flex h-16 w-40 shrink-0 items-center gap-2 rounded-lg border border-gray-700 bg-gray-800/50 px-2.5">
+      <Icon className="h-6 w-6 shrink-0 text-gray-300" />
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-xs font-medium text-gray-200" title={file.name}>{file.name}</p>
+        <p className="text-[10px] text-gray-500">{formatFileSize(file.size)}</p>
+      </div>
+      <button
+        type="button"
+        onClick={onRemove}
+        title="Remove file"
+        className="shrink-0 rounded p-0.5 text-gray-500 hover:bg-gray-700 hover:text-white"
       >
         <X className="h-3.5 w-3.5" />
       </button>
@@ -606,6 +672,22 @@ const Chat: React.FC<{
   const [showPinned, setShowPinned] = useState(false);
   const [highlightMessageId, setHighlightMessageId] = useState<string | null>(null);
   const [activeMobileActionsMessageId, setActiveMobileActionsMessageId] = useState<string | null>(null);
+  // On mobile, tapping a message opens its react/reply/pin row via activeMobileActionsMessageId
+  // (there's no hover there to reveal it) — but nothing closed it again except tapping that same
+  // message a second time. Tapping anywhere else on the page (the background, the composer, the
+  // header) now closes it too. Tapping a different message bubble isn't treated as "outside"
+  // here — that click's own handler (below, on the bubble) already swaps which message is open.
+  useEffect(() => {
+    if (!activeMobileActionsMessageId) return;
+    const onDocClick = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      if (!target.closest('.chat-msg-bubble, .chat-hover-actions')) {
+        setActiveMobileActionsMessageId(null);
+      }
+    };
+    document.addEventListener('click', onDocClick);
+    return () => document.removeEventListener('click', onDocClick);
+  }, [activeMobileActionsMessageId]);
   const [showEmoji, setShowEmoji] = useState(false);
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState('');
@@ -831,6 +913,13 @@ const Chat: React.FC<{
     setActiveDmId(null);
     setSearchParams({});
   }, [mobileNav.goToList, setSearchParams]);
+
+  // A PWA opened from the home screen has no browser chrome, so the OS/browser's native
+  // edge-swipe-back gesture never fires there — this is that gesture, reimplemented, only
+  // active on the thread screen (swiping back from the list makes no sense, there's nothing
+  // behind it). The list itself is never unmounted (see chat-mobile.css's display:none
+  // toggling between screens), so its scroll position is already exactly where it was.
+  const swipeBackRef = useSwipeBack<HTMLDivElement>(handleMobileBackToList, isMobile && mobileNav.isThread);
 
   const chatUnreadTotal = useMemo(
     () => sumCountableChannelUnread(channels) + dms.reduce((s, d) => s + (d.unread_count || 0), 0),
@@ -2549,13 +2638,13 @@ const Chat: React.FC<{
       </aside>
 
       {/* MAIN CHAT — full screen on mobile (thread view) */}
-      <div className="chat-main chat-panel flex min-w-0 flex-1 flex-col bg-[#0f1117] md:flex-row">
+      <div ref={swipeBackRef} className="chat-main chat-panel flex min-w-0 flex-1 flex-col bg-[#0f1117] md:flex-row">
         {showMembers && activeChannel && (
           <aside
             ref={membersPanelRef}
             className="chat-members-panel flex w-72 shrink-0 flex-col border-r border-gray-800 bg-[#13151c]"
           >
-            <div className="flex items-center justify-between border-b border-gray-800 px-4 py-3">
+            <div className="chat-panel-header flex items-center justify-between border-b border-gray-800 px-4 py-3">
               <div>
                 <p className="chat-members-title text-sm font-semibold text-white">Members</p>
                 <p className="text-[11px] text-gray-500">#{activeChannel.name}</p>
@@ -3249,28 +3338,37 @@ const Chat: React.FC<{
           )}
           {pendingFiles.length > 0 && (
             <div className="mb-2 space-y-2">
-              {pendingFiles.map((f, i) =>
-                f.type.startsWith('audio/') ? (
-                  <PendingAudioPreview
-                    key={`${f.name}-${i}`}
-                    file={f}
-                    onRemove={() => removePendingFile(i)}
-                  />
-                ) : (
-                  <span
-                    key={`${f.name}-${i}`}
-                    className="chat-pending-file mr-1 inline-flex items-center gap-1 rounded-md bg-gray-800/50 px-2 py-0.5 text-xs text-gray-300"
-                  >
-                    {f.name}
-                    <button
-                      type="button"
-                      onClick={() => removePendingFile(i)}
-                      className="text-gray-500 hover:text-white"
-                    >
-                      <X className="h-3 w-3" />
-                    </button>
-                  </span>
-                )
+              {pendingFiles.some((f) => f.type.startsWith('audio/')) && (
+                <div className="space-y-2">
+                  {pendingFiles.map((f, i) =>
+                    f.type.startsWith('audio/') ? (
+                      <PendingAudioPreview
+                        key={`${f.name}-${i}`}
+                        file={f}
+                        onRemove={() => removePendingFile(i)}
+                      />
+                    ) : null
+                  )}
+                </div>
+              )}
+              {pendingFiles.some((f) => !f.type.startsWith('audio/')) && (
+                <div className="flex gap-2 overflow-x-auto pb-1">
+                  {pendingFiles.map((f, i) =>
+                    f.type.startsWith('audio/') ? null : f.type.startsWith('image/') ? (
+                      <PendingImagePreview
+                        key={`${f.name}-${i}`}
+                        file={f}
+                        onRemove={() => removePendingFile(i)}
+                      />
+                    ) : (
+                      <PendingFileChip
+                        key={`${f.name}-${i}`}
+                        file={f}
+                        onRemove={() => removePendingFile(i)}
+                      />
+                    )
+                  )}
+                </div>
               )}
             </div>
           )}
@@ -3401,7 +3499,7 @@ const Chat: React.FC<{
         )}
         {showContext && !activeThreadRootId && activeChannel && hasRecordContext && activePanelView === 'chat' && !isVobiChannel && (
           <aside className="chat-context-panel flex w-72 shrink-0 flex-col border-l border-gray-800 bg-[#13151c]">
-            <div className="flex items-center justify-between border-b border-gray-800 px-4 py-3">
+            <div className="chat-panel-header flex items-center justify-between border-b border-gray-800 px-4 py-3">
               <div>
                 <p className="chat-members-title text-sm font-semibold text-white">
                   {recordContextTitle(activeChannel.record_type, activeChannel.record_id)}
@@ -3460,7 +3558,7 @@ const Chat: React.FC<{
 
         {activeThreadRootId && (
           <aside className="chat-context-panel flex w-80 shrink-0 flex-col border-l border-gray-800 bg-[#13151c]">
-            <div className="flex items-center justify-between border-b border-gray-800 px-4 py-3">
+            <div className="chat-panel-header flex items-center justify-between border-b border-gray-800 px-4 py-3">
               <p className="chat-members-title text-sm font-semibold text-white">Thread</p>
               <button
                 type="button"
@@ -3536,7 +3634,7 @@ const Chat: React.FC<{
         ref={fileInputRef}
         type="file"
         multiple
-        accept="image/*,video/*,audio/*,.pdf"
+        accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.heic,.heif"
         className="hidden"
         onChange={(e) => {
           const files = Array.from(e.target.files || []);
@@ -3847,7 +3945,7 @@ const Chat: React.FC<{
 
       {lightboxUrl && (
         <div
-          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 p-4"
+          className="fixed inset-0 z-[60] flex animate-in items-center justify-center fade-in-0 bg-black/50 p-4 backdrop-blur-md duration-200"
           onClick={() => setLightboxUrl(null)}
           onKeyDown={(e) => e.key === 'Escape' && setLightboxUrl(null)}
           role="button"
@@ -3856,7 +3954,8 @@ const Chat: React.FC<{
           <button
             type="button"
             onClick={() => setLightboxUrl(null)}
-            className="absolute right-4 top-4 rounded-full bg-black/50 p-2 text-white hover:bg-black/70"
+            className="absolute right-4 rounded-full bg-black/50 p-2 text-white hover:bg-black/70"
+            style={{ top: 'max(1rem, calc(env(safe-area-inset-top) + 0.5rem))' }}
           >
             <X className="h-5 w-5" />
           </button>

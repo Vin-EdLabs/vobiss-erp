@@ -37,7 +37,6 @@ import { RealtimeProvider } from '../context/RealtimeContext';
 import { VobiProvider } from '../context/VobiContext';
 import { VobiRoot } from '../components/vobi';
 import { PushNotificationSetup } from '../components/PushNotificationSetup';
-import { PWAUpdateToast } from '../components/PWAUpdateToast';
 import StaffHeader from '../components/StaffHeader';
 import DetailBreadcrumbs from '../components/DetailBreadcrumbs';
 import { MobileBottomNav } from '../components/MobileBottomNav';
@@ -317,7 +316,6 @@ const Index = () => {
       <div
         className="app-shell min-h-dvh bg-[var(--page-bg)] text-[var(--text-body)]"
       >
-        <PWAUpdateToast />
         <div
           className={`app-shell flex h-[100dvh] min-h-0 min-w-0 max-w-full overflow-x-hidden ${
             isChatRoute ? 'max-h-[100dvh] overflow-hidden' : ''

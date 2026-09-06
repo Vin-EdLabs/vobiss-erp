@@ -1,6 +1,10 @@
+import { createElement } from 'react';
 import { initializeApp, getApps, type FirebaseApp } from 'firebase/app';
 import { registerFcmToken } from '../api';
 import { getMessaging, getToken, isSupported, onMessage, type Messaging } from 'firebase/messaging';
+import { playDoubleBeep } from './beep';
+import { toast } from '../hooks/use-toast';
+import { ToastAction } from '../components/ui/toast';
 
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY as string | undefined,
@@ -49,17 +53,35 @@ export async function registerDeviceForPush(): Promise<string | null> {
     const title = payload.notification?.title || 'Vobiss';
     const body = payload.notification?.body || '';
     const url = (payload.data?.url as string) || (payload.data?.link as string) || '/';
-    if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
-      try {
-        const n = new Notification(title, { body, icon: '/vobiss-logo.png', data: { url } });
-        n.onclick = () => {
-          window.focus();
-          window.location.href = url;
-          n.close();
-        };
-      } catch {
-        /* ignore */
-      }
+    const type = payload.data?.type as string | undefined;
+
+    // The tab is open and focused right now — FCM only calls onMessage() in the foreground; a
+    // system popup here would be redundant with the app already on screen (and iOS Safari
+    // actively suppresses foreground Notification() calls), so this shows an in-app toast plus
+    // an immediate bell/unread-badge refresh instead. Background delivery still goes through
+    // firebase-messaging-sw.js's onBackgroundMessage, which keeps the real system notification.
+    playDoubleBeep();
+    toast({
+      title,
+      description: body,
+      action: createElement(
+        ToastAction,
+        {
+          altText: 'Open',
+          onClick: () => {
+            window.location.href = url;
+          },
+        },
+        'Open'
+      ),
+    });
+
+    // Same badge-refresh convention the rest of the app already uses for realtime updates
+    // (see Sidebar.tsx) — this just makes a push arriving with the tab open just as immediate.
+    if (type === 'chat_message' || type === 'chat_mention') {
+      window.dispatchEvent(new CustomEvent('chat:unread-changed'));
+    } else {
+      window.dispatchEvent(new CustomEvent('staff:notifications-changed'));
     }
   });
 

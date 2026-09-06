@@ -32,6 +32,7 @@ import { parseIdList, buildApprovalParties, myApprovalState, loadUserNames } fro
 import { formatPersonName } from '../utils/displayName.js';
 import { logUserAction } from '../services/activityLog.js';
 import { recordTimingEvent } from '../services/workflowTimeEngine.js';
+import { sendPushToUserIds } from '../push/sendPush.js';
 
 const router = express.Router();
 
@@ -333,17 +334,27 @@ router.post('/', async (req, res) => {
     // Notify Configured Fuel Approvers (or fallback to transport approvers)
     const approverIds = [...new Set([...selectedApproverIds, ...(transportConfig.fuel_request_approver_ids || []), ...(transportConfig.approver_ids || [])])].map(Number).filter(Boolean);
 
-    for (const approverId of approverIds) {
-      if (approverId !== req.user.id) {
-        await createNotification(
-          `Fuel Request Pending Approval`,
-          `A new fuel request ${refNo} from ${requesterName} (${vehicle_plate}) is waiting for your approval.`,
-          req.user.id,
-          approverId,
-          `/transport/fuel-requests/${newRequest.id}`,
-          'fuel_request'
-        );
-      }
+    const notifyApproverIds = approverIds.filter((id) => id !== req.user.id);
+    for (const approverId of notifyApproverIds) {
+      await createNotification(
+        `Fuel Request Pending Approval`,
+        `A new fuel request ${refNo} from ${requesterName} (${vehicle_plate}) is waiting for your approval.`,
+        req.user.id,
+        approverId,
+        `/transport/fuel-requests/${newRequest.id}`,
+        'fuel_request'
+      );
+    }
+    if (notifyApproverIds.length) {
+      await sendPushToUserIds(notifyApproverIds, {
+        title: 'Fuel Request Pending Approval',
+        body: `A new fuel request ${refNo} from ${requesterName} (${vehicle_plate}) is waiting for your approval.`,
+        data: {
+          url: `/transport/fuel-requests/${newRequest.id}`,
+          type: 'fuel_request', action: 'request_created',
+          requestId: String(newRequest.id), tag: `fuel-request-${newRequest.id}`,
+        },
+      }).catch(() => {});
     }
 
     await logUserAction(req.user, {

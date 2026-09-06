@@ -52,6 +52,8 @@ import { getTicketEscalationConfig, markTicketStageAccepted } from '../ticketEsc
 import { invalidateOnMutation } from '../services/vobiCache.js';
 import { logUserAction, ensureActivityLogsTable } from '../services/activityLog.js';
 import { recordTimingEvent } from '../services/workflowTimeEngine.js';
+import { sendPushToUserIds } from '../push/sendPush.js';
+import { resolveUnitRecipients } from '../services/unitNotify.js';
 
 const TICKET_TERMINAL_STATUSES = new Set(['CLOSED', 'RESOLVED']);
 
@@ -667,6 +669,28 @@ router.post('/tickets', async (req, res) => {
       }
     } catch (tagErr) {
       console.warn('[tags] apply on create failed:', tagErr.message);
+    }
+
+    try {
+      // Assigned goes straight to the assignee; otherwise the whole queue that owns the target
+      // unit gets it (same shape as an unclaimed ticket sitting in that unit's list).
+      const assigneeId = ticket.assigned_to || (assigned_to ? parseInt(assigned_to, 10) : null);
+      const recipientIds = assigneeId
+        ? [assigneeId]
+        : await resolveUnitRecipients({ unitSlugs: [targetUnit || 'cx'] });
+      if (recipientIds.length) {
+        await sendPushToUserIds(recipientIds, {
+          title: assigneeId ? `Ticket #${ticket.ticket_id} assigned to you` : `New ticket in ${(targetUnit || 'cx').toUpperCase()}`,
+          body: title.trim(),
+          data: {
+            url: `/staff/cx/tickets/${ticket.ticket_id}`,
+            type: 'ticket', action: 'ticket_created',
+            requestId: String(ticket.ticket_id), tag: `ticket-created-${ticket.ticket_id}`,
+          },
+        });
+      }
+    } catch (e) {
+      console.warn('[push] ticket created push failed:', e.message);
     }
 
     res.status(201).json({ success: true, ticket_id: ticket.ticket_id, ticket: { ...ticket, tags } });

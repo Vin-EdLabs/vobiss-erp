@@ -13,6 +13,12 @@ Note: Modules and pages are role-restricted. Users only see pages allowed for th
 - Archive: /archive
 - My Assessment: /my-assessment
 
+Workspace file and chat capabilities:
+- File Storage supports folder uploads, general file types up to 2 GB, and image,
+  PDF, video, and audio previews.
+- Chat supports image, video, audio, PDF, office, text, and HEIC/HEIF attachments
+  up to 200 MB per file.
+
 2. MAIN DASHBOARDS
 - Inventory Dashboard: /dashboard
 - CTO / Directors Dashboard: /director/dashboard

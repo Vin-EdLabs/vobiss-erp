@@ -10,6 +10,7 @@ import NotFound from "./pages/NotFound";
 import { AuthProvider, useAuth } from "./context/AuthContext";
 import Login from "./pages/Login";          // Staff login
 import SharedRecordPage from "./pages/SharedRecordPage"; // Public/private shared-link viewer
+import { PWAUpdateToast } from "./components/PWAUpdateToast";
 
 // CUSTOMER PORTAL IMPORTS
 import CustomerApp from "./pages/customer/CustomerApp";
@@ -34,6 +35,10 @@ const App = () => (
     <TooltipProvider>
       <Toaster />
       <Sonner />
+      {/* Registers the service worker on every route (including /login and /customer/*), not
+          just once someone is signed into the staff app — install criteria need it active from
+          the very first page load, not only after auth. */}
+      <PWAUpdateToast />
 
       {/* NO <BrowserRouter> here – it's already in main.tsx */}
       <AuthProvider>

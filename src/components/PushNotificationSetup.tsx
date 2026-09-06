@@ -7,6 +7,7 @@ import {
   enablePushNotifications,
   isCurrentlySubscribed,
 } from '@/lib/webPush';
+import { registerDeviceForPush } from '@/lib/firebaseMessaging';
 import { getPushPublicKey } from '@/api';
 import { useAuth } from '@/context/AuthContext';
 import { cn } from '@/lib/utils';
@@ -85,8 +86,18 @@ export function PushNotificationSetup({ className }: { className?: string }) {
               onClick={async () => {
                 setLoading(true);
                 try {
-                  const ok = await enablePushNotifications();
-                  setGranted(ok || permissionState() === 'granted');
+                  // Both channels share one permission prompt/click — the backend fans a push
+                  // out to whichever of these actually has a live token/subscription for the
+                  // user (see backend/push/sendPush.js), so registering both here just gives it
+                  // more delivery paths per device, not duplicate notifications.
+                  const [webPushOk, fcmToken] = await Promise.all([
+                    enablePushNotifications(),
+                    registerDeviceForPush().catch((e) => {
+                      console.warn('[push] FCM registration failed:', e);
+                      return null;
+                    }),
+                  ]);
+                  setGranted(webPushOk || !!fcmToken || permissionState() === 'granted');
                 } catch (e) {
                   console.error(e);
                 } finally {

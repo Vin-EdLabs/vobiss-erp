@@ -15,7 +15,7 @@ import {
   listFolders, getFolder, createFolder, renameFolder, deleteFolder,
   listFiles, getFile, recordUpload, renameOrMoveFile, deleteFile,
   listShareableFolders, copyFileToFolder,
-  extensionOf, ALLOWED_EXTENSIONS, PREVIEWABLE_EXTENSIONS, MAX_FILE_SIZE,
+  extensionOf, PREVIEWABLE_EXTENSIONS, MAX_FILE_SIZE,
 } from '../services/archive.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -47,14 +47,11 @@ const storage = multer.diskStorage({
   destination: (_req, _file, cb) => cb(null, storageDir),
   filename: (_req, file, cb) => cb(null, `arc-${Date.now()}-${Math.round(Math.random() * 1e9)}${path.extname(file.originalname || '')}`),
 });
+// Any file type is accepted — File Storage is a general-purpose library (documents, video,
+// archives, whatever), not gated to a fixed extension list. Only size is enforced.
 const upload = multer({
   storage,
   limits: { fileSize: MAX_FILE_SIZE },
-  fileFilter: (_req, file, cb) => {
-    const ext = extensionOf(file.originalname);
-    if (ALLOWED_EXTENSIONS.has(ext)) cb(null, true);
-    else cb(new Error(`File type .${ext || '?'} is not allowed in Archive`));
-  },
 });
 
 // Shared in-flight promise, not a boolean set after the await — otherwise every request that

@@ -55,6 +55,7 @@ import { recordTimingEvent } from '../services/workflowTimeEngine.js';
 import { ensureProjectRequestThread } from '../services/chatRecordThreads.js';
 import { effectiveUnitsForUser, hasProjectUnitAccess, hasDesignUnitAccess, isSystemAdminAccount, canonicalizeUnitSlug } from '../roles.js';
 import { notifyUnit, notifyMany } from '../services/unitNotify.js';
+import { sendPushToUserIds } from '../push/sendPush.js';
 
 // Who gets notified when a Service Request lands on each stage — mirrors the role/unit
 // conventions already used across NOC Shift Schedule, IP Unit, and Field Work this session.
@@ -70,13 +71,23 @@ const STAGE_NOTIFY = {
 async function notifySrStage(stage, { requestId, actingUserId, refLabel }) {
   const target = STAGE_NOTIFY[stage];
   if (!target) return;
-  await notifyUnit({
+  const title = `Service Request needs ${target.label}`;
+  const message = `${refLabel} has moved to ${target.label} and is awaiting action.`;
+  const linkUrl = recordViewPath('service_request', requestId);
+  const userIds = await notifyUnit({
     roles: target.roles, unitSlugs: target.unitSlugs,
-    title: `Service Request needs ${target.label}`,
-    message: `${refLabel} has moved to ${target.label} and is awaiting action.`,
-    actingUserId, linkUrl: recordViewPath('service_request', requestId),
+    title, message, actingUserId, linkUrl,
     notificationType: 'service_request_stage',
-  }).catch(() => {});
+  }).catch(() => []);
+  // Same recipient set the in-app notification just went to — covers the very first hop too
+  // (Sales submitting a brand-new request lands it on 'design', which runs through here same
+  // as every later stage move), so this one call site covers "new Service Request" push too.
+  if (userIds?.length) {
+    await sendPushToUserIds(userIds, {
+      title, body: message,
+      data: { url: linkUrl, type: 'service_request', action: 'stage_changed', requestId: String(requestId), tag: `sr-${requestId}-${stage}` },
+    }).catch(() => {});
+  }
 }
 
 const __filename = fileURLToPath(import.meta.url);

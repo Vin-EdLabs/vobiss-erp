@@ -12,9 +12,12 @@ import { isSystemAdminAccount, userHasAnyRole, effectiveUnitsForUser, MANAGER_RO
  * disk + multer) as every other upload in this app, just correctly scoped.
  */
 
-const ALLOWED_EXTENSIONS = new Set(['pdf', 'xls', 'xlsx', 'csv', 'doc', 'docx', 'kmz', 'kml', 'png', 'jpg', 'jpeg', 'gif', 'webp', 'zip']);
-const PREVIEWABLE_EXTENSIONS = new Set(['pdf', 'png', 'jpg', 'jpeg', 'gif', 'webp']);
-const MAX_FILE_SIZE = 30 * 1024 * 1024; // 30MB — slightly above the 25MB used elsewhere in the app
+// No extension allowlist — File Storage takes any file type (video, any document, zip/rar/7z
+// archives, whatever). ALLOWED_EXTENSIONS stays exported only as a hint set for icon/grouping
+// UI, never as an upload gate (see the multer fileFilter in routes/archive.js).
+const ALLOWED_EXTENSIONS = new Set(['pdf', 'xls', 'xlsx', 'csv', 'doc', 'docx', 'ppt', 'pptx', 'txt', 'rtf', 'odt', 'ods', 'odp', 'kmz', 'kml', 'png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'heic', 'mp4', 'mov', 'avi', 'mkv', 'webm', 'm4v', 'mp3', 'wav', 'm4a', 'zip', 'rar', '7z', 'tar', 'gz']);
+const PREVIEWABLE_EXTENSIONS = new Set(['pdf', 'png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'mp4', 'webm', 'mov', 'mp3', 'wav', 'm4a']);
+const MAX_FILE_SIZE = 2 * 1024 * 1024 * 1024; // 2GB — large enough for video, not just documents
 
 let tableReady = false;
 export async function ensureArchiveTables() {

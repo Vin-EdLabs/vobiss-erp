@@ -36,10 +36,18 @@
     max-width: 100%;
   }
 
+  /* [class*="rounded-xl"] etc. is a substring match, not a real Tailwind-class match — it was
+     meant to catch big panel/card containers, but it also matches any small fixed-size flex
+     child that merely uses rounded-xl/2xl for its own corners (an icon badge, an avatar frame).
+     Every such fixed-size element in this codebase pairs that with shrink-0 (so it survives
+     flex shrinking) — genuine full-width cards never do — so :not() on that is enough to tell
+     them apart without needing to touch every call site individually. Without it, this rule
+     forced width: 100% onto e.g. UnitPageHero's 48px icon box, stretching it to the full row
+     width and squeezing its sibling text into a 0-width column (wrapping one letter per line). */
   body:not(.chat-route-active) .staff-main-scroll .vobiss-card,
-  body:not(.chat-route-active) .staff-main-scroll [class*="rounded-[var(--radius-lg)]"],
-  body:not(.chat-route-active) .staff-main-scroll [class*="rounded-xl"],
-  body:not(.chat-route-active) .staff-main-scroll [class*="rounded-2xl"] {
+  body:not(.chat-route-active) .staff-main-scroll [class*="rounded-[var(--radius-lg)]"]:not([class*="shrink-0"]),
+  body:not(.chat-route-active) .staff-main-scroll [class*="rounded-xl"]:not([class*="shrink-0"]),
+  body:not(.chat-route-active) .staff-main-scroll [class*="rounded-2xl"]:not([class*="shrink-0"]) {
     width: 100%;
     max-width: 100%;
     overflow: hidden;

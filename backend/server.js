@@ -219,10 +219,15 @@ const corsOrigins = [
   'http://localhost:3000',
   'http://127.0.0.1:3000',
 ].filter(Boolean);
+// Same-network devices (a phone on the same Wi-Fi hitting the dev machine's LAN IP) send an
+// Origin like http://192.168.1.23:3000 — matched here by RFC1918 private-range regex, same
+// idea as the existing localhost/127.0.0.1 allowance, just widened to "any private IP", never
+// a public address.
+const PRIVATE_LAN_ORIGIN = /^https?:\/\/(localhost|127\.0\.0\.1|192\.168\.\d{1,3}\.\d{1,3}|10\.\d{1,3}\.\d{1,3}\.\d{1,3}|172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}):\d+$/;
 app.use(cors({
   origin(origin, cb) {
     if (!origin) return cb(null, true);
-    if (corsOrigins.includes(origin) || /^http:\/\/(localhost|127\.0\.0\.1):\d+$/.test(origin)) {
+    if (corsOrigins.includes(origin) || PRIVATE_LAN_ORIGIN.test(origin)) {
       return cb(null, true);
     }
     return cb(null, false);
@@ -2959,6 +2964,10 @@ app.use((req, res, next) => {
 
 // START SERVER (HTTP + Socket.IO)
 const server = http.createServer(app);
+// Node's default requestTimeout (5 min) would kill a large File Storage video/document upload
+// mid-transfer on a slow connection — this is a large-file server, so that default doesn't fit.
+server.requestTimeout = 0;
+server.headersTimeout = 0;
 const io = attachSocketIO(server);
 setupChatSocket(io);
 server.listen(port, '0.0.0.0', async () => {

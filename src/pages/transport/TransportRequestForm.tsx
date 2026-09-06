@@ -156,18 +156,18 @@ export default function TransportRequestForm() {
 
   return (
     <div className="mx-auto max-w-7xl space-y-6 p-4 md:p-6">
-      <div className="mb-6 flex items-center justify-between gap-3">
+      <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-3">
-          <div className="rounded-xl bg-amber-100 p-3 text-amber-700">
+          <div className="shrink-0 rounded-xl bg-amber-100 p-3 text-amber-700">
             <Truck className="h-6 w-6" />
           </div>
-          <div>
-            <h1 className="text-3xl font-bold text-slate-900">Transport Request</h1>
+          <div className="min-w-0">
+            <h1 className="text-2xl font-bold text-slate-900 sm:text-3xl">Transport Request</h1>
             <p className="text-sm text-slate-500">Submit and track your site transport requests.</p>
           </div>
         </div>
 
-        <Button onClick={() => setIsFormOpen((prev) => !prev)} className="bg-amber-600 hover:bg-amber-700">
+        <Button onClick={() => setIsFormOpen((prev) => !prev)} className="w-full bg-amber-600 hover:bg-amber-700 sm:w-auto">
           <Plus className="mr-2 h-4 w-4" />
           {isFormOpen ? 'Close Form' : 'New Transport Request'}
         </Button>
@@ -301,58 +301,84 @@ export default function TransportRequestForm() {
 
         <TabsContent value={activeTab} className="mt-6">
           <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-            <div className="overflow-x-auto">
-              <table className="min-w-full divide-y divide-slate-200 text-left">
-                <thead className="bg-slate-50">
-                  <tr>
-                    <th className="px-6 py-3 text-xs font-medium uppercase tracking-wider text-slate-500">Request</th>
-                    <th className="px-6 py-3 text-xs font-medium uppercase tracking-wider text-slate-500">Requester</th>
-                    <th className="px-6 py-3 text-xs font-medium uppercase tracking-wider text-slate-500">Site</th>
-                    <th className="px-6 py-3 text-xs font-medium uppercase tracking-wider text-slate-500">Client</th>
-                    <th className="px-6 py-3 text-xs font-medium uppercase tracking-wider text-slate-500">Reference</th>
-                    <th className="px-6 py-3 text-xs font-medium uppercase tracking-wider text-slate-500">Created</th>
-                    <th className="px-6 py-3 text-xs font-medium uppercase tracking-wider text-slate-500">Status</th>
-                    <th className="px-6 py-3 text-xs font-medium uppercase tracking-wider text-slate-500">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-200 bg-white">
-                  {filteredRequests.length === 0 ? (
-                    <tr>
-                      <td colSpan={8} className="px-6 py-10 text-center text-sm text-slate-500">No transport requests found in this status.</td>
-                    </tr>
-                  ) : (
-                    filteredRequests.map((request) => (
-                      <tr key={request.id} className="group hover:bg-slate-50">
-                        <td className="px-6 py-4 font-semibold text-slate-900">
-                          <span className="inline-flex items-center gap-1">
-                            {formatOwnReference('transport_request', request.id)}
-                            <span className="opacity-0 transition group-hover:opacity-100">
-                              <CopyRefButton value={formatOwnReference('transport_request', request.id)} size="sm" />
-                            </span>
-                          </span>
-                        </td>
-                        <td className="px-6 py-4 text-sm text-slate-700"><PersonName value={request.requester_name} /></td>
-                        <td className="px-6 py-4 text-sm text-slate-700">{request.site_name}</td>
-                        <td className="px-6 py-4 text-sm text-slate-700">{request.client_name}</td>
-                        <td className="px-6 py-4"><ReferenceBadge reference={request} /></td>
-                        <td className="px-6 py-4 text-sm text-slate-700">{new Date(request.created_at).toLocaleDateString()}</td>
-                        <td className="px-6 py-4">
-                          <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium ${statusBadge[request.status] || statusBadge.pending}`}>
-                            {request.status === 'pending' ? <Clock3 className="h-3.5 w-3.5" /> : request.status === 'approved' ? <CheckCircle2 className="h-3.5 w-3.5" /> : <XCircle className="h-3.5 w-3.5" />}
-                            {request.status}
-                          </span>
-                        </td>
-                        <td className="px-6 py-4">
-                          <Link to={`/transport-requests/${request.id}`} className="inline-flex items-center gap-1 text-sm font-medium text-blue-600 hover:text-blue-500">
-                            <FileText className="h-4 w-4" /> View
-                          </Link>
-                        </td>
+            {filteredRequests.length === 0 ? (
+              <p className="px-6 py-10 text-center text-sm text-slate-500">No transport requests found in this status.</p>
+            ) : (
+              <>
+                <div className="hidden overflow-x-auto sm:block">
+                  <table className="min-w-full divide-y divide-slate-200 text-left">
+                    <thead className="bg-slate-50">
+                      <tr>
+                        <th className="px-6 py-3 text-xs font-medium uppercase tracking-wider text-slate-500">Request</th>
+                        <th className="px-6 py-3 text-xs font-medium uppercase tracking-wider text-slate-500">Requester</th>
+                        <th className="px-6 py-3 text-xs font-medium uppercase tracking-wider text-slate-500">Site</th>
+                        <th className="px-6 py-3 text-xs font-medium uppercase tracking-wider text-slate-500">Client</th>
+                        <th className="px-6 py-3 text-xs font-medium uppercase tracking-wider text-slate-500">Reference</th>
+                        <th className="px-6 py-3 text-xs font-medium uppercase tracking-wider text-slate-500">Created</th>
+                        <th className="px-6 py-3 text-xs font-medium uppercase tracking-wider text-slate-500">Status</th>
+                        <th className="px-6 py-3 text-xs font-medium uppercase tracking-wider text-slate-500">Actions</th>
                       </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
+                    </thead>
+                    <tbody className="divide-y divide-slate-200 bg-white">
+                      {filteredRequests.map((request) => (
+                        <tr key={request.id} className="group hover:bg-slate-50">
+                          <td className="px-6 py-4 font-semibold text-slate-900">
+                            <span className="inline-flex items-center gap-1">
+                              {formatOwnReference('transport_request', request.id)}
+                              <span className="opacity-0 transition group-hover:opacity-100">
+                                <CopyRefButton value={formatOwnReference('transport_request', request.id)} size="sm" />
+                              </span>
+                            </span>
+                          </td>
+                          <td className="px-6 py-4 text-sm text-slate-700"><PersonName value={request.requester_name} /></td>
+                          <td className="px-6 py-4 text-sm text-slate-700">{request.site_name}</td>
+                          <td className="px-6 py-4 text-sm text-slate-700">{request.client_name}</td>
+                          <td className="px-6 py-4"><ReferenceBadge reference={request} /></td>
+                          <td className="px-6 py-4 text-sm text-slate-700">{new Date(request.created_at).toLocaleDateString()}</td>
+                          <td className="px-6 py-4">
+                            <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium ${statusBadge[request.status] || statusBadge.pending}`}>
+                              {request.status === 'pending' ? <Clock3 className="h-3.5 w-3.5" /> : request.status === 'approved' ? <CheckCircle2 className="h-3.5 w-3.5" /> : <XCircle className="h-3.5 w-3.5" />}
+                              {request.status}
+                            </span>
+                          </td>
+                          <td className="px-6 py-4">
+                            <Link to={`/transport-requests/${request.id}`} className="inline-flex items-center gap-1 text-sm font-medium text-blue-600 hover:text-blue-500">
+                              <FileText className="h-4 w-4" /> View
+                            </Link>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                <div className="divide-y divide-slate-200 sm:hidden">
+                  {filteredRequests.map((request) => (
+                    <Link
+                      key={request.id}
+                      to={`/transport-requests/${request.id}`}
+                      className="block p-4 active:bg-slate-50"
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="font-semibold text-slate-900">{formatOwnReference('transport_request', request.id)}</p>
+                          <p className="truncate text-sm text-slate-700"><PersonName value={request.requester_name} /></p>
+                          <p className="truncate text-sm text-slate-500">{request.site_name} · {request.client_name}</p>
+                        </div>
+                        <span className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium ${statusBadge[request.status] || statusBadge.pending}`}>
+                          {request.status === 'pending' ? <Clock3 className="h-3.5 w-3.5" /> : request.status === 'approved' ? <CheckCircle2 className="h-3.5 w-3.5" /> : <XCircle className="h-3.5 w-3.5" />}
+                          {request.status}
+                        </span>
+                      </div>
+                      <div className="mt-2 flex items-center justify-between text-xs text-slate-500">
+                        <span>{new Date(request.created_at).toLocaleDateString()}</span>
+                        <ReferenceBadge reference={request} />
+                      </div>
+                    </Link>
+                  ))}
+                </div>
+              </>
+            )}
           </div>
         </TabsContent>
       </Tabs>

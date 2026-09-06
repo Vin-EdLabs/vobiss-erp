@@ -19,6 +19,7 @@ import { getChatUnreadTotal } from '../api/chat';
 import { useAuth } from '../context/AuthContext';
 import { useCompany } from '@/hooks/useCompany';
 import { useIsMobile } from '@/hooks/useIsMobile';
+import { usePendingRequestBeep } from '@/hooks/usePendingRequestBeep';
 import { useQuery } from '@tanstack/react-query';
 import { hrSelfApi } from '@/api/hrSelf';
 import { hrApi } from '@/api/hr';
@@ -267,6 +268,14 @@ const Sidebar = ({
   const [projectUnitCounts, setProjectUnitCounts] = useState<Record<string, number>>({});
   const [ticketAttention, setTicketAttention] = useState<TicketAttentionCounts>(EMPTY_TICKET_COUNTS);
   const [canCreateProjectRequest, setCanCreateProjectRequest] = useState(false);
+
+  // Reminder beep while something is waiting on this user's approval — material/cash requests
+  // (pendingCount) plus service requests (projectUnitCounts, summed across every unit they can
+  // act on). Ticketing already has its own escalation/SLA alerting; Transport approvals don't
+  // have a live count wired into this sidebar yet, so they're not covered here.
+  const totalPendingApprovals = pendingCount + Object.values(projectUnitCounts).reduce((sum, n) => sum + (n || 0), 0);
+  usePendingRequestBeep(totalPendingApprovals);
+
   const hrMeQ = useQuery({
     queryKey: ['hr-self', 'me'],
     queryFn: hrSelfApi.me,
@@ -358,6 +367,22 @@ const Sidebar = ({
     window.addEventListener('chat:unread-changed', loadChatUnread);
     return () => window.removeEventListener('chat:unread-changed', loadChatUnread);
   }, [user?.id]);
+
+  // OS/PWA app-icon badge (installed home-screen app on Android/desktop; iOS Safari doesn't
+  // support the Badging API at all, so this is a no-op there, not an error) — mirrors the
+  // in-app chat unread count so the icon itself shows a number even when the app isn't open.
+  useEffect(() => {
+    const nav = navigator as Navigator & {
+      setAppBadge?: (count?: number) => Promise<void>;
+      clearAppBadge?: () => Promise<void>;
+    };
+    if (!nav.setAppBadge || !nav.clearAppBadge) return;
+    if (chatUnreadCount > 0) {
+      nav.setAppBadge(chatUnreadCount).catch(() => {});
+    } else {
+      nav.clearAppBadge().catch(() => {});
+    }
+  }, [chatUnreadCount]);
 
   useEffect(() => {
     if (!user?.id) {

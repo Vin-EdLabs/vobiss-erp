@@ -40,6 +40,17 @@ if (!fs.existsSync(chatUploadsDir)) {
   fs.mkdirSync(chatUploadsDir, { recursive: true });
 }
 
+// Phone photos (HEIC/HEIF in particular) are frequently handed to us by the browser with an
+// empty or generic mimetype ('', 'application/octet-stream') instead of 'image/...' — the OS
+// file picker still filtered by extension correctly, multer just never sees that. Falling back
+// to the extension keeps those uploads working instead of failing silently on mimetype alone.
+const MEDIA_EXTENSIONS = new Set([
+  'png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg', 'heic', 'heif', 'avif',
+  'mp4', 'mov', 'avi', 'mkv', 'webm', 'm4v', '3gp',
+  'mp3', 'wav', 'm4a', 'aac', 'ogg',
+  'pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'txt',
+]);
+
 const upload = multer({
   storage: multer.diskStorage({
     destination: (_req, _file, cb) => cb(null, chatUploadsDir),
@@ -48,14 +59,16 @@ const upload = multer({
       cb(null, `chat-${unique}${path.extname(file.originalname)}`);
     },
   }),
-  limits: { fileSize: 50 * 1024 * 1024 },
+  limits: { fileSize: 200 * 1024 * 1024 },
   fileFilter: (_req, file, cb) => {
-    const ok =
+    const mimeOk =
       file.mimetype.startsWith('image/') ||
       file.mimetype.startsWith('video/') ||
       file.mimetype.startsWith('audio/') ||
       file.mimetype === 'application/pdf';
-    cb(ok ? null : new Error('Only images, videos, and PDFs are allowed'), ok);
+    const ext = path.extname(file.originalname || '').slice(1).toLowerCase();
+    const ok = mimeOk || MEDIA_EXTENSIONS.has(ext);
+    cb(ok ? null : new Error('That file type is not supported here'), ok);
   },
 });
 

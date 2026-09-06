@@ -483,6 +483,13 @@
     max-width: 100% !important;
   }
 
+  /* These panels go edge-to-edge fullscreen above (inset: 0), so their own header — including
+     the close (X) button — sits right at the physical top edge same as .chat-topbar already
+     accounts for; without this, a notch/status bar can cover the close button entirely. */
+  .chat-app--mobile .chat-panel-header {
+    padding-top: max(0.75rem, calc(env(safe-area-inset-top) + 0.5rem));
+  }
+
   .chat-app--mobile .chat-search-panel,
   .chat-app--mobile .chat-pinned-panel {
     max-height: 40vh;
