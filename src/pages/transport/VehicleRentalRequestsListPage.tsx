@@ -139,18 +139,18 @@ export default function VehicleRentalRequestsListPage() {
   return (
     <div className="mx-auto max-w-7xl space-y-6 p-4 md:p-6">
       {/* Header */}
-      <div className="mb-6 flex items-center justify-between gap-3">
+      <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-3">
-          <div className="rounded-xl bg-amber-100 p-3 text-amber-700">
+          <div className="shrink-0 rounded-xl bg-amber-100 p-3 text-amber-700">
             <FileText className="h-6 w-6" />
           </div>
-          <div>
-            <h1 className="text-3xl font-bold text-slate-900">Vehicle Rental Requests</h1>
+          <div className="min-w-0">
+            <h1 className="text-2xl font-bold text-slate-900 sm:text-3xl">Vehicle Rental Requests</h1>
             <p className="text-sm text-slate-500">Submit and manage vehicle rental requests</p>
           </div>
         </div>
 
-        <Button onClick={() => navigate('/transport/new-rental-vehicle-request')} className="bg-amber-600 hover:bg-amber-700">
+        <Button onClick={() => navigate('/transport/new-rental-vehicle-request')} className="w-full bg-amber-600 hover:bg-amber-700 sm:w-auto">
           <Plus className="mr-2 h-4 w-4" />
           New Rental Request
         </Button>
@@ -171,103 +171,130 @@ export default function VehicleRentalRequestsListPage() {
 
       {/* Tabs */}
       <Tabs value={activeTab} onValueChange={(val) => setActiveTab(val as any)} className="w-full">
-        <TabsList className="grid w-full grid-cols-6">
-          <TabsTrigger value="pending">
+        <TabsList className="flex w-full justify-start gap-1 overflow-x-auto sm:grid sm:grid-cols-6 sm:justify-center sm:gap-0 sm:overflow-visible">
+          <TabsTrigger value="pending" className="shrink-0 sm:shrink">
             Pending ({requests.filter((r) => r.status === 'pending_manager').length})
           </TabsTrigger>
-          <TabsTrigger value="approved_manager">
+          <TabsTrigger value="approved_manager" className="shrink-0 sm:shrink">
             Approved by Manager ({requests.filter((r) => r.status === 'pending_finance').length})
           </TabsTrigger>
-          <TabsTrigger value="sent_finance">
+          <TabsTrigger value="sent_finance" className="shrink-0 sm:shrink">
             Sent to Finance ({requests.filter((r) => r.status === 'pending_finance' || r.status === 'cash_issued').length})
           </TabsTrigger>
-          <TabsTrigger value="cash_issued">
+          <TabsTrigger value="cash_issued" className="shrink-0 sm:shrink">
             Cash Issued ({requests.filter((r) => r.status === 'cash_issued').length})
           </TabsTrigger>
-          <TabsTrigger value="completed">
+          <TabsTrigger value="completed" className="shrink-0 sm:shrink">
             Completed ({requests.filter((r) => r.status === 'completed' || r.status === 'cash_issued').length})
           </TabsTrigger>
-          <TabsTrigger value="rejected">
+          <TabsTrigger value="rejected" className="shrink-0 sm:shrink">
             Rejected ({requests.filter((r) => r.status === 'rejected').length})
           </TabsTrigger>
         </TabsList>
 
         <TabsContent value={activeTab} className="mt-6">
           <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-            <div className="overflow-x-auto">
-              <table className="min-w-full divide-y divide-slate-200 text-left">
-                <thead className="bg-slate-50">
-                  <tr>
-                    <th className="px-6 py-3 text-xs font-medium uppercase tracking-wider text-slate-500">Ref No.</th>
-                    <th className="px-6 py-3 text-xs font-medium uppercase tracking-wider text-slate-500">Requestor</th>
-                    <th className="px-6 py-3 text-xs font-medium uppercase tracking-wider text-slate-500">Linked Transport Request</th>
-                    <th className="px-6 py-3 text-xs font-medium uppercase tracking-wider text-slate-500">Reference</th>
-                    <th className="px-6 py-3 text-xs font-medium uppercase tracking-wider text-slate-500">Purpose</th>
-                    <th className="px-6 py-3 text-xs font-medium uppercase tracking-wider text-slate-500">Grand Total (GHC)</th>
-                    <th className="px-6 py-3 text-xs font-medium uppercase tracking-wider text-slate-500">Date</th>
-                    <th className="px-6 py-3 text-xs font-medium uppercase tracking-wider text-slate-500">Status</th>
-                    <th className="px-6 py-3 text-xs font-medium uppercase tracking-wider text-slate-500">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-200 bg-white">
-                  {loading ? (
-                    <tr>
-                      <td colSpan={9} className="px-6 py-10 text-center text-sm text-slate-500">Loading vehicle rental requests...</td>
-                    </tr>
-                  ) : filteredRequests.length === 0 ? (
-                    <tr>
-                      <td colSpan={9} className="px-6 py-10 text-center text-sm text-slate-500">No rental requests found in this status.</td>
-                    </tr>
-                  ) : (
-                    filteredRequests.map((request) => {
-                      const { style, label } = getStatusBadge(request.status);
-                      return (
-                        <tr key={request.id} className="group hover:bg-slate-50">
-                          <td className="px-6 py-4 font-semibold text-amber-700">
-                            <span className="inline-flex items-center gap-1">
-                              <Link to={`/transport/vehicle-rental-requests/${request.id}`} className="hover:underline flex items-center gap-1">
-                                {formatOwnReference('vehicle_request', request.id)} <ArrowUpRight className="h-3.5 w-3.5 text-slate-400" />
-                              </Link>
-                              <span className="opacity-0 transition group-hover:opacity-100">
-                                <CopyRefButton value={formatOwnReference('vehicle_request', request.id)} size="sm" />
+            {loading ? (
+              <p className="px-6 py-10 text-center text-sm text-slate-500">Loading vehicle rental requests...</p>
+            ) : filteredRequests.length === 0 ? (
+              <p className="px-6 py-10 text-center text-sm text-slate-500">No rental requests found in this status.</p>
+            ) : (
+              <>
+                <div className="hidden overflow-x-auto sm:block">
+                  <table className="min-w-full divide-y divide-slate-200 text-left">
+                    <thead className="bg-slate-50">
+                      <tr>
+                        <th className="px-6 py-3 text-xs font-medium uppercase tracking-wider text-slate-500">Ref No.</th>
+                        <th className="px-6 py-3 text-xs font-medium uppercase tracking-wider text-slate-500">Requestor</th>
+                        <th className="px-6 py-3 text-xs font-medium uppercase tracking-wider text-slate-500">Linked Transport Request</th>
+                        <th className="px-6 py-3 text-xs font-medium uppercase tracking-wider text-slate-500">Reference</th>
+                        <th className="px-6 py-3 text-xs font-medium uppercase tracking-wider text-slate-500">Purpose</th>
+                        <th className="px-6 py-3 text-xs font-medium uppercase tracking-wider text-slate-500">Grand Total (GHC)</th>
+                        <th className="px-6 py-3 text-xs font-medium uppercase tracking-wider text-slate-500">Date</th>
+                        <th className="px-6 py-3 text-xs font-medium uppercase tracking-wider text-slate-500">Status</th>
+                        <th className="px-6 py-3 text-xs font-medium uppercase tracking-wider text-slate-500">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-200 bg-white">
+                      {filteredRequests.map((request) => {
+                        const { style, label } = getStatusBadge(request.status);
+                        return (
+                          <tr key={request.id} className="group hover:bg-slate-50">
+                            <td className="px-6 py-4 font-semibold text-amber-700">
+                              <span className="inline-flex items-center gap-1">
+                                <Link to={`/transport/vehicle-rental-requests/${request.id}`} className="hover:underline flex items-center gap-1">
+                                  {formatOwnReference('vehicle_request', request.id)} <ArrowUpRight className="h-3.5 w-3.5 text-slate-400" />
+                                </Link>
+                                <span className="opacity-0 transition group-hover:opacity-100">
+                                  <CopyRefButton value={formatOwnReference('vehicle_request', request.id)} size="sm" />
+                                </span>
                               </span>
-                            </span>
-                          </td>
-                          <td className="px-6 py-4 text-sm text-slate-700 font-medium">
-                            {request.requester_name || '—'}
-                            {request.department && <div className="text-xs text-slate-400">{request.department}</div>}
-                          </td>
-                          <td className="px-6 py-4 text-sm text-slate-700">
-                            {request.transport_request_id ? (
-                              <Link to={`/transport-requests/${request.transport_request_id}`} className="text-blue-600 hover:underline">
-                                #{request.transport_request_id}
+                            </td>
+                            <td className="px-6 py-4 text-sm text-slate-700 font-medium">
+                              {request.requester_name || '—'}
+                              {request.department && <div className="text-xs text-slate-400">{request.department}</div>}
+                            </td>
+                            <td className="px-6 py-4 text-sm text-slate-700">
+                              {request.transport_request_id ? (
+                                <Link to={`/transport-requests/${request.transport_request_id}`} className="text-blue-600 hover:underline">
+                                  #{request.transport_request_id}
+                                </Link>
+                              ) : (
+                                '—'
+                              )}
+                            </td>
+                            <td className="px-6 py-4"><ReferenceBadge reference={request} /></td>
+                            <td className="px-6 py-4 text-sm text-slate-700 max-w-xs truncate">{request.purpose || '—'}</td>
+                            <td className="px-6 py-4 text-sm font-bold text-slate-900">{formatGrandTotal(request.grand_total)}</td>
+                            <td className="px-6 py-4 text-sm text-slate-600">{formatDate(request.created_at)}</td>
+                            <td className="px-6 py-4">
+                              <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium border ${style.bg} ${style.text}`}>
+                                <Clock className="h-3.5 w-3.5" />
+                                {label}
+                              </span>
+                            </td>
+                            <td className="px-6 py-4">
+                              <Link to={`/transport/vehicle-rental-requests/${request.id}`} className="inline-flex items-center gap-1 text-sm font-medium text-blue-600 hover:text-blue-500">
+                                <FileText className="h-4 w-4" /> View Details
                               </Link>
-                            ) : (
-                              '—'
-                            )}
-                          </td>
-                          <td className="px-6 py-4"><ReferenceBadge reference={request} /></td>
-                          <td className="px-6 py-4 text-sm text-slate-700 max-w-xs truncate">{request.purpose || '—'}</td>
-                          <td className="px-6 py-4 text-sm font-bold text-slate-900">{formatGrandTotal(request.grand_total)}</td>
-                          <td className="px-6 py-4 text-sm text-slate-600">{formatDate(request.created_at)}</td>
-                          <td className="px-6 py-4">
-                            <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium border ${style.bg} ${style.text}`}>
-                              <Clock className="h-3.5 w-3.5" />
-                              {label}
-                            </span>
-                          </td>
-                          <td className="px-6 py-4">
-                            <Link to={`/transport/vehicle-rental-requests/${request.id}`} className="inline-flex items-center gap-1 text-sm font-medium text-blue-600 hover:text-blue-500">
-                              <FileText className="h-4 w-4" /> View Details
-                            </Link>
-                          </td>
-                        </tr>
-                      );
-                    })
-                  )}
-                </tbody>
-              </table>
-            </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+
+                <div className="divide-y divide-slate-200 sm:hidden">
+                  {filteredRequests.map((request) => {
+                    const { style, label } = getStatusBadge(request.status);
+                    return (
+                      <Link
+                        key={request.id}
+                        to={`/transport/vehicle-rental-requests/${request.id}`}
+                        className="block p-4 active:bg-slate-50"
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0">
+                            <p className="font-semibold text-amber-700">{formatOwnReference('vehicle_request', request.id)}</p>
+                            <p className="truncate text-sm font-medium text-slate-700">{request.requester_name || '—'}</p>
+                            <p className="truncate text-xs text-slate-500">{request.purpose || '—'}</p>
+                          </div>
+                          <span className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium border ${style.bg} ${style.text}`}>
+                            <Clock className="h-3.5 w-3.5" />
+                            {label}
+                          </span>
+                        </div>
+                        <div className="mt-2 flex items-center justify-between text-sm">
+                          <span className="text-slate-500">{formatDate(request.created_at)}</span>
+                          <span className="font-bold text-slate-900">{formatGrandTotal(request.grand_total)}</span>
+                        </div>
+                      </Link>
+                    );
+                  })}
+                </div>
+              </>
+            )}
           </div>
         </TabsContent>
       </Tabs>

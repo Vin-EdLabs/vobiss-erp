@@ -26,6 +26,7 @@ import {
   Bookmark,
   Menu,
   Globe,
+  Play,
 } from 'lucide-react';
 import '@/styles/chat-theme.css';
 import '@/styles/chat-mobile.css';
@@ -522,6 +523,31 @@ function PendingImagePreview({ file, onRemove }: { file: File; onRemove: () => v
         type="button"
         onClick={onRemove}
         title="Remove image"
+        className="absolute right-0.5 top-0.5 rounded-full bg-black/70 p-0.5 text-white opacity-90 hover:bg-black/90"
+      >
+        <X className="h-3 w-3" />
+      </button>
+    </div>
+  );
+}
+
+/** A <video> with no autoplay/controls just paints its first frame like a poster image — no
+ *  extra decoding step needed to get a real thumbnail instead of a generic file-type icon. */
+function PendingVideoPreview({ file, onRemove }: { file: File; onRemove: () => void }) {
+  const url = useFileDataUrl(file);
+  return (
+    <div className="chat-pending-video group relative h-16 w-16 shrink-0 overflow-hidden rounded-lg border border-gray-700 bg-black/30">
+      {url && (
+        // eslint-disable-next-line jsx-a11y/media-has-caption
+        <video src={url} muted playsInline preload="metadata" className="h-full w-full object-cover" />
+      )}
+      <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/20">
+        <Play className="h-5 w-5 fill-white text-white drop-shadow" />
+      </div>
+      <button
+        type="button"
+        onClick={onRemove}
+        title="Remove video"
         className="absolute right-0.5 top-0.5 rounded-full bg-black/70 p-0.5 text-white opacity-90 hover:bg-black/90"
       >
         <X className="h-3 w-3" />
@@ -2020,8 +2046,14 @@ const Chat: React.FC<{
       });
       queryClient.invalidateQueries({ queryKey: ['chat-channels'] });
       queryClient.invalidateQueries({ queryKey: ['chat-dms'] });
-    } catch {
+    } catch (e) {
       setMessages((prev) => prev.filter((m) => m.id !== optimistic.id));
+      console.error('[chat] send failed', e);
+      toast({
+        title: 'Message not sent',
+        description: e instanceof Error ? e.message : 'Something went wrong sending that.',
+        variant: 'destructive',
+      });
     } finally {
       setSending(false);
     }
@@ -3356,6 +3388,12 @@ const Chat: React.FC<{
                   {pendingFiles.map((f, i) =>
                     f.type.startsWith('audio/') ? null : f.type.startsWith('image/') ? (
                       <PendingImagePreview
+                        key={`${f.name}-${i}`}
+                        file={f}
+                        onRemove={() => removePendingFile(i)}
+                      />
+                    ) : f.type.startsWith('video/') ? (
+                      <PendingVideoPreview
                         key={`${f.name}-${i}`}
                         file={f}
                         onRemove={() => removePendingFile(i)}

@@ -12,6 +12,9 @@ import { getPushPublicKey } from '@/api';
 import { useAuth } from '@/context/AuthContext';
 import { cn } from '@/lib/utils';
 
+// Session-only: hides the card for the rest of THIS login after "Not now", but — unlike a
+// permanent flag — it does not survive a fresh login, so a user who still hasn't granted
+// permission gets asked again next time they sign in instead of being silenced forever.
 const STORAGE_KEY = 'vobiss_push_prompt_dismissed';
 
 /**
@@ -26,8 +29,30 @@ export function PushNotificationSetup({ className }: { className?: string }) {
     typeof Notification !== 'undefined' ? Notification.permission === 'granted' : false
   );
   const [dismissed, setDismissed] = useState(() =>
-    typeof localStorage !== 'undefined' ? localStorage.getItem(STORAGE_KEY) === '1' : false
+    typeof sessionStorage !== 'undefined' ? sessionStorage.getItem(STORAGE_KEY) === '1' : false
   );
+
+  const requestPush = async () => {
+    setLoading(true);
+    try {
+      // Both channels share one permission prompt/click — the backend fans a push out to
+      // whichever of these actually has a live token/subscription for the user (see
+      // backend/push/sendPush.js), so registering both here just gives it more delivery
+      // paths per device, not duplicate notifications.
+      const [webPushOk, fcmToken] = await Promise.all([
+        enablePushNotifications(),
+        registerDeviceForPush().catch((e) => {
+          console.warn('[push] FCM registration failed:', e);
+          return null;
+        }),
+      ]);
+      setGranted(webPushOk || !!fcmToken || permissionState() === 'granted');
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -42,10 +67,19 @@ export function PushNotificationSetup({ className }: { className?: string }) {
       try {
         const { configured: cfg } = await getPushPublicKey();
         const subscribed = await isCurrentlySubscribed();
+        const alreadyGranted = subscribed || permissionState() === 'granted';
         if (!cancelled) {
           setConfigured(cfg);
-          setGranted(subscribed || permissionState() === 'granted');
+          setGranted(alreadyGranted);
           setReady(true);
+        }
+        // Fire the real browser permission prompt automatically on login when the user has
+        // never been asked ('default' — as opposed to a past explicit 'denied', which the
+        // browser itself will refuse to re-prompt for until the user resets it in site
+        // settings). This is what makes "ask every login until allowed" actually happen,
+        // instead of waiting on a click the user may never make.
+        if (!cancelled && cfg && !alreadyGranted && permissionState() === 'default') {
+          requestPush();
         }
       } catch {
         if (!cancelled) {
@@ -83,27 +117,7 @@ export function PushNotificationSetup({ className }: { className?: string }) {
               size="sm"
               disabled={loading || granted}
               className="rounded-full bg-emerald-500 text-white hover:bg-emerald-600"
-              onClick={async () => {
-                setLoading(true);
-                try {
-                  // Both channels share one permission prompt/click — the backend fans a push
-                  // out to whichever of these actually has a live token/subscription for the
-                  // user (see backend/push/sendPush.js), so registering both here just gives it
-                  // more delivery paths per device, not duplicate notifications.
-                  const [webPushOk, fcmToken] = await Promise.all([
-                    enablePushNotifications(),
-                    registerDeviceForPush().catch((e) => {
-                      console.warn('[push] FCM registration failed:', e);
-                      return null;
-                    }),
-                  ]);
-                  setGranted(webPushOk || !!fcmToken || permissionState() === 'granted');
-                } catch (e) {
-                  console.error(e);
-                } finally {
-                  setLoading(false);
-                }
-              }}
+              onClick={requestPush}
             >
               {loading ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : null}
               {granted ? 'Notifications on' : 'Enable notifications'}
@@ -114,7 +128,7 @@ export function PushNotificationSetup({ className }: { className?: string }) {
               variant="ghost"
               className="rounded-full text-slate-200 hover:bg-white/10 hover:text-white"
               onClick={() => {
-                localStorage.setItem(STORAGE_KEY, '1');
+                sessionStorage.setItem(STORAGE_KEY, '1');
                 setDismissed(true);
               }}
             >

@@ -369,20 +369,37 @@ const Sidebar = ({
   }, [user?.id]);
 
   // OS/PWA app-icon badge (installed home-screen app on Android/desktop; iOS Safari doesn't
-  // support the Badging API at all, so this is a no-op there, not an error) — mirrors the
-  // in-app chat unread count so the icon itself shows a number even when the app isn't open.
+  // support the Badging API at all, so this is a no-op there, not an error) — unread chat plus
+  // unread general notifications (the same figure this sidebar already badges "My Workspace"
+  // with), not chat alone, so the icon reflects everything waiting, not just messages.
+  const appBadgeTotal = chatUnreadCount + unreadNotifCount;
   useEffect(() => {
     const nav = navigator as Navigator & {
       setAppBadge?: (count?: number) => Promise<void>;
       clearAppBadge?: () => Promise<void>;
     };
     if (!nav.setAppBadge || !nav.clearAppBadge) return;
-    if (chatUnreadCount > 0) {
-      nav.setAppBadge(chatUnreadCount).catch(() => {});
+    if (appBadgeTotal > 0) {
+      nav.setAppBadge(appBadgeTotal).catch(() => {});
     } else {
       nav.clearAppBadge().catch(() => {});
     }
-  }, [chatUnreadCount]);
+  }, [appBadgeTotal]);
+
+  // Browser-tab title fallback — the Badging API has no effect at all on iOS Safari (installed
+  // or not) and doesn't cover a tab that isn't installed as an app on any platform, so this is
+  // the one indicator guaranteed to show up regardless of device/install state.
+  const baseTitleRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (baseTitleRef.current === null) {
+      baseTitleRef.current = document.title.replace(/^\(\d+\+?\)\s*/, '');
+    }
+    const base = baseTitleRef.current;
+    document.title = appBadgeTotal > 0 ? `(${appBadgeTotal > 99 ? '99+' : appBadgeTotal}) ${base}` : base;
+    return () => {
+      document.title = base;
+    };
+  }, [appBadgeTotal]);
 
   useEffect(() => {
     if (!user?.id) {

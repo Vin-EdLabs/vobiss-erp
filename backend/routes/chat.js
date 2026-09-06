@@ -2136,4 +2136,22 @@ router.get('/users', async (req, res) => {
   }
 });
 
+// Multer (upload.array) reports failures — oversized file, rejected type, disk write error —
+// by calling next(err) *before* any route handler's own try/catch runs, so without this they
+// fall through to Express's default handler, which sends an HTML error page instead of JSON.
+// The frontend's chatFetch expects JSON on every response; against an HTML body its
+// res.json() parse fails and the real reason (e.g. "file too large") never reaches the user.
+router.use((err, _req, res, _next) => {
+  if (err instanceof multer.MulterError) {
+    const status = err.code === 'LIMIT_FILE_SIZE' ? 413 : 400;
+    const message =
+      err.code === 'LIMIT_FILE_SIZE' ? 'That file is too large (max 200MB).' : err.message;
+    return res.status(status).json({ error: message });
+  }
+  if (err) {
+    return res.status(400).json({ error: err.message || 'Upload failed' });
+  }
+  res.status(500).json({ error: 'Unexpected error' });
+});
+
 export default router;

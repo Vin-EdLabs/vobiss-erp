@@ -19,6 +19,14 @@ import { ReferenceBadge } from '@/components/transport/ReferenceBadge';
 import { PersonName } from '@/components/PersonName';
 import { CopyRefButton } from '@/components/CopyRefButton';
 
+function fuelStatusBadgeClass(status: string): string {
+  const s = status.toLowerCase();
+  if (s.includes('completed') || s.includes('approved')) return 'bg-emerald-100 text-emerald-800 border border-emerald-200';
+  if (s.includes('rejected')) return 'bg-rose-100 text-rose-800 border border-rose-200';
+  if (s.includes('cash') || s.includes('receipt')) return 'bg-blue-100 text-blue-800 border border-blue-200';
+  return 'bg-amber-100 text-amber-800 border border-amber-200';
+}
+
 export default function FuelRequestsListPage() {
   const { user } = useAuth();
   useSubmittedToast();
@@ -164,18 +172,18 @@ export default function FuelRequestsListPage() {
   return (
     <div className="mx-auto max-w-7xl space-y-6 p-4 md:p-6">
       {/* Header */}
-      <div className="mb-6 flex items-center justify-between gap-3">
+      <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-3">
-          <div className="rounded-xl bg-amber-100 p-3 text-amber-700">
+          <div className="shrink-0 rounded-xl bg-amber-100 p-3 text-amber-700">
             <Fuel className="h-6 w-6" />
           </div>
-          <div>
-            <h1 className="text-3xl font-bold text-slate-900">Fuel Requests</h1>
+          <div className="min-w-0">
+            <h1 className="text-2xl font-bold text-slate-900 sm:text-3xl">Fuel Requests</h1>
             <p className="text-sm text-slate-500">Submit and track your vehicle fuel requests.</p>
           </div>
         </div>
 
-        <Button onClick={() => setIsFormOpen((prev) => !prev)} className="bg-amber-600 hover:bg-amber-700">
+        <Button onClick={() => setIsFormOpen((prev) => !prev)} className="w-full bg-amber-600 hover:bg-amber-700 sm:w-auto">
           <Plus className="mr-2 h-4 w-4" />
           {isFormOpen ? 'Close Form' : 'New Fuel Request'}
         </Button>
@@ -348,101 +356,115 @@ export default function FuelRequestsListPage() {
 
       {/* Tabs */}
       <Tabs value={activeTab} onValueChange={(val) => setActiveTab(val as any)} className="w-full">
-        <TabsList className="grid w-full grid-cols-5">
-          <TabsTrigger value="pending">
+        <TabsList className="flex w-full justify-start gap-1 overflow-x-auto sm:grid sm:grid-cols-5 sm:justify-center sm:gap-0 sm:overflow-visible">
+          <TabsTrigger value="pending" className="shrink-0 sm:shrink">
             Pending ({requests.filter((r) => r.status.toLowerCase() === 'pending').length})
           </TabsTrigger>
-          <TabsTrigger value="approved">
+          <TabsTrigger value="approved" className="shrink-0 sm:shrink">
             Approved ({requests.filter((r) => r.status.toLowerCase().includes('approved') && !r.status.toLowerCase().includes('cash')).length})
           </TabsTrigger>
-          <TabsTrigger value="awaiting_receipt">
+          <TabsTrigger value="awaiting_receipt" className="shrink-0 sm:shrink">
             Awaiting Receipt ({requests.filter((r) => r.status.toLowerCase().includes('cash issued') || r.status.toLowerCase().includes('awaiting receipt') || r.status.toLowerCase().includes('receipt submitted')).length})
           </TabsTrigger>
-          <TabsTrigger value="completed">
+          <TabsTrigger value="completed" className="shrink-0 sm:shrink">
             Completed ({requests.filter((r) => r.status.toLowerCase().includes('completed')).length})
           </TabsTrigger>
-          <TabsTrigger value="rejected">
+          <TabsTrigger value="rejected" className="shrink-0 sm:shrink">
             Rejected ({requests.filter((r) => r.status.toLowerCase().includes('rejected')).length})
           </TabsTrigger>
         </TabsList>
 
         <TabsContent value={activeTab} className="mt-6">
           <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-            <div className="overflow-x-auto">
-              <table className="min-w-full divide-y divide-slate-200 text-left">
-                <thead className="bg-slate-50">
-                  <tr>
-                    <th className="px-6 py-3 text-xs font-medium uppercase tracking-wider text-slate-500">Ref No.</th>
-                    <th className="px-6 py-3 text-xs font-medium uppercase tracking-wider text-slate-500">Requester</th>
-                    <th className="px-6 py-3 text-xs font-medium uppercase tracking-wider text-slate-500">Vehicle Plate</th>
-                    <th className="px-6 py-3 text-xs font-medium uppercase tracking-wider text-slate-500">Fuel & Qty</th>
-                    <th className="px-6 py-3 text-xs font-medium uppercase tracking-wider text-slate-500">Est. Amount</th>
-                    <th className="px-6 py-3 text-xs font-medium uppercase tracking-wider text-slate-500">Reference</th>
-                    <th className="px-6 py-3 text-xs font-medium uppercase tracking-wider text-slate-500">Status</th>
-                    <th className="px-6 py-3 text-xs font-medium uppercase tracking-wider text-slate-500">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-200 bg-white">
-                  {loading ? (
-                    <tr>
-                      <td colSpan={8} className="px-6 py-10 text-center text-sm text-slate-500">Loading fuel requests...</td>
-                    </tr>
-                  ) : filteredRequests.length === 0 ? (
-                    <tr>
-                      <td colSpan={8} className="px-6 py-10 text-center text-sm text-slate-500">No fuel requests found in this status.</td>
-                    </tr>
-                  ) : (
-                    filteredRequests.map((request) => (
-                      <tr key={request.id} className="group hover:bg-slate-50">
-                        <td className="px-6 py-4 font-semibold text-amber-700">
-                          <span className="inline-flex items-center gap-1">
-                            <Link to={`/transport/fuel-requests/${request.id}`} className="hover:underline flex items-center gap-1">
-                              {request.ref_no} <ArrowUpRight className="h-3.5 w-3.5 text-slate-400" />
-                            </Link>
-                            <span className="opacity-0 transition group-hover:opacity-100">
-                              <CopyRefButton value={request.ref_no} size="sm" />
-                            </span>
-                          </span>
-                        </td>
-                        <td className="px-6 py-4 text-sm text-slate-700 font-medium">
-                          <PersonName value={request.requester_name} />
-                          {request.department && <div className="text-xs text-slate-400">{request.department}</div>}
-                        </td>
-                        <td className="px-6 py-4 text-sm font-mono font-medium text-slate-700">{request.vehicle_plate}</td>
-                        <td className="px-6 py-4 text-sm text-slate-700">
-                          {request.fuel_type} ({request.quantity_litres} L)
-                        </td>
-                        <td className="px-6 py-4 text-sm font-bold text-slate-900">
-                          GHC {Number(request.estimated_amount).toFixed(2)}
-                        </td>
-                        <td className="px-6 py-4"><ReferenceBadge reference={request} /></td>
-                        <td className="px-6 py-4">
-                          <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium ${
-                            request.status.toLowerCase().includes('completed')
-                              ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
-                              : request.status.toLowerCase().includes('rejected')
-                              ? 'bg-rose-100 text-rose-800 border border-rose-200'
-                              : request.status.toLowerCase().includes('cash') || request.status.toLowerCase().includes('receipt')
-                              ? 'bg-blue-100 text-blue-800 border border-blue-200'
-                              : request.status.toLowerCase().includes('approved')
-                              ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
-                              : 'bg-amber-100 text-amber-800 border border-amber-200'
-                          }`}>
-                            <Clock3 className="h-3.5 w-3.5" />
-                            {request.status}
-                          </span>
-                        </td>
-                        <td className="px-6 py-4">
-                          <Link to={`/transport/fuel-requests/${request.id}`} className="inline-flex items-center gap-1 text-sm font-medium text-blue-600 hover:text-blue-500">
-                            <FileText className="h-4 w-4" /> View Details
-                          </Link>
-                        </td>
+            {loading ? (
+              <p className="px-6 py-10 text-center text-sm text-slate-500">Loading fuel requests...</p>
+            ) : filteredRequests.length === 0 ? (
+              <p className="px-6 py-10 text-center text-sm text-slate-500">No fuel requests found in this status.</p>
+            ) : (
+              <>
+                <div className="hidden overflow-x-auto sm:block">
+                  <table className="min-w-full divide-y divide-slate-200 text-left">
+                    <thead className="bg-slate-50">
+                      <tr>
+                        <th className="px-6 py-3 text-xs font-medium uppercase tracking-wider text-slate-500">Ref No.</th>
+                        <th className="px-6 py-3 text-xs font-medium uppercase tracking-wider text-slate-500">Requester</th>
+                        <th className="px-6 py-3 text-xs font-medium uppercase tracking-wider text-slate-500">Vehicle Plate</th>
+                        <th className="px-6 py-3 text-xs font-medium uppercase tracking-wider text-slate-500">Fuel & Qty</th>
+                        <th className="px-6 py-3 text-xs font-medium uppercase tracking-wider text-slate-500">Est. Amount</th>
+                        <th className="px-6 py-3 text-xs font-medium uppercase tracking-wider text-slate-500">Reference</th>
+                        <th className="px-6 py-3 text-xs font-medium uppercase tracking-wider text-slate-500">Status</th>
+                        <th className="px-6 py-3 text-xs font-medium uppercase tracking-wider text-slate-500">Actions</th>
                       </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
+                    </thead>
+                    <tbody className="divide-y divide-slate-200 bg-white">
+                      {filteredRequests.map((request) => (
+                        <tr key={request.id} className="group hover:bg-slate-50">
+                          <td className="px-6 py-4 font-semibold text-amber-700">
+                            <span className="inline-flex items-center gap-1">
+                              <Link to={`/transport/fuel-requests/${request.id}`} className="hover:underline flex items-center gap-1">
+                                {request.ref_no} <ArrowUpRight className="h-3.5 w-3.5 text-slate-400" />
+                              </Link>
+                              <span className="opacity-0 transition group-hover:opacity-100">
+                                <CopyRefButton value={request.ref_no} size="sm" />
+                              </span>
+                            </span>
+                          </td>
+                          <td className="px-6 py-4 text-sm text-slate-700 font-medium">
+                            <PersonName value={request.requester_name} />
+                            {request.department && <div className="text-xs text-slate-400">{request.department}</div>}
+                          </td>
+                          <td className="px-6 py-4 text-sm font-mono font-medium text-slate-700">{request.vehicle_plate}</td>
+                          <td className="px-6 py-4 text-sm text-slate-700">
+                            {request.fuel_type} ({request.quantity_litres} L)
+                          </td>
+                          <td className="px-6 py-4 text-sm font-bold text-slate-900">
+                            GHC {Number(request.estimated_amount).toFixed(2)}
+                          </td>
+                          <td className="px-6 py-4"><ReferenceBadge reference={request} /></td>
+                          <td className="px-6 py-4">
+                            <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium ${fuelStatusBadgeClass(request.status)}`}>
+                              <Clock3 className="h-3.5 w-3.5" />
+                              {request.status}
+                            </span>
+                          </td>
+                          <td className="px-6 py-4">
+                            <Link to={`/transport/fuel-requests/${request.id}`} className="inline-flex items-center gap-1 text-sm font-medium text-blue-600 hover:text-blue-500">
+                              <FileText className="h-4 w-4" /> View Details
+                            </Link>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                <div className="divide-y divide-slate-200 sm:hidden">
+                  {filteredRequests.map((request) => (
+                    <Link
+                      key={request.id}
+                      to={`/transport/fuel-requests/${request.id}`}
+                      className="block p-4 active:bg-slate-50"
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="font-semibold text-amber-700">{request.ref_no}</p>
+                          <p className="truncate text-sm font-medium text-slate-700"><PersonName value={request.requester_name} /></p>
+                          <p className="truncate font-mono text-xs text-slate-500">{request.vehicle_plate}</p>
+                        </div>
+                        <span className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium ${fuelStatusBadgeClass(request.status)}`}>
+                          <Clock3 className="h-3.5 w-3.5" />
+                          {request.status}
+                        </span>
+                      </div>
+                      <div className="mt-2 flex items-center justify-between text-sm">
+                        <span className="text-slate-700">{request.fuel_type} ({request.quantity_litres} L)</span>
+                        <span className="font-bold text-slate-900">GHC {Number(request.estimated_amount).toFixed(2)}</span>
+                      </div>
+                    </Link>
+                  ))}
+                </div>
+              </>
+            )}
           </div>
         </TabsContent>
       </Tabs>
