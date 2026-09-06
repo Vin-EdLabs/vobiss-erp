@@ -61,7 +61,13 @@ export default defineConfig(({ mode }) => {
       process.env.VITE_HTTPS === "1" && basicSsl(),
 
       VitePWA({
-        registerType: "prompt",
+        // "prompt" needs the app to have already rendered successfully in order to show its own
+        // "update available" toast — if a stale, broken service worker is what's actually
+        // causing the blank page, the app can never mount to offer that prompt in the first
+        // place, and the user has no way out except clearing site data by hand. "autoUpdate"
+        // takes over and reloads on a new SW without waiting for a click, so a bad cached
+        // version gets replaced automatically on the very next visit instead of getting stuck.
+        registerType: "autoUpdate",
         includeAssets: ["favicon.ico", "favicon-16.png", "favicon-32.png", "apple-touch-icon.png", "vobiss-logo.png"],
         // The real manifest is served dynamically by backend/server.js's GET /manifest.json
         // (staff vs. customer variant, real icons, real name) and already linked in index.html.

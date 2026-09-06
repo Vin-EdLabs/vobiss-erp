@@ -432,34 +432,51 @@ app.get('/manifest.json', (req, res) => {
   res.json(manifest);
 });
 
-// Firebase Messaging SW (separate scope from Vite PWA — see client register())
+// Firebase Messaging SW (separate scope from Vite PWA — see client register()).
+// Deliberately NOT using firebase-messaging-compat.js's own push handling here (that was the
+// original approach): the Firebase JS SDK's internal 'push' listener checks for any open/visible
+// tab of the app and, if one exists, suppresses the system notification entirely — it forwards
+// the payload to that tab instead of calling showNotification. That's why messages went
+// unnoticed whenever a tab was open anywhere (even unfocused, even a background window), which
+// isn't how WhatsApp behaves: it pops a real OS notification for every message regardless of
+// whether a tab happens to be open. A raw 'push' listener here has no such suppression — it
+// always shows the notification, and separately nudges any open tab via postMessage so that
+// tab's in-app toast still updates immediately (see firebaseMessaging.ts's message listener).
+// getToken()/pushManager.subscribe() on the page side don't care what code this SW contains —
+// only that a valid registration exists — so no Firebase script needs to load in here at all.
 app.get('/firebase-messaging-sw.js', (req, res) => {
   res.setHeader('Content-Type', 'application/javascript; charset=utf-8');
   res.setHeader('Service-Worker-Allowed', '/');
-  const cfg = firebaseWebConfigJson();
-  res.send(`importScripts('https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js');
-importScripts('https://www.gstatic.com/firebasejs/10.14.1/firebase-messaging-compat.js');
-firebase.initializeApp(${cfg});
-var messaging = firebase.messaging();
-messaging.onBackgroundMessage(function(payload) {
-  var title = (payload.notification && payload.notification.title) || 'Vobiss';
-  var body = (payload.notification && payload.notification.body) || '';
+  res.send(`self.addEventListener('push', function(event) {
+  if (!event.data) return;
+  var payload;
+  try { payload = event.data.json(); } catch (e) { return; }
+  var notif = payload.notification || {};
   var data = payload.data || {};
+  var title = notif.title || 'Vobiss';
+  var body = notif.body || '';
   var isChat = data.type === 'chat_message' || data.type === 'chat_mention';
-  return self.registration.showNotification(title, {
-    body: body,
-    icon: '/vobiss-logo-192.png',
-    badge: '/vobiss-logo-192.png',
-    data: data,
-    tag: data.tag || 'vobiss',
-    renotify: true,
-    requireInteraction: data.requireInteraction === '1' || data.type === 'announcement',
-    vibrate: [120, 60, 120, 60, 200],
-    actions: [
-      { action: 'open', title: isChat ? 'Open chat' : 'Open Vobiss' },
-      { action: 'dismiss', title: 'Dismiss' }
-    ]
-  });
+
+  event.waitUntil((async function() {
+    await self.registration.showNotification(title, {
+      body: body,
+      icon: '/vobiss-logo-192.png',
+      badge: '/vobiss-logo-192.png',
+      data: data,
+      tag: data.tag || 'vobiss',
+      renotify: true,
+      requireInteraction: data.requireInteraction === '1' || data.type === 'announcement',
+      vibrate: [120, 60, 120, 60, 200],
+      actions: [
+        { action: 'open', title: isChat ? 'Open chat' : 'Open Vobiss' },
+        { action: 'dismiss', title: 'Dismiss' }
+      ]
+    });
+    var list = await clients.matchAll({ type: 'window', includeUncontrolled: true });
+    list.forEach(function(c) {
+      c.postMessage({ type: 'vobiss-push', title: title, body: body, data: data });
+    });
+  })());
 });
 self.addEventListener('notificationclick', function(event) {
   event.notification.close();
@@ -572,17 +589,6 @@ async function getFreshPermissionUser(userId) {
 
 function getClientIp(req) {
   return req.headers['x-forwarded-for']?.split(',')[0].trim() || req.ip || req.connection?.remoteAddress || 'unknown';
-}
-
-function firebaseWebConfigJson() {
-  return JSON.stringify({
-    apiKey: process.env.FIREBASE_API_KEY || '',
-    authDomain: process.env.FIREBASE_AUTH_DOMAIN || '',
-    projectId: process.env.FIREBASE_PROJECT_ID || '',
-    storageBucket: process.env.FIREBASE_STORAGE_BUCKET || '',
-    messagingSenderId: process.env.FIREBASE_MESSAGING_SENDER_ID || '',
-    appId: process.env.FIREBASE_APP_ID || '',
-  });
 }
 
 /**

@@ -35,6 +35,21 @@ export function PWAUpdateToast() {
     };
   }, [registration]);
 
+  // registerType is "autoUpdate", so don't wait on a click here — a user who never notices (or
+  // never can, if a broken cached version is what's keeping the page blank in the first place)
+  // would otherwise be stuck indefinitely. This still renders the toast below for the brief
+  // moment before the reload, so it's visible rather than a silent flash.
+  useEffect(() => {
+    if (!needRefresh) return;
+    void (async () => {
+      try {
+        await updateServiceWorker();
+      } finally {
+        window.location.reload();
+      }
+    })();
+  }, [needRefresh, updateServiceWorker]);
+
   if (!needRefresh) return null;
 
   return (

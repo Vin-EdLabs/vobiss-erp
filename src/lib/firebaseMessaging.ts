@@ -1,7 +1,7 @@
 import { createElement } from 'react';
 import { initializeApp, getApps, type FirebaseApp } from 'firebase/app';
 import { registerFcmToken } from '../api';
-import { getMessaging, getToken, isSupported, onMessage, type Messaging } from 'firebase/messaging';
+import { getMessaging, getToken, isSupported, type Messaging } from 'firebase/messaging';
 import { playDoubleBeep } from './beep';
 import { toast } from '../hooks/use-toast';
 import { ToastAction } from '../components/ui/toast';
@@ -32,34 +32,29 @@ export async function isFirebaseMessagingConfigured(): Promise<boolean> {
   return Boolean(getFirebaseApp() && vapidKey);
 }
 
-export async function registerDeviceForPush(): Promise<string | null> {
-  const supported = await isSupported();
-  if (!supported || !vapidKey) return null;
+let pushMessageListenerAttached = false;
 
-  const fbApp = getFirebaseApp();
-  if (!fbApp) return null;
+/**
+ * The service worker (backend/server.js's /firebase-messaging-sw.js) always shows the real
+ * system notification itself now, regardless of whether a tab is open — that's what makes this
+ * behave like WhatsApp instead of going silent whenever the app happens to be open in some
+ * background tab or window. It also posts the same payload to every open tab via
+ * `postMessage`, which is what this listens for, purely to refresh this tab's toast/bell/badge
+ * immediately instead of waiting on the next poll.
+ */
+function attachPushMessageListener() {
+  if (pushMessageListenerAttached || !navigator.serviceWorker) return;
+  pushMessageListenerAttached = true;
 
-  const registration = await navigator.serviceWorker.register('/firebase-messaging-sw.js', {
-    scope: '/firebase-cloud-messaging-push-scope',
-  });
+  navigator.serviceWorker.addEventListener('message', (event) => {
+    const msg = event.data as { type?: string; title?: string; body?: string; data?: Record<string, string> } | null;
+    if (!msg || msg.type !== 'vobiss-push') return;
 
-  const messaging: Messaging = getMessaging(fbApp);
-  const token = await getToken(messaging, { vapidKey, serviceWorkerRegistration: registration });
-  if (token) {
-    await registerFcmToken(token);
-  }
+    const title = msg.title || 'Vobiss';
+    const body = msg.body || '';
+    const url = msg.data?.url || msg.data?.link || '/';
+    const type = msg.data?.type;
 
-  onMessage(messaging, (payload) => {
-    const title = payload.notification?.title || 'Vobiss';
-    const body = payload.notification?.body || '';
-    const url = (payload.data?.url as string) || (payload.data?.link as string) || '/';
-    const type = payload.data?.type as string | undefined;
-
-    // The tab is open and focused right now — FCM only calls onMessage() in the foreground; a
-    // system popup here would be redundant with the app already on screen (and iOS Safari
-    // actively suppresses foreground Notification() calls), so this shows an in-app toast plus
-    // an immediate bell/unread-badge refresh instead. Background delivery still goes through
-    // firebase-messaging-sw.js's onBackgroundMessage, which keeps the real system notification.
     playDoubleBeep();
     toast({
       title,
@@ -84,6 +79,26 @@ export async function registerDeviceForPush(): Promise<string | null> {
       window.dispatchEvent(new CustomEvent('staff:notifications-changed'));
     }
   });
+}
+
+export async function registerDeviceForPush(): Promise<string | null> {
+  const supported = await isSupported();
+  if (!supported || !vapidKey) return null;
+
+  const fbApp = getFirebaseApp();
+  if (!fbApp) return null;
+
+  const registration = await navigator.serviceWorker.register('/firebase-messaging-sw.js', {
+    scope: '/firebase-cloud-messaging-push-scope',
+  });
+
+  const messaging: Messaging = getMessaging(fbApp);
+  const token = await getToken(messaging, { vapidKey, serviceWorkerRegistration: registration });
+  if (token) {
+    await registerFcmToken(token);
+  }
+
+  attachPushMessageListener();
 
   return token;
 }
