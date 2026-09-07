@@ -5,7 +5,8 @@
   "scripts": {
     "start": "node server.js",
     "build": "npm --prefix .. run build",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "db:ensure-schema": "node scripts/ensure-all-schema.js"
   },
   "keywords": [],
   "author": "",

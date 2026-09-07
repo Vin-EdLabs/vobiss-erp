@@ -56,7 +56,7 @@ function collectRoleSlugs(user = {}) {
 }
 
 /** HR module — unit HR, position HR, legacy hr role, or superadmin. */
-function isHrOrExecutive(user = {}) {
+export function isHrOrExecutive(user = {}) {
   if (isSystemAdminAccount(user)) return true;
   const roles = collectRoleSlugs(user);
   if (roles.has('hr') || roles.has('director') || roles.has('cto')) return true;

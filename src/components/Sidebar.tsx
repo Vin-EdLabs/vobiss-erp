@@ -1038,6 +1038,7 @@ const Sidebar = ({
         { icon: HandCoins, label: 'Salary Advances', path: '/hr/payroll/advances' },
         { icon: ClipboardList, label: 'Payroll History', path: '/hr/payroll-history' },
         { icon: ClipboardCheck, label: 'Attendance', path: '/hr/attendance' },
+        { icon: MapPin, label: 'Field Arrivals', path: '/hr/field-arrivals' },
         { icon: BarChart3, label: 'Analytics', path: '/hr/analytics' },
         { icon: BarChart2, label: 'Reports', path: '/hr/reports' },
         { icon: FolderOpen, label: 'Documents', path: '/hr/documents' },
@@ -1264,7 +1265,13 @@ const Sidebar = ({
         // duplicated into Inventory. Transport Supervisors / admins get the full Transport
         // section (with the request page already inside it) instead of this standalone link.
         const showsFullTransportSection = isTransportSupervisor || isSystemOperator;
-        if (!showsFullTransportSection && !isSalesUser) unitItems.push(transportRequest);
+        if (!showsFullTransportSection && !isSalesUser) {
+          unitItems.push(transportRequest);
+          // Field engineers regularly need fuel/vehicles to reach a site — give them direct
+          // links to both request types without granting the full Transport section (which also
+          // shows the supervisor dashboard and every other staff member's requests).
+          if (isTxUser) unitItems.push(fuelRequests, rentalVehicleRequests);
+        }
 
         if (approvalSubItems.length && !isSalesUser) unitItems.push(requestApprovalsSection);
         if (showsFullTransportSection && !isSalesUser) unitItems.push(transportSection);

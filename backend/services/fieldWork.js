@@ -4,6 +4,7 @@ import { logUserAction, formatRecordLabel, recordViewPath } from './activityLog.
 import { recordTimingEvent } from './workflowTimeEngine.js';
 import { isSystemAdminAccount, userHasAnyRole, effectiveUnitsForUser, canonicalizeUnitSlug } from '../roles.js';
 import { tsAcceptRequest } from '../db/project.js';
+import { haversineMeters } from './geo.js';
 
 /**
  * Field Engineering / Site Work — a child record of a Ticket or Service Request, never a
@@ -76,6 +77,9 @@ export async function ensureFieldWorkTables() {
     );
     CREATE INDEX IF NOT EXISTS field_work_updates_fw_idx ON field_work_updates(field_work_id);
     CREATE INDEX IF NOT EXISTS field_work_updates_user_idx ON field_work_updates(user_id);
+    ALTER TABLE field_work_updates ADD COLUMN IF NOT EXISTS latitude DOUBLE PRECISION;
+    ALTER TABLE field_work_updates ADD COLUMN IF NOT EXISTS longitude DOUBLE PRECISION;
+    ALTER TABLE field_work_updates ADD COLUMN IF NOT EXISTS distance_from_site_meters INTEGER;
 
     CREATE TABLE IF NOT EXISTS field_work_confirmations (
       id SERIAL PRIMARY KEY,
@@ -311,10 +315,47 @@ export async function listFieldWork({ status, siteId, engineerId, sourceType, da
   return result.rows;
 }
 
+/** Recent "Confirm I'm here" check-ins across all field work — the HR/TX-supervisor visibility
+ *  feed. Deliberately narrow (just arrivals, not full field_work access) rather than expanding
+ *  canViewFieldWork broadly — HR gets to see who's on site, not full case-management access. */
+export async function listRecentArrivals({ dateFrom, dateTo, limit = 100 } = {}) {
+  await ensureFieldWorkTables();
+  const clauses = [`up.update_type = 'arrival'`];
+  const params = [];
+  if (dateFrom) { params.push(dateFrom); clauses.push(`up.created_at >= $${params.length}`); }
+  if (dateTo) { params.push(dateTo); clauses.push(`up.created_at <= $${params.length}`); }
+  params.push(Math.min(300, Math.max(1, Number(limit) || 100)));
+
+  const result = await pool.query(
+    `SELECT up.id, up.field_work_id, up.content, up.attachments, up.latitude, up.longitude,
+            up.distance_from_site_meters, up.created_at,
+            COALESCE(NULLIF(trim(concat_ws(' ', u.first_name, u.last_name)), ''), u.username) AS engineer_name,
+            fw.source_type, fw.source_id, fw.title AS field_work_title,
+            cs.site_name
+     FROM field_work_updates up
+     JOIN field_work fw ON fw.id = up.field_work_id
+     LEFT JOIN users u ON u.id = up.user_id
+     LEFT JOIN customer_sites cs ON cs.id = fw.site_id
+     WHERE ${clauses.join(' AND ')}
+     ORDER BY up.created_at DESC
+     LIMIT $${params.length}`,
+    params
+  );
+
+  return Promise.all(
+    result.rows.map(async (row) => ({
+      ...row,
+      source_reference: await sourceReferenceLabel(row.source_type, row.source_id),
+    }))
+  );
+}
+
 export async function getFieldWorkDetail(id) {
   await ensureFieldWorkTables();
   const fwResult = await pool.query(
-    `SELECT fw.*, cs.site_name, cs.site_address, cs.region AS site_region, c.contact_person AS client_name
+    `SELECT fw.*, cs.site_name, cs.site_address, cs.region AS site_region,
+            cs.latitude AS site_latitude, cs.longitude AS site_longitude,
+            c.contact_person AS client_name
      FROM field_work fw
      LEFT JOIN customer_sites cs ON cs.id = fw.site_id
      LEFT JOIN customers c ON c.id = fw.client_id
@@ -472,7 +513,7 @@ export async function updateFieldWorkStatus(fieldWorkId, status, actingUser) {
   return getFieldWorkDetail(fieldWorkId);
 }
 
-export async function postFieldWorkUpdate(fieldWorkId, actingUser, { updateType = 'note', content, progressPercentage, attachments = [] }) {
+export async function postFieldWorkUpdate(fieldWorkId, actingUser, { updateType = 'note', content, progressPercentage, attachments = [], latitude, longitude }) {
   await ensureFieldWorkTables();
   const fw = await pool.query(`SELECT * FROM field_work WHERE id = $1`, [fieldWorkId]);
   const fieldWork = fw.rows[0];
@@ -481,10 +522,37 @@ export async function postFieldWorkUpdate(fieldWorkId, actingUser, { updateType 
   if (!supervisor && !(await isAssignedEngineer(fieldWorkId, actingUser.id))) throw new Error('You are not assigned to this field work');
   const ref = await sourceReferenceLabel(fieldWork.source_type, fieldWork.source_id);
 
+  // Completing (departure) needs proof either way — GPS is the primary path, but a photo is an
+  // accepted fallback for when a device's location genuinely never resolves (how many attempts
+  // that took is a client-side UX concern; the server just needs one or the other).
+  if (updateType === 'departure' && !supervisor) {
+    const hasLocation = Number.isFinite(latitude) && Number.isFinite(longitude);
+    if (!hasLocation && !(attachments || []).length) {
+      throw new Error('Confirm your location or attach a photo to mark this complete');
+    }
+  }
+
+  // Arrivals carry the engineer's device coordinates — checked against the site's saved
+  // coordinates (if any) purely to surface a distance badge to supervisors/HR. Never blocks the
+  // check-in: GPS drift, gate distance, or a site with no coordinates yet shouldn't stop someone
+  // from confirming they're there.
+  const hasCoords = Number.isFinite(latitude) && Number.isFinite(longitude);
+  let distanceMeters = null;
+  if (hasCoords && fieldWork.site_id) {
+    const siteRes = await pool.query(`SELECT latitude, longitude FROM customer_sites WHERE id = $1`, [fieldWork.site_id]);
+    const site = siteRes.rows[0];
+    if (site && Number.isFinite(site.latitude) && Number.isFinite(site.longitude)) {
+      distanceMeters = haversineMeters({ lat: latitude, lng: longitude }, { lat: site.latitude, lng: site.longitude });
+    }
+  }
+
   const inserted = await pool.query(
-    `INSERT INTO field_work_updates (field_work_id, user_id, update_type, content, progress_percentage, attachments)
-     VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
-    [fieldWorkId, actingUser.id, updateType, content || null, progressPercentage ?? null, JSON.stringify(attachments || [])]
+    `INSERT INTO field_work_updates (field_work_id, user_id, update_type, content, progress_percentage, attachments, latitude, longitude, distance_from_site_meters)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
+    [
+      fieldWorkId, actingUser.id, updateType, content || null, progressPercentage ?? null, JSON.stringify(attachments || []),
+      hasCoords ? latitude : null, hasCoords ? longitude : null, distanceMeters,
+    ]
   );
 
   await logUserAction(actingUser, { actionType: 'field_work_update_posted', recordType: 'field_work', recordId: fieldWorkId, description: `You posted an update on field work ${ref}` });
@@ -496,6 +564,17 @@ export async function postFieldWorkUpdate(fieldWorkId, actingUser, { updateType 
       uploaderId: actingUser.id, uploaderName: actorBrief?.name || 'Field Engineer',
     }).catch(() => {});
     await logUserAction(actingUser, { actionType: 'field_work_file_uploaded', recordType: 'field_work', recordId: fieldWorkId, description: `You uploaded ${file.name} on field work ${ref}` });
+  }
+
+  // One button/one request does both: confirming arrival or completion also flips the
+  // engineer's own status (on_site / completed), reusing the exact same transition
+  // updateFieldWorkStatus already does for the status dropdown — no separate second call needed.
+  if (!supervisor) {
+    if (updateType === 'arrival') {
+      await updateFieldWorkStatus(fieldWorkId, 'on_site', actingUser).catch(() => {});
+    } else if (updateType === 'departure') {
+      await updateFieldWorkStatus(fieldWorkId, 'completed', actingUser).catch(() => {});
+    }
   }
 
   return inserted.rows[0];

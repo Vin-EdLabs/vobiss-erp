@@ -30,7 +30,7 @@ const requireNoc = (req, res, next) => canUseSchedule(req.user) ? next() : res.s
 const requireNocManager = (req, res, next) => canManageSchedule(req.user) ? next() : res.status(403).json({ error: 'Only NOC Managers or Supervisors can manage the shift schedule' });
 
 let tableReady = false;
-async function init() {
+export async function init() {
   if (tableReady) return;
   await pool.query(`
     CREATE TABLE IF NOT EXISTS noc_shift_definitions (

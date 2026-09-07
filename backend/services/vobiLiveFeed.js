@@ -31,6 +31,103 @@ export async function ensureVobiFeedTable() {
     CREATE INDEX IF NOT EXISTS vobi_feed_expires_idx ON vobi_feed(expires_at);
   `);
   tableReady = true;
+
+  // Reactions and "seen by" are engagement features layered on top of the feed, not required
+  // for the sweep itself — creating them is wrapped separately so a failure here (or on any
+  // later call) can never take down vobi_feed, which the 15-minute sweep genuinely depends on.
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS vobi_feed_reactions (
+        id SERIAL PRIMARY KEY,
+        feed_id INTEGER REFERENCES vobi_feed(id) ON DELETE CASCADE,
+        staff_id TEXT NOT NULL,
+        emoji TEXT NOT NULL,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        UNIQUE(feed_id, staff_id, emoji)
+      );
+      CREATE INDEX IF NOT EXISTS vobi_feed_reactions_feed_idx ON vobi_feed_reactions(feed_id);
+
+      CREATE TABLE IF NOT EXISTS vobi_feed_seen (
+        id SERIAL PRIMARY KEY,
+        feed_id INTEGER REFERENCES vobi_feed(id) ON DELETE CASCADE,
+        staff_id TEXT NOT NULL,
+        initials TEXT NOT NULL,
+        seen_at TIMESTAMPTZ DEFAULT NOW(),
+        UNIQUE(feed_id, staff_id)
+      );
+      CREATE INDEX IF NOT EXISTS vobi_feed_seen_feed_idx ON vobi_feed_seen(feed_id);
+    `);
+  } catch (e) {
+    console.warn('[vobi-live-feed] reactions/seen schema:', e.message);
+  }
+}
+
+/** Bulk-loads reactions + seen state for a set of feed ids and shapes each into the
+ *  { reactions: [{emoji,count,reacted_by_me}], seen: [{staff_id,initials}] } the frontend
+ *  renders directly — used by GET / and after mutations so every response has the same shape. */
+export async function attachFeedEngagement(rows, viewerStaffId) {
+  if (!rows.length) return rows;
+  const ids = rows.map((r) => r.id);
+
+  const [reactionsRes, seenRes] = await Promise.all([
+    pool.query(`SELECT feed_id, emoji, staff_id FROM vobi_feed_reactions WHERE feed_id = ANY($1::int[])`, [ids]).catch(() => ({ rows: [] })),
+    pool.query(`SELECT feed_id, staff_id, initials FROM vobi_feed_seen WHERE feed_id = ANY($1::int[]) ORDER BY seen_at ASC`, [ids]).catch(() => ({ rows: [] })),
+  ]);
+
+  const reactionsByFeed = new Map();
+  for (const r of reactionsRes.rows) {
+    if (!reactionsByFeed.has(r.feed_id)) reactionsByFeed.set(r.feed_id, new Map());
+    const byEmoji = reactionsByFeed.get(r.feed_id);
+    if (!byEmoji.has(r.emoji)) byEmoji.set(r.emoji, { emoji: r.emoji, count: 0, reacted_by_me: false });
+    const bucket = byEmoji.get(r.emoji);
+    bucket.count += 1;
+    if (String(r.staff_id) === String(viewerStaffId)) bucket.reacted_by_me = true;
+  }
+
+  const seenByFeed = new Map();
+  for (const s of seenRes.rows) {
+    if (!seenByFeed.has(s.feed_id)) seenByFeed.set(s.feed_id, []);
+    seenByFeed.get(s.feed_id).push({ staff_id: s.staff_id, initials: s.initials });
+  }
+
+  return rows.map((row) => ({
+    ...row,
+    reactions: [...(reactionsByFeed.get(row.id)?.values() || [])],
+    seen: seenByFeed.get(row.id) || [],
+  }));
+}
+
+/** Toggle one staff member's reaction on one feed entry — add if missing, remove if present.
+ *  Returns the emoji's new total count alongside which way it just moved. */
+export async function toggleFeedReaction(feedId, staffId, emoji) {
+  const existing = await pool.query(
+    `SELECT 1 FROM vobi_feed_reactions WHERE feed_id = $1 AND staff_id = $2 AND emoji = $3`,
+    [feedId, staffId, emoji]
+  );
+  let action;
+  if (existing.rowCount > 0) {
+    await pool.query(`DELETE FROM vobi_feed_reactions WHERE feed_id = $1 AND staff_id = $2 AND emoji = $3`, [feedId, staffId, emoji]);
+    action = 'remove';
+  } else {
+    await pool.query(
+      `INSERT INTO vobi_feed_reactions (feed_id, staff_id, emoji) VALUES ($1, $2, $3)
+       ON CONFLICT (feed_id, staff_id, emoji) DO NOTHING`,
+      [feedId, staffId, emoji]
+    );
+    action = 'add';
+  }
+  const countRes = await pool.query(`SELECT COUNT(*)::int AS count FROM vobi_feed_reactions WHERE feed_id = $1 AND emoji = $2`, [feedId, emoji]);
+  return { action, count: countRes.rows[0]?.count ?? 0 };
+}
+
+/** Records that one staff member has seen one feed entry — a no-op refresh if already recorded,
+ *  never affects any other staff member's own read state. */
+export async function recordFeedSeen(feedId, staffId, initials) {
+  await pool.query(
+    `INSERT INTO vobi_feed_seen (feed_id, staff_id, initials) VALUES ($1, $2, $3)
+     ON CONFLICT (feed_id, staff_id) DO UPDATE SET initials = EXCLUDED.initials, seen_at = NOW()`,
+    [feedId, staffId, initials]
+  );
 }
 
 /** Deletes rows past their expiry — called at the top of every sweep, and safe to call anytime. */
@@ -49,6 +146,27 @@ function fullName(row, prefix = '') {
 
 function minutesBetween(from, to = new Date()) {
   return Math.max(0, Math.round((new Date(to).getTime() - new Date(from).getTime()) / 60000));
+}
+
+/** A short, human "3 hrs ago" / "in 40 min" phrase — every date handed to the narration model
+ *  goes through this instead of a raw Date/ISO value, so it never has a reason (or the raw
+ *  material) to quote a literal timestamp like "2026-09-03T19:01:25.934Z" in the write-up. */
+function humanizeAgo(date) {
+  if (!date) return null;
+  const diffMs = Date.now() - new Date(date).getTime();
+  const isPast = diffMs >= 0;
+  const minutes = Math.round(Math.abs(diffMs) / 60000);
+  let phrase;
+  if (minutes < 1) return 'just now';
+  else if (minutes < 60) phrase = `${minutes} min`;
+  else if (minutes < 1440) {
+    const hours = Math.round(minutes / 60);
+    phrase = `${hours} hr${hours === 1 ? '' : 's'}`;
+  } else {
+    const days = Math.round(minutes / 1440);
+    phrase = `${days} day${days === 1 ? '' : 's'}`;
+  }
+  return isPast ? `${phrase} ago` : `in ${phrase}`;
 }
 
 /** Segments (open, in-progress work) from the shared timing engine, keyed for O(1) lookup by the callers below. */
@@ -108,14 +226,14 @@ async function gatherTickets(segments) {
       queue_unit: t.escalation_stage,
       assigned_to: fullName(t, 'assignee_'),
       open_for_minutes: minutesBetween(t.created_at),
-      latest_note: latestNote ? { message: latestNote.message, by: latestNote.actor_name, at: latestNote.created_at } : null,
+      latest_note: latestNote ? { message: latestNote.message, by: latestNote.actor_name, at: humanizeAgo(latestNote.created_at) } : null,
       escalated: !!escalation,
       escalation_reason: escalation ? escalation.message : null,
       escalated_by: escalation ? escalation.actor_name : null,
       sla_breach: Boolean(responseBreached || resolutionBreached),
       sla_breach_kind: resolutionBreached ? 'resolution' : responseBreached ? 'response' : null,
-      response_due_at: t.response_due_at,
-      resolution_due_at: t.resolution_due_at,
+      response_due: humanizeAgo(t.response_due_at),
+      resolution_due: humanizeAgo(t.resolution_due_at),
       elapsed_minutes: seg?.elapsedMinutes ?? null,
       timing_sla_status: seg?.slaStatus ?? null,
       record_ref: { type: 'ticket', id: t.id },
@@ -235,7 +353,10 @@ async function gatherApprovals(segments) {
       type: r.type,
       requester_full_name: r.created_by,
       department_unit: resolveDepartment(r.department, r.user_department, r.user_unit),
-      amount: r.total_amount != null ? Number(r.total_amount) : null,
+      // Cash request amounts are financial data and never leave this feed — withheld here
+      // (not just asked-nicely of the model) so there's nothing for the narration to leak.
+      // Authorized users still see the real amount on the request's own page.
+      amount: r.type === 'cash_request' ? null : (r.total_amount != null ? Number(r.total_amount) : null),
       purpose: r.purpose,
       approval_stage: r.status,
       pending_on: approverInfo?.pending || [],
@@ -365,7 +486,8 @@ async function gatherSinceLastUpdate(lastSweepAt) {
     requests_completed: requestsCompleted.rows.map((r) => ({
       type: r.type,
       requester_full_name: r.created_by,
-      amount: r.total_amount != null ? Number(r.total_amount) : null,
+      // Same withholding as gatherApprovals — cash amounts never reach the narration.
+      amount: r.type === 'cash_request' ? null : (r.total_amount != null ? Number(r.total_amount) : null),
     })),
     service_requests_completed: srCompleted.rows.map((pr) => ({
       sr_number: `SR-${String(pr.id).padStart(4, '0')}`,
@@ -421,10 +543,12 @@ This post will be read by all staff across the company.
 RULES:
 - Write in clear, direct, human English — short flowing paragraphs by section, not a system log.
 - Always use real names, ticket numbers, and amounts. Never say "a user" or "someone."
+- NEVER quote a raw timestamp (anything like "2026-09-03T19:01:25.934Z" or "2026-09-03 19:01:25"). Every date-ish value in the DATA below is already given to you as a short phrase (e.g. "3 hrs ago," "in 40 min") for exactly this reason — always use that phrase as-is, never the underlying value it was computed from.
+- GLOBAL EXCEPTION — cash requests (type "cash_request"), anywhere they appear in this update (approvals, since-last-update, anywhere): NEVER state, estimate, or imply the amount. Its "amount" field is intentionally left out of the data below — do not describe it as "an amount," "a sum," "undisclosed," or anything else that hints a figure exists; just don't mention money at all for these. Everyone should still know the work is happening; only authorized users see the real amount on the request's own page. Cover the requester's name, department, and stage/wait time exactly as you would for any other approval, styled like: "💰 **Cash Request** • Finance — **Sarah** submitted a cash request; awaiting Finance approval." or, once it has moved: "🟡 **Finance Update** — A cash request from **Sarah** has moved to the Finance Manager for review." A completed cash request in SINCE LAST UPDATE gets the same treatment, e.g.: "A cash request from **Sarah** was completed."
 - For every ticket you mention: include its description, latest note or update, who holds it, and who it is assigned to.
 - For escalated tickets: include the escalation reason word-for-word if available, who escalated it, and how long it has been at the current escalation level.
 - Call out SLA breaches explicitly — state the ticket or request name, how many hours it is overdue, and who currently owns it. Use the phrase "SLA BREACH" clearly.
-- For approvals: always state the full name of the requester, their department, the amount, and exactly how long it has been waiting. Name exactly who it is pending on right now (from pending_on) — if only one person, name that person directly; if someone has already approved (already_approved_by), say so and name them as done.
+- For approvals: always state the full name of the requester, their department, the amount, and exactly how long it has been waiting (cash requests excepted — see above). Name exactly who it is pending on right now (from pending_on) — if only one person, name that person directly; if someone has already approved (already_approved_by), say so and name them as done.
 - NEVER invent, assume, or default a department — every department/unit named in the DATA below is the real, on-file value. If a record's department_unit is null, that person has no department on file: say their name only and leave the department out of the sentence entirely. Do not write "General," "Unassigned," "an unspecified department," or any other placeholder for a missing department.
 - For service requests: state the assigned unit, and if assigned_person is set, name that specific individual as the one actually working it (not just the unit).
 - If a stalled ticket is connected to a stalled request or another record, point that out — explain the connection.
@@ -463,7 +587,10 @@ export async function runVobiFeedSweep() {
     );
     const feedEntry = inserted.rows[0];
 
-    emitToStaff('vobi:feed-update', feedEntry);
+    // Empty reactions/seen — a brand-new entry naturally has neither yet — keeps this event's
+    // shape identical to what GET /api/vobi-feed returns, so the frontend can treat both the
+    // same way instead of special-casing a freshly-arrived card.
+    emitToStaff('vobi:feed-update', { ...feedEntry, reactions: [], seen: [] });
     console.log(`[vobi-live-feed] sweep complete — feed #${feedEntry.id} saved and broadcast`);
     return feedEntry;
   } catch (error) {

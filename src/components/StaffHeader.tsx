@@ -78,6 +78,20 @@ function formatUserAttribute(value?: string | null) {
     .join(' ');
 }
 
+/** Strips the feed's Markdown down to a plain first line/summary for the toast preview —
+ *  the full formatted card only needs to render inside the panel itself. */
+function summarizeOpsUpdate(markdown: string, max = 100): string {
+  const plain = String(markdown || '')
+    .replace(/^#{1,6}\s+/gm, '')
+    .replace(/\*\*(.+?)\*\*/g, '$1')
+    .replace(/[*_`]/g, '')
+    .replace(/^[-*]\s+/gm, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (plain.length <= max) return plain;
+  return `${plain.slice(0, max - 1).trimEnd()}…`;
+}
+
 function isAdminSuperAccount(user: any) {
   const role = String(user?.main_role || user?.role || '').trim().toLowerCase();
   const username = String(user?.username || '').trim().toLowerCase();
@@ -123,6 +137,8 @@ const StaffHeader: React.FC<StaffHeaderProps> = ({
   const [liveOpsOpen, setLiveOpsOpen] = useState(false);
   const [liveOpsUnread, setLiveOpsUnread] = useState(0);
   const [liveOpsSeverity, setLiveOpsSeverity] = useState<'green' | 'amber' | 'red'>('green');
+  const [liveOpsToast, setLiveOpsToast] = useState<string | null>(null);
+  const liveOpsToastTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
   const [accountOpen, setAccountOpen] = useState(false);
   const [manualOpen, setManualOpen] = useState(false);
   const [manualTime, setManualTime] = useState(() => {
@@ -229,15 +245,26 @@ const StaffHeader: React.FC<StaffHeaderProps> = ({
       const detail = (e as CustomEvent<{ narrated_text?: string }>).detail;
       if (!detail?.narrated_text) return;
       setLiveOpsSeverity(liveOpsSeverityFor(detail.narrated_text));
-      if (!liveOpsOpen) setLiveOpsUnread((prev) => prev + 1);
+      if (!liveOpsOpen) {
+        setLiveOpsUnread((prev) => prev + 1);
+        setLiveOpsToast(summarizeOpsUpdate(detail.narrated_text));
+        if (liveOpsToastTimerRef.current) window.clearTimeout(liveOpsToastTimerRef.current);
+        liveOpsToastTimerRef.current = window.setTimeout(() => setLiveOpsToast(null), 8000);
+      }
     };
     window.addEventListener('vobi:feed-update', onFeedUpdate);
     return () => window.removeEventListener('vobi:feed-update', onFeedUpdate);
   }, [liveOpsOpen]);
 
+  useEffect(() => () => {
+    if (liveOpsToastTimerRef.current) window.clearTimeout(liveOpsToastTimerRef.current);
+  }, []);
+
   const openLiveOps = () => {
     setLiveOpsOpen(true);
     setLiveOpsUnread(0);
+    setLiveOpsToast(null);
+    if (liveOpsToastTimerRef.current) window.clearTimeout(liveOpsToastTimerRef.current);
   };
 
   const liveOpsDotClass =
@@ -384,24 +411,58 @@ const StaffHeader: React.FC<StaffHeaderProps> = ({
             <BellOff className="h-[17px] w-[17px]" />
           </button>
         )}
-        <button
-          type="button"
-          onClick={openLiveOps}
-          className={cn(iconBtn, 'relative')}
-          aria-label="Live Ops"
-          title="Vobi Live Ops Feed"
-        >
-          <RadioTower className="h-[17px] w-[17px]" />
-          <span
-            className={cn('absolute right-0.5 top-0.5 h-2 w-2 animate-pulse rounded-full ring-2 ring-[var(--topbar-bg)]', liveOpsDotClass)}
-            aria-hidden="true"
-          />
-          {liveOpsUnread > 0 && (
-            <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-[var(--accent-red)] px-1 text-[9px] font-bold text-white">
-              {liveOpsUnread > 9 ? '9+' : liveOpsUnread}
-            </span>
+        <div className="relative">
+          <button
+            type="button"
+            onClick={openLiveOps}
+            className={cn(iconBtn, 'relative')}
+            aria-label="Live Ops"
+            title="Vobi Live Ops Feed"
+          >
+            <RadioTower className="h-[17px] w-[17px]" />
+            <span
+              className={cn('absolute right-0.5 top-0.5 h-2 w-2 animate-pulse rounded-full ring-2 ring-[var(--topbar-bg)]', liveOpsDotClass)}
+              aria-hidden="true"
+            />
+            {liveOpsUnread > 0 && (
+              <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-[var(--accent-red)] px-1 text-[9px] font-bold text-white">
+                {liveOpsUnread > 9 ? '9+' : liveOpsUnread}
+              </span>
+            )}
+          </button>
+          {liveOpsToast && (
+            <div
+              role="alert"
+              className="animate-in fade-in-0 zoom-in-95 slide-in-from-top-2 absolute right-0 top-full z-[95] mt-2 w-72 max-w-[85vw] overflow-hidden rounded-2xl border border-cyan-400/20 bg-[#0d1526] shadow-2xl ring-1 ring-white/5 duration-200"
+            >
+              <div className="flex items-start gap-2.5 p-3">
+                <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-cyan-400/15 text-cyan-300 ring-1 ring-cyan-400/30">
+                  <RadioTower className="h-3.5 w-3.5" />
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="text-[11px] font-bold uppercase tracking-wide text-cyan-300/90">New Ops Update</p>
+                  <p className="mt-0.5 line-clamp-2 text-xs leading-snug text-slate-300">{liveOpsToast}</p>
+                  <div className="mt-2 flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={openLiveOps}
+                      className="rounded-full bg-cyan-400/15 px-2.5 py-1 text-[11px] font-semibold text-cyan-200 transition hover:bg-cyan-400/25"
+                    >
+                      View
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setLiveOpsToast(null)}
+                      className="rounded-full px-2 py-1 text-[11px] font-medium text-slate-500 transition hover:text-slate-300"
+                    >
+                      Dismiss
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
           )}
-        </button>
+        </div>
         <Popover open={notifOpen} onOpenChange={setNotifOpen}>
           <PopoverTrigger asChild>
             <button type="button" className={cn(iconBtn, 'relative')} aria-label="Notifications">

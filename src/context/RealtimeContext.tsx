@@ -419,12 +419,20 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
     const onVobiFeedUpdate = (payload: unknown) => {
       window.dispatchEvent(new CustomEvent('vobi:feed-update', { detail: payload }));
     };
+    const onVobiReactionUpdate = (payload: unknown) => {
+      window.dispatchEvent(new CustomEvent('vobi:reaction-update', { detail: payload }));
+    };
+    const onVobiSeenUpdate = (payload: unknown) => {
+      window.dispatchEvent(new CustomEvent('vobi:seen-update', { detail: payload }));
+    };
 
     socket.on('connect', onConnect);
     socket.on('disconnect', onDisconnect);
     socket.on(CHANNEL, onPayload);
     socket.on('new_message', onNewMessage);
     socket.on('vobi:feed-update', onVobiFeedUpdate);
+    socket.on('vobi:reaction-update', onVobiReactionUpdate);
+    socket.on('vobi:seen-update', onVobiSeenUpdate);
 
     return () => {
       socket.off('connect', onConnect);
@@ -432,6 +440,8 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
       socket.off(CHANNEL, onPayload);
       socket.off('new_message', onNewMessage);
       socket.off('vobi:feed-update', onVobiFeedUpdate);
+      socket.off('vobi:reaction-update', onVobiReactionUpdate);
+      socket.off('vobi:seen-update', onVobiSeenUpdate);
       socket.disconnect();
       if (socketRef.current === socket) socketRef.current = null;
     };

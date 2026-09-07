@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import {
   Wrench, MapPin, Building2, Clock, UserPlus, UserMinus, Star, Send, Paperclip,
   CheckCircle2, ShieldCheck, Users, Package, Truck, Fuel, Car, ExternalLink, Download,
+  Navigation, Camera, X, CheckCheck, LocateFixed, RefreshCw, ImageUp,
 } from 'lucide-react';
 import { fileIconFor } from '@/components/archive/shared';
 import { Button } from '@/components/ui/button';
@@ -12,6 +13,14 @@ import { StatusPill } from '@/components/ui/status-pill';
 import { Progress } from '@/components/ui/progress';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import {
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogDescription,
+  AlertDialogFooter,
+} from '@/components/ui/alert-dialog';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/context/AuthContext';
 import { userHasAnyRole } from '@/config/roles';
@@ -56,6 +65,21 @@ export function FieldWorkPanel({
   const [posting, setPosting] = useState(false);
   const [addingEngineer, setAddingEngineer] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Confirm I'm here / Mark My Work Complete share one dialog and one rule: if the site has
+  // saved coordinates, GPS is how you confirm — compared against those coordinates. If the site
+  // has none, there's nothing to compare against, so a photo is required instead, straight away
+  // (no point making someone sit through GPS attempts that could never be verified anyway). A
+  // photo is also the fallback if the device's own GPS genuinely won't resolve.
+  const MAX_GPS_ATTEMPTS = 3;
+  const [confirmAction, setConfirmAction] = useState<'arrival' | 'departure' | null>(null);
+  const [confirmStage, setConfirmStage] = useState<'locating' | 'retry' | 'photo' | 'ready'>('locating');
+  const [confirmAttempts, setConfirmAttempts] = useState(0);
+  const [confirmCoords, setConfirmCoords] = useState<{ lat: number; lng: number } | null>(null);
+  const [confirmPhoto, setConfirmPhoto] = useState<File | null>(null);
+  const [confirmBusy, setConfirmBusy] = useState(false);
+  const [photoReason, setPhotoReason] = useState<'no-site-coords' | 'gps-failed'>('gps-failed');
+  const confirmPhotoRef = useRef<HTMLInputElement>(null);
 
   const isSupervisor = userHasAnyRole(user, SUPERVISOR_ROLES);
   const isNoc = userHasAnyRole(user, NOC_ROLES);
@@ -114,6 +138,71 @@ export function FieldWorkPanel({
       toast({ title: `Status updated to ${ENGINEER_STATUS_LABELS[status]}` });
       load();
     } catch (e) { toast({ title: 'Could not update status', description: e instanceof Error ? e.message : undefined, variant: 'destructive' }); }
+  };
+
+  const siteHasCoords = detail?.site_latitude != null && detail?.site_longitude != null;
+
+  const openConfirmDialog = (action: 'arrival' | 'departure') => {
+    setConfirmAction(action);
+    setConfirmAttempts(0);
+    setConfirmCoords(null);
+    setConfirmPhoto(null);
+    if (siteHasCoords) {
+      setConfirmStage('locating');
+      tryLocate(0);
+    } else {
+      setPhotoReason('no-site-coords');
+      setConfirmStage('photo');
+    }
+  };
+
+  const tryLocate = (attemptIndex: number) => {
+    if (!navigator.geolocation) {
+      setPhotoReason('gps-failed');
+      setConfirmStage('photo');
+      return;
+    }
+    setConfirmStage('locating');
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        setConfirmCoords({ lat: position.coords.latitude, lng: position.coords.longitude });
+        setConfirmStage('ready');
+      },
+      () => {
+        const nextAttempt = attemptIndex + 1;
+        setConfirmAttempts(nextAttempt);
+        if (nextAttempt >= MAX_GPS_ATTEMPTS) {
+          setPhotoReason('gps-failed');
+          setConfirmStage('photo');
+        } else {
+          setConfirmStage('retry');
+        }
+      },
+      { enableHighAccuracy: true, timeout: 15000 }
+    );
+  };
+
+  const submitConfirm = async () => {
+    if (!confirmAction || (!confirmCoords && !confirmPhoto)) return;
+    try {
+      setConfirmBusy(true);
+      await postFieldWorkUpdate(detail.id, {
+        update_type: confirmAction,
+        latitude: confirmCoords?.lat,
+        longitude: confirmCoords?.lng,
+        files: confirmPhoto ? [confirmPhoto] : [],
+      });
+      toast({
+        title: confirmAction === 'arrival' ? "You're checked in" : 'Work marked complete',
+        description: confirmAction === 'arrival' ? 'Marked on site and linked to this job.' : 'Sent for NOC confirmation.',
+      });
+      setConfirmAction(null);
+      load();
+    } catch (e) {
+      toast({ title: 'Could not confirm', description: e instanceof Error ? e.message : undefined, variant: 'destructive' });
+    } finally {
+      setConfirmBusy(false);
+    }
   };
 
   const submitUpdate = async () => {
@@ -216,9 +305,18 @@ export function FieldWorkPanel({
           <Select value={detail.engineers.find((e) => e.user_id === user?.id)?.status} onValueChange={(v) => setMyStatus(v as EngineerStatus)}>
             <SelectTrigger className="w-40"><SelectValue /></SelectTrigger>
             <SelectContent>
-              {(['assigned', 'travelling', 'on_site', 'completed'] as EngineerStatus[]).map((s) => <SelectItem key={s} value={s}>{ENGINEER_STATUS_LABELS[s]}</SelectItem>)}
+              {/* on_site / completed are deliberately NOT selectable here — both require GPS (or
+                  a photo fallback) via the "Confirm I'm here" / "Mark My Work Complete" flows
+                  below. Letting either be picked directly from this dropdown would bypass that
+                  verification entirely. */}
+              {(['assigned', 'travelling'] as EngineerStatus[]).map((s) => <SelectItem key={s} value={s}>{ENGINEER_STATUS_LABELS[s]}</SelectItem>)}
             </SelectContent>
           </Select>
+          {!['on_site', 'completed'].includes(detail.engineers.find((e) => e.user_id === user?.id)?.status || '') && (
+            <Button type="button" size="sm" onClick={() => openConfirmDialog('arrival')} className="bg-[var(--success-text)] text-white hover:opacity-90">
+              <Navigation className="mr-1 h-3.5 w-3.5" /> Confirm I'm here
+            </Button>
+          )}
           <div className="ml-auto flex flex-wrap gap-2">
             <Button type="button" size="sm" variant="outline" onClick={() => goRequest('/request-forms')}><Package className="mr-1 h-3.5 w-3.5" /> Materials</Button>
             <Button type="button" size="sm" variant="outline" onClick={() => goRequest('/transport-request')}><Truck className="mr-1 h-3.5 w-3.5" /> Transport</Button>
@@ -244,10 +342,40 @@ export function FieldWorkPanel({
         <div className="mb-4 space-y-2">
           {detail.updates.map((u) => (
             <div key={u.id} className="rounded-lg border border-[var(--border)] px-3 py-2 text-sm">
-              <div className="flex items-center justify-between">
-                <span className="font-medium text-[var(--text-primary)]">{u.full_name || 'System'}</span>
+              <div className="flex flex-wrap items-center justify-between gap-1">
+                <span className="flex items-center gap-1.5 font-medium text-[var(--text-primary)]">
+                  {u.full_name || 'System'}
+                  {u.update_type === 'arrival' && (
+                    <span className="flex items-center gap-1 rounded-full bg-[var(--accent-green-light)] px-2 py-0.5 text-[10px] font-semibold text-[var(--success-text)]">
+                      <Navigation className="h-2.5 w-2.5" /> Checked in
+                    </span>
+                  )}
+                  {u.update_type === 'departure' && (
+                    <span className="flex items-center gap-1 rounded-full bg-[var(--accent-blue-light)] px-2 py-0.5 text-[10px] font-semibold text-[var(--info-text)]">
+                      <CheckCheck className="h-2.5 w-2.5" /> Marked complete
+                    </span>
+                  )}
+                </span>
                 <span className="text-xs text-[var(--text-muted)]">{new Date(u.created_at).toLocaleString()}</span>
               </div>
+              {(u.update_type === 'arrival' || u.update_type === 'departure') && u.latitude != null && (
+                <p
+                  className={`mt-1 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                    u.distance_from_site_meters == null
+                      ? 'bg-[var(--surface-secondary)] text-[var(--text-muted)]'
+                      : u.distance_from_site_meters <= 150
+                        ? 'bg-[var(--accent-green-light)] text-[var(--success-text)]'
+                        : 'bg-[var(--accent-amber-light)] text-[var(--accent-amber)]'
+                  }`}
+                >
+                  <MapPin className="h-2.5 w-2.5" />
+                  {u.distance_from_site_meters == null
+                    ? 'Site has no saved coordinates to verify against'
+                    : u.distance_from_site_meters <= 150
+                      ? `Verified — ${u.distance_from_site_meters}m from site`
+                      : `${u.distance_from_site_meters}m from site — unusually far`}
+                </p>
+              )}
               {u.content && <p className="mt-0.5 text-[var(--text-secondary)]">{u.content}</p>}
               {u.progress_percentage != null && <p className="mt-0.5 text-xs text-[var(--text-muted)]">Progress: {u.progress_percentage}%</p>}
               {u.attachments.length > 0 && (
@@ -279,7 +407,7 @@ export function FieldWorkPanel({
       )}
 
       {isEngineer && !isSupervisor && detail.status !== 'completed' && !['noc_confirmed', 'client_confirmed', 'closed'].includes(detail.status) && (
-        <Button type="button" className="mb-4 w-full" onClick={() => setMyStatus('completed')}><CheckCircle2 className="mr-1.5 h-4 w-4" /> Mark My Work Complete</Button>
+        <Button type="button" className="mb-4 w-full" onClick={() => openConfirmDialog('departure')}><CheckCircle2 className="mr-1.5 h-4 w-4" /> Mark My Work Complete</Button>
       )}
 
       {isNoc && detail.status === 'completed' && (
@@ -308,6 +436,89 @@ export function FieldWorkPanel({
         open={addingEngineer} onClose={() => setAddingEngineer(false)} sourceType={detail.source_type} sourceId={detail.source_id}
         onCreated={load}
       />
+
+      <AlertDialog open={!!confirmAction} onOpenChange={(open) => !open && !confirmBusy && setConfirmAction(null)}>
+        <AlertDialogContent className="max-w-sm rounded-2xl">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <CheckCircle2 className="h-5 w-5 text-[var(--success-text)]" />
+              {confirmAction === 'arrival' ? "Confirm you're here" : 'Confirm work complete'}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {confirmStage === 'locating' && 'Checking your location…'}
+              {confirmStage === 'retry' && `Couldn't get your location (attempt ${confirmAttempts} of ${MAX_GPS_ATTEMPTS}).`}
+              {confirmStage === 'photo' && photoReason === 'no-site-coords' &&
+                "This site doesn't have saved coordinates yet, so a photo is needed instead — something that shows where you are, like a digital address app or a clear shot of the site."}
+              {confirmStage === 'photo' && photoReason === 'gps-failed' &&
+                `Still couldn't get your location after ${MAX_GPS_ATTEMPTS} tries. Upload a photo instead to continue.`}
+              {confirmStage === 'ready' && 'Location confirmed. You can add a photo too, then confirm.'}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+
+          <div className="py-2">
+            {confirmStage === 'locating' && (
+              <div className="flex flex-col items-center gap-3 py-6">
+                <LocateFixed className="h-10 w-10 animate-pulse text-[var(--primary)]" />
+                <p className="text-sm text-[var(--text-muted)]">Getting your location…</p>
+              </div>
+            )}
+
+            {confirmStage === 'retry' && (
+              <div className="flex flex-col items-center gap-3 py-4">
+                <div className="flex gap-1.5">
+                  {Array.from({ length: MAX_GPS_ATTEMPTS }).map((_, i) => (
+                    <span key={i} className={`h-2 w-8 rounded-full ${i < confirmAttempts ? 'bg-[var(--accent-amber)]' : 'bg-[var(--surface-secondary)]'}`} />
+                  ))}
+                </div>
+                <Button type="button" variant="outline" onClick={() => tryLocate(confirmAttempts)}>
+                  <RefreshCw className="mr-1.5 h-3.5 w-3.5" /> Try again
+                </Button>
+              </div>
+            )}
+
+            {(confirmStage === 'photo' || confirmStage === 'ready') && (
+              <div className="space-y-3">
+                {confirmStage === 'ready' && (
+                  <p className="flex items-center gap-1.5 rounded-full bg-[var(--accent-green-light)] px-3 py-1.5 text-xs font-semibold text-[var(--success-text)] w-fit">
+                    <MapPin className="h-3.5 w-3.5" /> Location captured
+                  </p>
+                )}
+                <input ref={confirmPhotoRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => setConfirmPhoto(e.target.files?.[0] || null)} />
+                <button
+                  type="button"
+                  onClick={() => confirmPhotoRef.current?.click()}
+                  className="flex w-full items-center justify-center gap-2 rounded-xl border-2 border-dashed border-[var(--border-strong)] bg-[var(--surface-secondary)] px-4 py-6 text-sm font-medium text-[var(--text-secondary)] hover:border-[var(--primary)] hover:text-[var(--primary)]"
+                >
+                  {confirmPhoto ? <Camera className="h-5 w-5" /> : <ImageUp className="h-5 w-5" />}
+                  {confirmPhoto ? confirmPhoto.name : confirmStage === 'photo' ? 'Upload photo (required)' : 'Add photo (optional)'}
+                </button>
+                {confirmPhoto && (
+                  <button type="button" onClick={() => setConfirmPhoto(null)} className="mx-auto flex items-center gap-1 text-xs text-[var(--text-muted)] hover:text-[var(--danger-text)]">
+                    <X className="h-3 w-3" /> Remove photo
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+
+          <AlertDialogFooter className="flex-col gap-2 sm:flex-row">
+            <Button type="button" variant="ghost" className="w-full sm:w-auto" disabled={confirmBusy} onClick={() => setConfirmAction(null)}>
+              Cancel
+            </Button>
+            {(confirmStage === 'photo' || confirmStage === 'ready') && (
+              <Button
+                type="button"
+                className="w-full bg-[var(--success-text)] text-white hover:opacity-90 sm:w-auto"
+                disabled={confirmBusy || (confirmStage === 'photo' && !confirmPhoto)}
+                onClick={submitConfirm}
+              >
+                <CheckCheck className="mr-1.5 h-4 w-4" />
+                {confirmBusy ? 'Submitting…' : confirmAction === 'arrival' ? "I'm here" : 'Confirm Complete'}
+              </Button>
+            )}
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

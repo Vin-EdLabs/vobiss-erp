@@ -5,7 +5,7 @@ import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
 import pool from '../db.js';
-import { authenticateToken } from '../middleware/auth.js';
+import { authenticateToken, isHrOrExecutive } from '../middleware/auth.js';
 import {
   ensureFieldWorkTables,
   isFieldWorkSupervisor,
@@ -14,6 +14,7 @@ import {
   canViewFieldWork,
   createFieldWork,
   listFieldWork,
+  listRecentArrivals,
   getFieldWorkDetail,
   addEngineers,
   removeEngineer,
@@ -101,6 +102,19 @@ router.get('/supervisor-view', requireSupervisor, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// GET /api/field-work/arrivals — recent "Confirm I'm here" check-ins, for TX supervisors/managers
+// and HR. Narrower than supervisor-view: just arrival check-ins (who, where, distance, photo),
+// not full field-work case access.
+router.get('/arrivals', async (req, res) => {
+  try {
+    if (!isFieldWorkSupervisor(req.user) && !isNocConfirmer(req.user) && !isHrOrExecutive(req.user)) {
+      return res.status(403).json({ error: 'Not authorized to view field arrivals' });
+    }
+    const rows = await listRecentArrivals({ dateFrom: req.query.dateFrom, dateTo: req.query.dateTo, limit: req.query.limit });
+    res.json(rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // GET /api/field-work/sites?q= — searchable site picker for the assignment form.
 router.get('/sites', async (req, res) => {
   try {
@@ -108,7 +122,7 @@ router.get('/sites', async (req, res) => {
     const params = [];
     let where = '';
     if (q) { params.push(`%${q}%`); where = `WHERE site_name ILIKE $1 OR site_address ILIKE $1`; }
-    const rows = await pool.query(`SELECT id, site_name, site_address, region, customer_id FROM customer_sites ${where} ORDER BY site_name LIMIT 20`, params);
+    const rows = await pool.query(`SELECT id, site_name, site_address, region, customer_id, latitude, longitude FROM customer_sites ${where} ORDER BY site_name LIMIT 20`, params);
     res.json(rows.rows);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -152,10 +166,21 @@ router.get('/:id', async (req, res) => {
 });
 
 // PATCH /api/field-work/:id/status — engineers update their own status, supervisors update any status.
+// on_site/completed are deliberately refused here for a plain engineer — both are mandatory-GPS
+// (or photo-fallback) transitions, only reachable through POST /:id/updates with
+// update_type 'arrival'/'departure' (see postFieldWorkUpdate), which is the one place that
+// validation actually runs. Without this guard, this route was a direct, unverified bypass.
 router.patch('/:id/status', async (req, res) => {
   try {
     const status = String(req.body?.status || '').trim();
     if (!status) return res.status(400).json({ error: 'status is required' });
+    if (['on_site', 'completed'].includes(status) && !isFieldWorkSupervisor(req.user)) {
+      return res.status(400).json({
+        error: status === 'on_site'
+          ? 'Use "Confirm I\'m here" to go on site — it requires your location.'
+          : 'Use "Mark My Work Complete" to close this out — it requires your location or a photo.',
+      });
+    }
     const updated = await updateFieldWorkStatus(Number(req.params.id), status, req.user);
     res.json(updated);
   } catch (e) { res.status(400).json({ error: e.message }); }
@@ -183,10 +208,13 @@ router.post('/:id/updates', upload.array('files', 10), async (req, res) => {
     const files = (req.files || []).map((f) => ({
       path: `/uploads/field-work/${f.filename}`, name: f.originalname, mime_type: f.mimetype,
     }));
+    const lat = req.body?.latitude != null && req.body.latitude !== '' ? Number(req.body.latitude) : undefined;
+    const lng = req.body?.longitude != null && req.body.longitude !== '' ? Number(req.body.longitude) : undefined;
     const update = await postFieldWorkUpdate(Number(req.params.id), req.user, {
       updateType: req.body?.update_type, content: req.body?.content,
       progressPercentage: req.body?.progress_percentage != null && req.body.progress_percentage !== '' ? Number(req.body.progress_percentage) : null,
       attachments: files,
+      latitude: lat, longitude: lng,
     });
     res.status(201).json(update);
   } catch (e) { res.status(400).json({ error: e.message }); }

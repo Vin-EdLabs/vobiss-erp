@@ -802,7 +802,7 @@ const catalogue = [
   ['Server', '24Online Server']
 ];
 
-async function init() {
+export async function init() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS regions(id SERIAL PRIMARY KEY,name TEXT UNIQUE NOT NULL);
     CREATE TABLE IF NOT EXISTS territories(id SERIAL PRIMARY KEY,name TEXT UNIQUE NOT NULL);

@@ -43,7 +43,7 @@ router.get('/:id', authenticateOrShareToken('incident_note', requireNocAuth), as
 
 router.use(authenticateToken);
 
-async function init() {
+export async function init() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS noc_incident_notes (
       id SERIAL PRIMARY KEY, note_date DATE NOT NULL DEFAULT CURRENT_DATE,

@@ -1,6 +1,6 @@
 import pool from '../db.js';
 
-async function ensureTodosTable() {
+export async function ensureTodosTable() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS user_todos (
       id SERIAL PRIMARY KEY,

@@ -79,7 +79,7 @@ const router = express.Router();
 router.use(authenticateToken);
 router.use(invalidateOnMutation);
 
-async function ensurePinTableReady() {
+export async function ensurePinTableReady() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS message_pins (
       message_id UUID PRIMARY KEY REFERENCES chat_messages(id) ON DELETE CASCADE,
@@ -172,7 +172,7 @@ async function unpinMessageForUser({ messageId, channelId, dmId, userId }) {
   throw err;
 }
 
-async function ensureMessageDeletionTableReady() {
+export async function ensureMessageDeletionTableReady() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS chat_message_deletions (
       message_id UUID NOT NULL REFERENCES chat_messages(id) ON DELETE CASCADE,

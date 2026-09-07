@@ -1,12 +1,24 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { AnimatePresence, motion } from 'framer-motion';
 import { formatDistanceToNow } from 'date-fns';
 import { Bot, RadioTower, RefreshCw, ShieldCheck, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { getVobiFeed, type VobiFeedEntry } from '@/api/vobiFeed';
+import { useAuth } from '@/context/AuthContext';
+import {
+  getVobiFeed,
+  reactToFeed,
+  markFeedSeen,
+  type VobiFeedEntry,
+  type VobiFeedReaction,
+  type VobiFeedSeenBy,
+} from '@/api/vobiFeed';
 import { VobiMessage } from '@/components/vobi/VobiMessage';
 import { useVobiLiveOpsStore } from '@/stores/vobiLiveOpsStore';
 
 const SWEEP_INTERVAL_MINUTES = 15;
+const MAX_ENTRIES = 3;
+const REACTION_EMOJIS = ['✅', '👀', '🔥', '⚠️', '💪', '😬'];
+const SEEN_AVATAR_CAP = 6;
 
 /** A faint grain layer keeps the gradients below from banding and gives the panel a tactile,
  *  premium-dashboard feel instead of looking flat-printed. Same trick most modern SaaS surfaces
@@ -20,18 +32,176 @@ function cardAccentClass(text: string): string {
   return 'border-l-[3px] border-l-[var(--accent-blue)]';
 }
 
+/** Relative timestamps ("2 min ago") go stale the moment they're rendered if nothing ever
+ *  re-renders the component again — this just ticks every 30s so a card left open for a while
+ *  keeps counting up instead of freezing at whatever it said when it first arrived. */
+function useTicker(intervalMs = 30000) {
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const id = window.setInterval(() => setTick((t) => t + 1), intervalMs);
+    return () => window.clearInterval(id);
+  }, [intervalMs]);
+}
+
 function minutesUntilNextSweep(latest: VobiFeedEntry | undefined): number {
   if (!latest) return SWEEP_INTERVAL_MINUTES;
   const nextSweepAt = new Date(latest.created_at).getTime() + SWEEP_INTERVAL_MINUTES * 60 * 1000;
   return Math.max(0, Math.round((nextSweepAt - Date.now()) / 60000));
 }
 
+/** Reaction updates arrive from the API response (my own click) and from other staff's clicks
+ *  via the socket — both funnel through this one reducer so the two paths can never disagree. */
+function applyReactionUpdate(
+  entries: VobiFeedEntry[],
+  payload: { feedId: number; emoji: string; count: number; staffId: string; action: 'add' | 'remove' },
+  myStaffId: string
+): VobiFeedEntry[] {
+  return entries.map((entry) => {
+    if (entry.id !== payload.feedId) return entry;
+    const others = entry.reactions.filter((r) => r.emoji !== payload.emoji);
+    if (payload.count <= 0) return { ...entry, reactions: others };
+    const previous = entry.reactions.find((r) => r.emoji === payload.emoji);
+    const reactedByMe = payload.staffId === myStaffId ? payload.action === 'add' : (previous?.reacted_by_me ?? false);
+    return { ...entry, reactions: [...others, { emoji: payload.emoji, count: payload.count, reacted_by_me: reactedByMe }] };
+  });
+}
+
+function applySeenUpdate(entries: VobiFeedEntry[], payload: { feedId: number; staffId: string; initials: string }): VobiFeedEntry[] {
+  return entries.map((entry) => {
+    if (entry.id !== payload.feedId) return entry;
+    if (entry.seen.some((s) => s.staff_id === payload.staffId)) return entry;
+    return { ...entry, seen: [...entry.seen, { staff_id: payload.staffId, initials: payload.initials }] };
+  });
+}
+
+function ReactionBar({ reactions, onReact }: { reactions: VobiFeedReaction[]; onReact: (emoji: string) => void }) {
+  const byEmoji = new Map(reactions.map((r) => [r.emoji, r]));
+  return (
+    <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
+      {REACTION_EMOJIS.map((emoji) => {
+        const r = byEmoji.get(emoji);
+        const count = r?.count ?? 0;
+        const mine = r?.reacted_by_me ?? false;
+        return (
+          <button
+            key={emoji}
+            type="button"
+            onClick={() => onReact(emoji)}
+            aria-pressed={mine}
+            className={cn(
+              'flex items-center gap-1 rounded-full border px-2 py-[3px] text-[11.5px] font-semibold transition-all active:scale-95',
+              mine
+                ? 'border-[var(--primary)] bg-[var(--accent-green-light)] text-[var(--primary)]'
+                : 'border-[var(--border)] bg-[var(--surface)] text-[var(--text-muted)] hover:border-[var(--text-muted)] hover:text-[var(--text-secondary)]'
+            )}
+          >
+            <span className="leading-none">{emoji}</span>
+            {count > 0 && <span className="tabular-nums leading-none">{count}</span>}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function SeenByRow({ seen }: { seen: VobiFeedSeenBy[] }) {
+  if (!seen.length) return null;
+  const visible = seen.slice(0, SEEN_AVATAR_CAP);
+  const extra = seen.length - visible.length;
+  return (
+    <div className="mt-2 flex items-center gap-2">
+      <div className="flex -space-x-2">
+        {visible.map((s, i) => (
+          <span
+            key={s.staff_id}
+            title={s.initials}
+            style={{ zIndex: visible.length - i }}
+            className="flex h-6 w-6 items-center justify-center rounded-full border-2 border-[var(--surface-secondary)] bg-[var(--primary)] text-[8.5px] font-bold text-white shadow-sm"
+          >
+            {s.initials}
+          </span>
+        ))}
+      </div>
+      {extra > 0 && <span className="text-[10px] font-semibold text-[var(--text-muted)]">+{extra} more</span>}
+      <span className="text-[10px] text-[var(--text-muted)]">seen this</span>
+    </div>
+  );
+}
+
+function FeedCard({
+  entry,
+  isNewest,
+  justArrived,
+  onReact,
+}: {
+  entry: VobiFeedEntry;
+  isNewest: boolean;
+  justArrived: boolean;
+  onReact: (emoji: string) => void;
+}) {
+  useTicker();
+  return (
+    <motion.div
+      layout
+      initial={{ opacity: 0, y: -16, scale: 0.98 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      exit={{ opacity: 0, x: 60, scale: 0.95, transition: { duration: 0.22 } }}
+      transition={{ duration: 0.3, ease: 'easeOut' }}
+      className={cn(
+        'relative rounded-2xl border border-[var(--border)]/60 bg-[var(--surface-secondary)] p-4 shadow-[var(--shadow-sm)] backdrop-blur-sm transition hover:shadow-[var(--shadow-md)]',
+        cardAccentClass(entry.narrated_text),
+        justArrived && 'animate-ops-border-pulse'
+      )}
+      style={justArrived ? { boxShadow: '0 0 0 3px color-mix(in srgb, var(--primary) 30%, transparent)' } : undefined}
+    >
+      <div className="mb-2.5 flex items-center gap-2.5">
+        <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[var(--surface)] text-[var(--primary)] ring-1 ring-[var(--border)]">
+          <Bot className="h-3.5 w-3.5" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-1.5">
+            <p className="text-[11.5px] font-bold uppercase tracking-[0.06em] text-[var(--text-primary)]">Update #{entry.id}</p>
+            {isNewest ? (
+              <span className="flex items-center gap-1 rounded-full bg-[var(--accent-red-light)] px-1.5 py-[1px] text-[9px] font-bold uppercase tracking-wide text-[var(--accent-red)] ring-1 ring-[var(--accent-red)]/30">
+                <span className="relative flex h-1.5 w-1.5">
+                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[var(--accent-red)] opacity-75" />
+                  <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-[var(--accent-red)]" />
+                </span>
+                Live
+              </span>
+            ) : (
+              <span className="rounded-full bg-[var(--surface)] px-1.5 py-[1px] text-[9px] font-bold uppercase tracking-wide text-[var(--text-muted)] ring-1 ring-[var(--border)]">
+                Past
+              </span>
+            )}
+          </div>
+          <p className="text-[11px] font-medium text-[var(--text-muted)]">
+            Updated {formatDistanceToNow(new Date(entry.created_at), { addSuffix: true })}
+          </p>
+        </div>
+      </div>
+      <div className="text-[13.5px] leading-relaxed text-[var(--text-secondary)]">
+        <VobiMessage content={entry.narrated_text} />
+      </div>
+      <div className="mt-2.5 border-t border-[var(--border)]/60 pt-2.5">
+        <ReactionBar reactions={entry.reactions} onReact={onReact} />
+        <SeenByRow seen={entry.seen} />
+      </div>
+    </motion.div>
+  );
+}
+
 export function VobiLiveOpsPanel({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const { user } = useAuth();
+  useTicker();
+  const myStaffId = user?.id != null ? String(user.id) : '';
   const [entries, setEntries] = useState<VobiFeedEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [justArrivedId, setJustArrivedId] = useState<number | null>(null);
   const setLiveOpsStoreOpen = useVobiLiveOpsStore((s) => s.setOpen);
+  const seenSentRef = useRef<Set<number>>(new Set());
 
   useEffect(() => {
     setLiveOpsStoreOpen(open);
@@ -43,7 +213,7 @@ export function VobiLiveOpsPanel({ open, onClose }: { open: boolean; onClose: ()
     setError(null);
     try {
       const { entries: rows } = await getVobiFeed('CW');
-      setEntries(rows);
+      setEntries(rows.slice(0, MAX_ENTRIES));
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not load the Live Ops feed.');
     } finally {
@@ -56,15 +226,63 @@ export function VobiLiveOpsPanel({ open, onClose }: { open: boolean; onClose: ()
     if (open) void load();
   }, [open]);
 
+  // New entries — prepend and cap at 3; anything past that slides out (AnimatePresence handles
+  // the exit animation once it drops out of this array).
   useEffect(() => {
     const onUpdate = (e: Event) => {
       const detail = (e as CustomEvent<VobiFeedEntry>).detail;
       if (!detail?.id) return;
-      setEntries((prev) => (prev.some((x) => x.id === detail.id) ? prev : [detail, ...prev].slice(0, 20)));
+      setEntries((prev) => {
+        if (prev.some((x) => x.id === detail.id)) return prev;
+        return [{ reactions: [], seen: [], ...detail }, ...prev].slice(0, MAX_ENTRIES);
+      });
+      setJustArrivedId(detail.id);
+      window.setTimeout(() => setJustArrivedId((cur) => (cur === detail.id ? null : cur)), 3000);
     };
     window.addEventListener('vobi:feed-update', onUpdate);
     return () => window.removeEventListener('vobi:feed-update', onUpdate);
   }, []);
+
+  useEffect(() => {
+    const onReaction = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (!detail?.feedId) return;
+      setEntries((prev) => applyReactionUpdate(prev, detail, myStaffId));
+    };
+    const onSeen = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (!detail?.feedId) return;
+      setEntries((prev) => applySeenUpdate(prev, detail));
+    };
+    window.addEventListener('vobi:reaction-update', onReaction);
+    window.addEventListener('vobi:seen-update', onSeen);
+    return () => {
+      window.removeEventListener('vobi:reaction-update', onReaction);
+      window.removeEventListener('vobi:seen-update', onSeen);
+    };
+  }, [myStaffId]);
+
+  // Opening the panel marks every currently-loaded entry seen for this user only — each staff
+  // member's own read state, tracked independently server-side.
+  useEffect(() => {
+    if (!open || !entries.length) return;
+    for (const entry of entries) {
+      if (seenSentRef.current.has(entry.id)) continue;
+      seenSentRef.current.add(entry.id);
+      markFeedSeen(entry.id).catch(() => {
+        seenSentRef.current.delete(entry.id);
+      });
+    }
+  }, [open, entries]);
+
+  const handleReact = async (feedId: number, emoji: string) => {
+    try {
+      const result = await reactToFeed(feedId, emoji);
+      setEntries((prev) => applyReactionUpdate(prev, result, myStaffId));
+    } catch {
+      // Silent — the reaction bar just won't move; nothing destructive to roll back.
+    }
+  };
 
   const latest = entries[0];
 
@@ -119,7 +337,7 @@ export function VobiLiveOpsPanel({ open, onClose }: { open: boolean; onClose: ()
               <div className="min-w-0">
                 <h2 className="text-[14px] font-extrabold tracking-tight text-white">Live Ops Feed</h2>
                 <p className="text-[11px] font-medium text-white/70">
-                  {latest ? `Past ${formatDistanceToNow(new Date(latest.created_at), { addSuffix: true })}` : 'Watching for the first update'}
+                  {latest ? `Updated ${formatDistanceToNow(new Date(latest.created_at), { addSuffix: true })}` : 'Watching for the first update'}
                 </p>
               </div>
             </div>
@@ -189,37 +407,17 @@ export function VobiLiveOpsPanel({ open, onClose }: { open: boolean; onClose: ()
             </div>
           ) : (
             <div className="relative space-y-3">
-              {entries.map((entry, i) => (
-                <div
-                  key={entry.id}
-                  className={cn(
-                    'rounded-2xl border border-[var(--border)]/60 bg-[var(--surface-secondary)] p-4 shadow-[var(--shadow-sm)] backdrop-blur-sm transition hover:shadow-[var(--shadow-md)]',
-                    cardAccentClass(entry.narrated_text)
-                  )}
-                >
-                  <div className="mb-2.5 flex items-center gap-2.5">
-                    <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[var(--surface)] text-[var(--primary)] ring-1 ring-[var(--border)]">
-                      <Bot className="h-3.5 w-3.5" />
-                    </span>
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-1.5">
-                        <p className="text-[11.5px] font-bold uppercase tracking-[0.06em] text-[var(--text-primary)]">Vobi</p>
-                        {i > 0 && (
-                          <span className="rounded-full bg-[var(--surface)] px-1.5 py-[1px] text-[9px] font-bold uppercase tracking-wide text-[var(--text-muted)] ring-1 ring-[var(--border)]">
-                            Past
-                          </span>
-                        )}
-                      </div>
-                      <p className="text-[11px] font-medium text-[var(--text-muted)]">
-                        {formatDistanceToNow(new Date(entry.created_at), { addSuffix: true })}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="text-[13.5px] leading-relaxed text-[var(--text-secondary)]">
-                    <VobiMessage content={entry.narrated_text} />
-                  </div>
-                </div>
-              ))}
+              <AnimatePresence initial={false}>
+                {entries.map((entry, i) => (
+                  <FeedCard
+                    key={entry.id}
+                    entry={entry}
+                    isNewest={i === 0}
+                    justArrived={justArrivedId === entry.id}
+                    onReact={(emoji) => handleReact(entry.id, emoji)}
+                  />
+                ))}
+              </AnimatePresence>
               <div className="flex justify-center pt-1">
                 <span className="inline-flex items-center gap-1.5 rounded-full border border-[var(--border)] bg-[var(--surface)] px-3 py-1 text-[10.5px] font-semibold text-[var(--text-muted)] shadow-[var(--shadow-sm)]">
                   <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />

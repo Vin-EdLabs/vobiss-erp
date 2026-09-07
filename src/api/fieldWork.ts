@@ -47,7 +47,27 @@ export interface FieldWorkUpdate {
   content: string | null;
   progress_percentage: number | null;
   attachments: { path: string; name: string; mime_type?: string }[];
+  latitude?: number | null;
+  longitude?: number | null;
+  distance_from_site_meters?: number | null;
   created_at: string;
+}
+
+export interface FieldArrival {
+  id: number;
+  field_work_id: number;
+  content: string | null;
+  attachments: { path: string; name: string; mime_type?: string }[];
+  latitude: number | null;
+  longitude: number | null;
+  distance_from_site_meters: number | null;
+  created_at: string;
+  engineer_name: string | null;
+  source_type: 'ticket' | 'service_request';
+  source_id: number;
+  source_reference: string;
+  field_work_title: string;
+  site_name: string | null;
 }
 
 export interface FieldWorkConfirmation {
@@ -92,6 +112,8 @@ export interface FieldWorkListRow {
 export interface FieldWorkDetail extends FieldWorkListRow {
   notes: string | null;
   site_address: string | null;
+  site_latitude?: number | null;
+  site_longitude?: number | null;
   engineers: FieldWorkEngineer[];
   removedEngineers: FieldWorkEngineer[];
   updates: FieldWorkUpdate[];
@@ -127,11 +149,13 @@ export const addFieldWorkEngineers = (id: number | string, engineerIds: number[]
 export const removeFieldWorkEngineer = (id: number | string, userId: number): Promise<FieldWorkDetail> =>
   fieldWorkFetch(`/${id}/engineers/${userId}`, { method: 'DELETE' });
 
-export const postFieldWorkUpdate = async (id: number | string, payload: { update_type?: string; content?: string; progress_percentage?: number | null; files?: File[] }): Promise<FieldWorkUpdate> => {
+export const postFieldWorkUpdate = async (id: number | string, payload: { update_type?: string; content?: string; progress_percentage?: number | null; files?: File[]; latitude?: number; longitude?: number }): Promise<FieldWorkUpdate> => {
   const form = new FormData();
   if (payload.update_type) form.append('update_type', payload.update_type);
   if (payload.content) form.append('content', payload.content);
   if (payload.progress_percentage != null) form.append('progress_percentage', String(payload.progress_percentage));
+  if (payload.latitude != null) form.append('latitude', String(payload.latitude));
+  if (payload.longitude != null) form.append('longitude', String(payload.longitude));
   (payload.files || []).forEach((f) => form.append('files', f));
   const res = await fetch(`${API_URL}/field-work/${id}/updates`, { method: 'POST', headers: getAuthHeader(), body: form });
   if (!res.ok) {
@@ -139,6 +163,11 @@ export const postFieldWorkUpdate = async (id: number | string, payload: { update
     throw new Error(err.error || err.message || `Request failed (${res.status})`);
   }
   return res.json();
+};
+
+export const getFieldArrivals = (params?: { dateFrom?: string; dateTo?: string; limit?: number }): Promise<FieldArrival[]> => {
+  const qs = new URLSearchParams(Object.fromEntries(Object.entries(params || {}).filter(([, v]) => v != null).map(([k, v]) => [k, String(v)]))).toString();
+  return fieldWorkFetch(`/arrivals${qs ? `?${qs}` : ''}`);
 };
 
 export const confirmFieldWork = (id: number | string, payload: { confirmation_type: 'noc' | 'client'; notes?: string; client_name?: string; client_signature?: string; outcome?: 'confirm' | 'reject' }): Promise<FieldWorkDetail> =>

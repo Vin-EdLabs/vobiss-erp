@@ -58,6 +58,7 @@ interface Ticket {
   customer_id?: string;
   project_name: string;
   project_id?: string;
+  site_name?: string;
   source?: 'portal' | 'email' | 'phone';
   description?: string;
   creator_name?: string;
@@ -168,6 +169,7 @@ const IPAllTickets: React.FC = () => {
             undefined,
           project_name: t.project_name || t.project?.name || 'General',
           project_id: t.project_id || t.project?.id,
+          site_name: t.site_name || undefined,
           source: t.source?.toLowerCase() || 'portal',
           description: t.description || 'No description provided.',
           creator_name: 
@@ -629,7 +631,7 @@ const IPAllTickets: React.FC = () => {
                     <th className="px-3 py-2.5 text-left font-medium">Ticket ID</th>
                     <th className="px-3 py-2.5 text-left font-medium">Source</th>
                     <th className="px-3 py-2.5 text-left font-medium">Customer</th>
-                    <th className="px-3 py-2.5 text-left font-medium">Project</th>
+                    <th className="px-3 py-2.5 text-left font-medium">Site</th>
                     <th className="px-3 py-2.5 text-left font-medium">Created</th>
                     <th className="px-3 py-2.5 text-left font-medium">Status</th>
                     <th className="px-3 py-2.5 text-left font-medium">Priority</th>
@@ -665,7 +667,7 @@ const IPAllTickets: React.FC = () => {
                           <p className="font-medium text-slate-800 text-xs">{ticket.customer_name}</p>
                         </td>
                         <td className="px-3 py-2.5">
-                          <p className="font-medium text-slate-800 text-xs">{ticket.project_name}</p>
+                          <p className="font-medium text-slate-800 text-xs">{ticket.site_name || '—'}</p>
                         </td>
                         <td className="px-3 py-2.5">
                           <div className="flex items-center gap-1 text-xs text-slate-600">

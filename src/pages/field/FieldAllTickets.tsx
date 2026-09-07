@@ -51,6 +51,7 @@ interface Ticket {
   customer_id?: string;
   project_name: string;
   project_id?: string;
+  site_name?: string;
   source?: 'portal' | 'email' | 'phone' | 'staff';
   description?: string;
   creator_name: string;
@@ -183,6 +184,7 @@ const FieldAllTickets: React.FC = () => {
           customer_id: t.customer_id || t.customer?.id,
           project_name: t.project_name || t.project?.name || 'General',
           project_id: t.project_id || t.project?.id,
+          site_name: t.site_name || undefined,
           source: t.source?.toLowerCase() || 'portal',
           description: t.description || 'No description provided.',
           creator_name:
@@ -590,7 +592,7 @@ const FieldAllTickets: React.FC = () => {
                     <th className="px-3 py-2.5 text-left font-medium">ID</th>
                     <th className="px-3 py-2.5 text-left font-medium">Source</th>
                     <th className="px-3 py-2.5 text-left font-medium">Customer</th>
-                    <th className="px-3 py-2.5 text-left font-medium">Project</th>
+                    <th className="px-3 py-2.5 text-left font-medium">Site</th>
                     <th className="px-3 py-2.5 text-left font-medium">Created By</th>
                     <th className="px-3 py-2.5 text-left font-medium">Status</th>
                     <th className="px-3 py-2.5 text-left font-medium">Priority</th>
@@ -626,7 +628,7 @@ const FieldAllTickets: React.FC = () => {
                           <p className="font-medium text-xs">{ticket.customer_name}</p>
                         </td>
                         <td className="px-3 py-2.5">
-                          <p className="font-medium text-xs">{ticket.project_name}</p>
+                          <p className="font-medium text-xs">{ticket.site_name || '—'}</p>
                         </td>
                         <td className="px-3 py-2.5 text-xs">
                           <p className="font-medium">{ticket.creator_name}</p>

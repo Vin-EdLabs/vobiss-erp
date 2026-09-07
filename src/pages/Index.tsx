@@ -157,6 +157,7 @@ import HrPayrollAdvances from './hr/PayrollAdvances';
 import HrPayrollHistory from './hr/PayrollHistory';
 import HrPayrollAudit from './hr/PayrollAudit';
 import HrAttendance from './hr/Attendance';
+import HrFieldArrivals from './hr/FieldArrivals';
 import HrAnalytics from './hr/Analytics';
 import HrReports from './hr/Reports';
 import HrDocuments from './hr/Documents';
@@ -189,6 +190,7 @@ import {
   NOC_DASHBOARD_ROLES,
   IP_TICKET_ROLES,
   FIELD_TICKET_ROLES,
+  FIELD_WORK_SUPERVISOR_ROLES,
   IP_UNIT_ROLES,
   FINANCE_ROLES,
   INVENTORY_ADMIN_ROLES,
@@ -1260,7 +1262,7 @@ const Index = () => {
               <Route
                 path="/staff/field/field-work"
                 element={
-                  <ProtectedRoute allowedRoles={FIELD_TICKET_ROLES} allowedUnits={['tx', 'ts']}>
+                  <ProtectedRoute allowedRoles={FIELD_WORK_SUPERVISOR_ROLES}>
                     <FieldWorkList />
                   </ProtectedRoute>
                 }
@@ -1394,6 +1396,14 @@ const Index = () => {
                 element={
                   <ProtectedRoute allowedRoles={HR_ROLES} allowedUnits={HR_UNITS} allowedPositions={HR_POSITIONS}>
                     <HrAttendance />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/hr/field-arrivals"
+                element={
+                  <ProtectedRoute allowedRoles={HR_ROLES} allowedUnits={HR_UNITS} allowedPositions={HR_POSITIONS}>
+                    <HrFieldArrivals />
                   </ProtectedRoute>
                 }
               />

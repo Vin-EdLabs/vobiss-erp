@@ -53,6 +53,7 @@ interface Ticket {
   contact_phone?: string;
   project_name: string;
   project_id?: string;
+  site_name?: string;
   source?: 'portal' | 'email' | 'phone';
   description?: string;
   creator_name?: string;
@@ -241,6 +242,7 @@ const NOCAllTickets: React.FC = () => {
           customer_code: t.customer_code,
           project_name: t.project_name || 'General',
           project_id: t.project_id,
+          site_name: t.site_name || undefined,
           source: t.source?.toLowerCase() || 'portal',
           description: t.description || 'No description provided.',
           creator_name: t.creator_name || 'Unknown',
@@ -743,9 +745,7 @@ const NOCAllTickets: React.FC = () => {
                     <th className="px-4 py-3 text-left font-medium">Source</th>
                     <th className="px-4 py-3 text-left font-medium">Customer</th>
                     <th className="px-4 py-3 text-left font-medium">Tags</th>
-                    <th className="px-4 py-3 text-left font-medium">Phone</th>
-                    <th className="px-4 py-3 text-left font-medium">Email</th>
-                    <th className="px-4 py-3 text-left font-medium">Project</th>
+                    <th className="px-4 py-3 text-left font-medium">Site</th>
                     <th className="px-4 py-3 text-left font-medium">Created</th>
                     <th className="px-4 py-3 text-left font-medium">Status</th>
                     <th className="px-4 py-3 text-left font-medium">Priority</th>
@@ -781,13 +781,7 @@ const NOCAllTickets: React.FC = () => {
                         <td className="px-4 py-3">
                           <TicketTagBadgesRow tags={ticket.tags} max={3} compact />
                         </td>
-                        <td className="px-4 py-3 text-slate-600">
-                          {ticket.customer_phone || ticket.contact_phone || <span className="text-slate-400 italic">—</span>}
-                        </td>
-                        <td className="px-4 py-3 text-slate-600">
-                          {ticket.customer_email || ticket.contact_email || <span className="text-slate-400 italic">—</span>}
-                        </td>
-                        <td className="px-4 py-3 font-medium text-slate-800">{ticket.project_name}</td>
+                        <td className="px-4 py-3 font-medium text-slate-800">{ticket.site_name || <span className="text-slate-400 italic">—</span>}</td>
                         <td className="px-4 py-3 text-slate-600">
                           <div className="flex items-center gap-1.5">
                             <Clock className="w-4 h-4" />

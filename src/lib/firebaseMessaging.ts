@@ -81,6 +81,28 @@ function attachPushMessageListener() {
   });
 }
 
+/**
+ * Calling register() again for an already-active worker at the same URL/scope is how you ask
+ * the browser to re-check for a newer version — it's a cheap no-op otherwise. Without this,
+ * a device that already granted permission would only ever get that check from the browser's
+ * own best-effort ~24h background timer, which isn't reliable for a PWA that goes untouched for
+ * days or weeks — exactly the case a fix here needs to actually reach. Call this on every app
+ * load (not just when first granting permission) so the check happens every time someone
+ * actually opens the app, whenever that is.
+ */
+export async function refreshPushServiceWorker(): Promise<void> {
+  if (!(await isSupported()) || !navigator.serviceWorker) return;
+  try {
+    const registration = await navigator.serviceWorker.register('/firebase-messaging-sw.js', {
+      scope: '/firebase-cloud-messaging-push-scope',
+    });
+    await registration.update();
+    attachPushMessageListener();
+  } catch {
+    /* best-effort — a normal enable/registerDeviceForPush() still runs on its own path */
+  }
+}
+
 export async function registerDeviceForPush(): Promise<string | null> {
   const supported = await isSupported();
   if (!supported || !vapidKey) return null;

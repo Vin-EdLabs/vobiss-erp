@@ -7,7 +7,7 @@ import {
   enablePushNotifications,
   isCurrentlySubscribed,
 } from '@/lib/webPush';
-import { registerDeviceForPush } from '@/lib/firebaseMessaging';
+import { registerDeviceForPush, refreshPushServiceWorker } from '@/lib/firebaseMessaging';
 import { getPushPublicKey } from '@/api';
 import { useAuth } from '@/context/AuthContext';
 import { cn } from '@/lib/utils';
@@ -80,6 +80,12 @@ export function PushNotificationSetup({ className }: { className?: string }) {
         // instead of waiting on a click the user may never make.
         if (!cancelled && cfg && !alreadyGranted && permissionState() === 'default') {
           requestPush();
+        } else if (!cancelled && cfg && alreadyGranted) {
+          // Already granted on a past visit — no permission prompt needed, but this is the one
+          // reliable moment (the app actually being opened) to ask the browser to re-check for
+          // a newer service worker. Waiting on the browser's own background timer isn't
+          // reliable for a PWA that might not be opened again for days or weeks.
+          void refreshPushServiceWorker();
         }
       } catch {
         if (!cancelled) {

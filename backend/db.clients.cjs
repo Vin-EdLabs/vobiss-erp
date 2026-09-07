@@ -4,6 +4,7 @@
  */
 let pool = null;
 let bcrypt = null;
+let geo = null;
 
 async function load() {
   if (pool) return;
@@ -15,6 +16,11 @@ async function load() {
   } catch {
     bcrypt = (await import('bcryptjs')).default;
   }
+}
+
+async function loadGeo() {
+  if (!geo) geo = await import('./services/geo.js');
+  return geo;
 }
 
 async function ensureClientSitesSchema() {
@@ -100,6 +106,15 @@ async function ensureClientSitesSchema() {
     BEGIN
       IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='customer_sites' AND column_name='location') THEN
         ALTER TABLE customer_sites ADD COLUMN location VARCHAR(255);
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='customer_sites' AND column_name='gps_coordinates') THEN
+        ALTER TABLE customer_sites ADD COLUMN gps_coordinates TEXT;
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='customer_sites' AND column_name='latitude') THEN
+        ALTER TABLE customer_sites ADD COLUMN latitude DOUBLE PRECISION;
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='customer_sites' AND column_name='longitude') THEN
+        ALTER TABLE customer_sites ADD COLUMN longitude DOUBLE PRECISION;
       END IF;
     END $$;
   `);
@@ -411,8 +426,11 @@ async function linkSitesToClient(customerId, siteIds = [], dbClient = pool) {
   return res.rowCount;
 }
 
-function siteInsertValues(data = {}) {
+async function siteInsertValues(data = {}) {
   if (!data.site_name?.trim()) throw new Error('Site name is required');
+  const gpsRaw = data.gps_coordinates?.trim() || null;
+  const { parseCoordinates } = await loadGeo();
+  const parsed = gpsRaw ? parseCoordinates(gpsRaw) : null;
   return {
     site_name: data.site_name.trim(),
     site_address: data.site_address?.trim() || null,
@@ -422,17 +440,20 @@ function siteInsertValues(data = {}) {
     service_type: data.service_type?.trim() || null,
     ip_address: data.ip_address?.trim() || null,
     connection_status: data.connection_status || 'Pending',
+    gps_coordinates: gpsRaw,
+    latitude: parsed?.lat ?? null,
+    longitude: parsed?.lng ?? null,
   };
 }
 
 async function createStandaloneSite(data = {}) {
   await load();
-  const fields = siteInsertValues(data);
+  const fields = await siteInsertValues(data);
   const site_code = await nextSiteCode();
   const res = await pool.query(
     `INSERT INTO customer_sites
-      (site_code, customer_id, site_name, site_address, location, region, bandwidth, service_type, ip_address, connection_status)
-     VALUES ($1,NULL,$2,$3,$4,$5,$6,$7,$8,$9)
+      (site_code, customer_id, site_name, site_address, location, region, bandwidth, service_type, ip_address, connection_status, gps_coordinates, latitude, longitude)
+     VALUES ($1,NULL,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
      RETURNING *`,
     [
       site_code,
@@ -444,6 +465,9 @@ async function createStandaloneSite(data = {}) {
       fields.service_type,
       fields.ip_address,
       fields.connection_status,
+      fields.gps_coordinates,
+      fields.latitude,
+      fields.longitude,
     ]
   );
   return res.rows[0];
@@ -451,7 +475,7 @@ async function createStandaloneSite(data = {}) {
 
 async function createSite(customerId, data = {}) {
   await load();
-  const fields = siteInsertValues(data);
+  const fields = await siteInsertValues(data);
   const cust = await pool.query(
     `SELECT id FROM customers WHERE id = $1 AND deleted_at IS NULL`,
     [customerId]
@@ -461,8 +485,8 @@ async function createSite(customerId, data = {}) {
   const site_code = await nextSiteCode();
   const res = await pool.query(
     `INSERT INTO customer_sites
-      (site_code, customer_id, site_name, site_address, location, region, bandwidth, service_type, ip_address, connection_status)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+      (site_code, customer_id, site_name, site_address, location, region, bandwidth, service_type, ip_address, connection_status, gps_coordinates, latitude, longitude)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
      RETURNING *`,
     [
       site_code,
@@ -475,6 +499,9 @@ async function createSite(customerId, data = {}) {
       fields.service_type,
       fields.ip_address,
       fields.connection_status,
+      fields.gps_coordinates,
+      fields.latitude,
+      fields.longitude,
     ]
   );
   return res.rows[0];
@@ -492,6 +519,7 @@ async function updateSiteById(siteId, fields = {}) {
     'ip_address',
     'connection_status',
     'customer_id',
+    'gps_coordinates',
   ];
   const sets = [];
   const params = [];
@@ -510,6 +538,14 @@ async function updateSiteById(siteId, fields = {}) {
           );
           if (!cust.rows[0]) throw new Error('Client not found');
         }
+      } else if (key === 'gps_coordinates') {
+        val = typeof val === 'string' ? val.trim() || null : null;
+        const { parseCoordinates } = await loadGeo();
+        const parsed = val ? parseCoordinates(val) : null;
+        params.push(parsed?.lat ?? null);
+        sets.push(`latitude = $${params.length}`);
+        params.push(parsed?.lng ?? null);
+        sets.push(`longitude = $${params.length}`);
       } else if (typeof val === 'string') {
         val = val.trim();
       }
@@ -543,12 +579,23 @@ async function updateSite(customerId, siteId, fields = {}) {
     'service_type',
     'ip_address',
     'connection_status',
+    'gps_coordinates',
   ];
   const sets = [];
   const params = [];
   for (const key of allowed) {
     if (fields[key] !== undefined) {
-      params.push(typeof fields[key] === 'string' ? fields[key].trim() : fields[key]);
+      let val = typeof fields[key] === 'string' ? fields[key].trim() : fields[key];
+      if (key === 'gps_coordinates') {
+        val = val || null;
+        const { parseCoordinates } = await loadGeo();
+        const parsed = val ? parseCoordinates(val) : null;
+        params.push(parsed?.lat ?? null);
+        sets.push(`latitude = $${params.length}`);
+        params.push(parsed?.lng ?? null);
+        sets.push(`longitude = $${params.length}`);
+      }
+      params.push(val);
       sets.push(`${key} = $${params.length}`);
     }
   }

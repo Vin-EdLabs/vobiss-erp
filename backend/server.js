@@ -462,7 +462,20 @@ app.get('/manifest.json', (req, res) => {
 app.get('/firebase-messaging-sw.js', (req, res) => {
   res.setHeader('Content-Type', 'application/javascript; charset=utf-8');
   res.setHeader('Service-Worker-Allowed', '/');
-  res.send(`self.addEventListener('push', function(event) {
+  // Never let the browser (or a proxy) serve a stale copy of this script from cache — every
+  // registration attempt must actually re-check the live bytes, or an update here can sit
+  // unnoticed indefinitely.
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate, max-age=0');
+  res.send(`// Take over immediately instead of leaving the OLD version of this worker running
+// until every tab that references it happens to close. A push-handling fix deployed here is
+// worthless to someone who genuinely never closes their PWA (or whose OS suspends rather than
+// kills it) if the stale worker just keeps controlling push events forever.
+self.skipWaiting();
+self.addEventListener('activate', function(event) {
+  event.waitUntil(self.clients.claim());
+});
+
+self.addEventListener('push', function(event) {
   if (!event.data) return;
   var payload;
   try { payload = event.data.json(); } catch (e) { return; }

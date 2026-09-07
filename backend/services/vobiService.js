@@ -13,7 +13,7 @@ function parseUserId(raw) {
   return n;
 }
 
-async function ensureVobiSchema() {
+export async function ensureVobiSchema() {
   await pool.query(`
     ALTER TABLE chat_channels
       ADD COLUMN IF NOT EXISTS vobi_user_id INTEGER REFERENCES users(id) ON DELETE CASCADE

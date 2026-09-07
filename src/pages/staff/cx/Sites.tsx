@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Plus, RotateCcw, Search } from 'lucide-react';
+import { Plus, RotateCcw, Search, MapPin } from 'lucide-react';
 import { toast } from 'sonner';
 import { cxApi } from '@/api';
 import { Button } from '@/components/ui/button';
@@ -26,6 +26,7 @@ export const emptySiteForm = {
   ip_address: '',
   connection_status: 'Pending',
   customer_id: '',
+  gps_coordinates: '',
 };
 
 type SiteRow = {
@@ -43,6 +44,9 @@ type SiteRow = {
   client_code?: string | null;
   customer_id?: number | null;
   ticket_count?: number;
+  gps_coordinates?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
 };
 
 const PAGE_SIZE = 50;
@@ -133,6 +137,7 @@ const SitesPage: React.FC = () => {
       ip_address: site.ip_address || '',
       connection_status: site.connection_status || 'Pending',
       customer_id: site.customer_id ? String(site.customer_id) : '',
+      gps_coordinates: site.gps_coordinates || '',
     });
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
@@ -155,6 +160,7 @@ const SitesPage: React.FC = () => {
         ip_address: form.ip_address.trim() || undefined,
         connection_status: form.connection_status,
         customer_id: form.customer_id ? Number(form.customer_id) : null,
+        gps_coordinates: form.gps_coordinates.trim() || undefined,
       };
       if (editingId) {
         await cxApi.updateSite(editingId, payload);
@@ -295,6 +301,17 @@ const SitesPage: React.FC = () => {
                     onChange={(e) => setForm((f) => ({ ...f, ip_address: e.target.value }))}
                   />
                 </div>
+                <div className="md:col-span-2">
+                  <Label>GPS Coordinates</Label>
+                  <Input
+                    value={form.gps_coordinates}
+                    onChange={(e) => setForm((f) => ({ ...f, gps_coordinates: e.target.value }))}
+                    placeholder="Paste from Google Maps — e.g. 5.6037, -0.1870, a maps link, or DMS"
+                  />
+                  <p className="mt-1 text-xs text-[var(--text-muted)]">
+                    Paste whatever you have — decimal coordinates, a Google Maps link, or degrees/minutes/seconds. We'll recognize it automatically.
+                  </p>
+                </div>
                 <div>
                   <Label>Connection Status</Label>
                   <Select
@@ -377,7 +394,23 @@ const SitesPage: React.FC = () => {
                         </span>
                       </td>
                       <td className="px-4 py-3 font-medium text-[var(--text-primary)]">{site.site_name}</td>
-                      <td className="px-4 py-3 text-[var(--text-secondary)]">{site.location || '—'}</td>
+                      <td className="px-4 py-3 text-[var(--text-secondary)]">
+                        <div className="flex items-center gap-1.5">
+                          <span>{site.location || '—'}</span>
+                          {site.latitude != null && site.longitude != null && (
+                            <a
+                              href={`https://www.google.com/maps?q=${site.latitude},${site.longitude}`}
+                              target="_blank"
+                              rel="noreferrer"
+                              title="View on map"
+                              onClick={(e) => e.stopPropagation()}
+                              className="text-[var(--primary)] hover:opacity-70"
+                            >
+                              <MapPin className="h-3.5 w-3.5" />
+                            </a>
+                          )}
+                        </div>
+                      </td>
                       <td className="px-4 py-3 text-[var(--text-secondary)]">{site.region || '—'}</td>
                       <td className="px-4 py-3">
                         {site.customer_id ? (

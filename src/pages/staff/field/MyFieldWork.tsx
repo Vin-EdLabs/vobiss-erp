@@ -1,18 +1,16 @@
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { Wrench, MapPin, Building2, Clock, ArrowRight, CheckCircle2, Sparkles, Sun } from 'lucide-react';
+import { Wrench, MapPin, Building2, Clock, ArrowRight, CheckCircle2, Sparkles, Sun, Navigation } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import { Skeleton } from '@/components/ui/skeleton';
 import { StatusPill } from '@/components/ui/status-pill';
 import { StatCard } from '@/components/ui/stat-card';
 import { GreetingBanner, OutlinePill } from '@/components/ui/greeting-banner';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/context/AuthContext';
-import { getMyFieldWork, updateFieldWorkStatus, type FieldWorkListRow, type EngineerStatus } from '@/api/fieldWork';
-import { FIELD_WORK_STATUS_LABELS, ENGINEER_STATUS_LABELS, fieldWorkStatusTone, progressForStatus, timeElapsedSince, sourcePath } from '@/components/fieldwork/shared';
+import { getMyFieldWork, type FieldWorkListRow } from '@/api/fieldWork';
+import { FIELD_WORK_STATUS_LABELS, fieldWorkStatusTone, progressForStatus, timeElapsedSince, sourcePath } from '@/components/fieldwork/shared';
 
 const ACTIVE_STATUSES = ['assigned', 'travelling', 'on_site', 'in_progress', 'waiting', 'completed', 'noc_confirmed'];
 const TONE_BORDER: Record<string, string> = {
@@ -25,7 +23,6 @@ const TONE_BORDER: Record<string, string> = {
 export default function MyFieldWork() {
   const { user } = useAuth();
   const navigate = useNavigate();
-  const { toast } = useToast();
   const query = useQuery({ queryKey: ['field-work', 'my-work'], queryFn: getMyFieldWork, refetchInterval: 60000 });
 
   const active = useMemo(() => (query.data || []).filter((r) => ACTIVE_STATUSES.includes(r.status)), [query.data]);
@@ -35,16 +32,6 @@ export default function MyFieldWork() {
     const weekAgo = Date.now() - 7 * 86400000;
     return completed.filter((r) => new Date(r.updated_at).getTime() >= weekAgo).length;
   }, [completed]);
-
-  const setStatus = async (id: number, status: EngineerStatus) => {
-    try {
-      await updateFieldWorkStatus(id, status);
-      toast({ title: `Status updated to ${ENGINEER_STATUS_LABELS[status]}` });
-      query.refetch();
-    } catch (e) {
-      toast({ title: 'Could not update status', description: e instanceof Error ? e.message : undefined, variant: 'destructive' });
-    }
-  };
 
   const firstName = user?.first_name || user?.full_name?.split(' ')[0] || 'there';
 
@@ -85,7 +72,7 @@ export default function MyFieldWork() {
           </div>
         ) : (
           <div className="grid gap-3 sm:grid-cols-2">
-            {active.map((r) => <FieldWorkCard key={r.id} row={r} myUserId={user?.id} onOpen={() => navigate(`/staff/field/field-work/${r.id}`)} onSetStatus={setStatus} />)}
+            {active.map((r) => <FieldWorkCard key={r.id} row={r} myUserId={user?.id} onOpen={() => navigate(`/staff/field/field-work/${r.id}`)} />)}
           </div>
         )}
       </div>
@@ -96,7 +83,7 @@ export default function MyFieldWork() {
           <p className="py-6 text-center text-sm text-[var(--text-muted)]">No completed field work yet.</p>
         ) : (
           <div className="grid gap-3 sm:grid-cols-2">
-            {completed.map((r) => <FieldWorkCard key={r.id} row={r} myUserId={user?.id} onOpen={() => navigate(`/staff/field/field-work/${r.id}`)} onSetStatus={setStatus} compact />)}
+            {completed.map((r) => <FieldWorkCard key={r.id} row={r} myUserId={user?.id} onOpen={() => navigate(`/staff/field/field-work/${r.id}`)} compact />)}
           </div>
         )}
       </div>
@@ -104,14 +91,25 @@ export default function MyFieldWork() {
   );
 }
 
-function FieldWorkCard({ row, myUserId, onOpen, onSetStatus, compact }: {
-  row: FieldWorkListRow; myUserId?: number; onOpen: () => void; onSetStatus: (id: number, status: EngineerStatus) => void; compact?: boolean;
+/** Primary call-to-action per status — location-verified check-in/complete both live on the
+ *  detail page (FieldWorkPanel), so every card action here just routes there, rather than
+ *  offering a bare status dropdown that would bypass the GPS confirmation entirely. */
+function primaryActionForStatus(status: string): { label: string; icon: typeof Navigation } {
+  if (['assigned', 'travelling'].includes(status)) return { label: "Confirm I'm here", icon: Navigation };
+  if (['on_site', 'in_progress', 'waiting'].includes(status)) return { label: 'Mark Complete', icon: CheckCircle2 };
+  return { label: 'Open Field Work', icon: ArrowRight };
+}
+
+function FieldWorkCard({ row, myUserId, onOpen, compact }: {
+  row: FieldWorkListRow; myUserId?: number; onOpen: () => void; compact?: boolean;
 }) {
   const navigate = useNavigate();
   const tone = fieldWorkStatusTone(row.status);
+  const isDone = ['completed', 'noc_confirmed', 'client_confirmed', 'closed'].includes(row.status);
+  const action = primaryActionForStatus(row.status);
   return (
     <div
-      className="vobiss-card group cursor-pointer rounded-2xl border bg-[var(--surface)] p-4 shadow-[var(--shadow-sm)] transition hover:-translate-y-0.5 hover:shadow-[var(--shadow-md)]"
+      className="vobiss-card group cursor-pointer rounded-2xl border bg-[var(--surface)] p-4 shadow-[var(--shadow-sm)] transition hover:-translate-y-0.5 hover:shadow-[var(--shadow-md)] active:scale-[0.99]"
       style={{ borderLeftWidth: 3, borderLeftColor: TONE_BORDER[tone] }}
       onClick={onOpen}
     >
@@ -134,18 +132,15 @@ function FieldWorkCard({ row, myUserId, onOpen, onSetStatus, compact }: {
         <span className="flex items-center gap-1"><Clock className="h-3.5 w-3.5" /> {timeElapsedSince(row.created_at)}</span>
       </div>
       {!compact && <Progress value={progressForStatus(row.status)} className="mb-3 h-1.5" />}
-      {!compact && !['completed', 'noc_confirmed', 'client_confirmed', 'closed'].includes(row.status) && (
-        <div className="mb-3 flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
-          <Select onValueChange={(v) => onSetStatus(row.id, v as EngineerStatus)}>
-            <SelectTrigger className="h-8 flex-1 text-xs"><SelectValue placeholder="Update status…" /></SelectTrigger>
-            <SelectContent>
-              {(['assigned', 'travelling', 'on_site', 'completed'] as EngineerStatus[]).map((s) => <SelectItem key={s} value={s}>{ENGINEER_STATUS_LABELS[s]}</SelectItem>)}
-            </SelectContent>
-          </Select>
-        </div>
-      )}
-      <Button type="button" size="sm" variant="outline" className="w-full" onClick={(e) => { e.stopPropagation(); onOpen(); }}>
-        Open Field Work <ArrowRight className="ml-1.5 h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" />
+      <Button
+        type="button"
+        size="sm"
+        variant={isDone ? 'outline' : 'default'}
+        className="w-full"
+        onClick={(e) => { e.stopPropagation(); onOpen(); }}
+      >
+        <action.icon className="mr-1.5 h-3.5 w-3.5" /> {action.label}
+        {isDone && <ArrowRight className="ml-1.5 h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" />}
       </Button>
     </div>
   );

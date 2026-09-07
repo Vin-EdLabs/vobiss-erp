@@ -209,6 +209,18 @@ export const FIELD_TICKET_ROLES: string[] = [
   'noc',
 ];
 
+/** The Field Work case-management list/board (assign engineers, track every job) — supervisors
+ *  and managers only. A plain field_engineer uses "My Field Work" instead; deliberately narrower
+ *  than FIELD_TICKET_ROLES above (which also covers the ticket queue, open to the engineer). */
+export const FIELD_WORK_SUPERVISOR_ROLES: string[] = [
+  'field_engineer_admin',
+  'ts_manager',
+  'ts_supervisor',
+  'director',
+  'cto',
+  'superadmin',
+];
+
 export const FINANCE_ROLES: string[] = [
   'finance',
   'finance_manager',
