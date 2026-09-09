@@ -405,9 +405,15 @@ export const SERVICE_REQUEST_REPORT_ROLES: string[] = [
   'design_supervisor',
 ];
 
+export const TRANSPORT_REPORT_ROLES: string[] = [
+  'superadmin',
+  'director',
+  'cto',
+];
+
 /** Report System hub — union of report types */
 export const REPORT_SYSTEM_ROLES: string[] = [
-  ...new Set([...TICKET_REPORT_ROLES, ...REPORTS_ROLES, ...CASH_REPORT_ROLES, ...SERVICE_REQUEST_REPORT_ROLES]),
+  ...new Set([...TICKET_REPORT_ROLES, ...REPORTS_ROLES, ...CASH_REPORT_ROLES, ...SERVICE_REQUEST_REPORT_ROLES, ...TRANSPORT_REPORT_ROLES]),
 ];
 
 export function userCanAccessReport(

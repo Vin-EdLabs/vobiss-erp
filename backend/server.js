@@ -87,6 +87,7 @@ import globalSearchRoutes from './routes/globalSearch.routes.js';
 import site360Routes from './routes/site360.routes.js';
 import vobiRoutes from './routes/vobi.js';
 import vobiFeedRoutes from './routes/vobiFeed.js';
+import vobiExecSummaryRoutes from './routes/vobiExecSummary.js';
 import vobiVaultRoutes from './routes/vobiVault.routes.js';
 import hrRoutes from './routes/hr.js';
 import hrSelfRoutes from './routes/hrSelf.js';
@@ -141,6 +142,7 @@ async function persistLinkedReferences(sourceType, sourceId, links, userId) {
 import { logUserAction } from './services/activityLog.js';
 import { recordTimingEvent, checkSlaThresholdsAndNotify } from './services/workflowTimeEngine.js';
 import { runVobiFeedSweep } from './services/vobiLiveFeed.js';
+import { runExecSummarySweep } from './services/vobiExecSummary.js';
 import activityRoutes from './routes/activity.js';
 import sharedLinksRoutes from './routes/sharedLinks.js';
 import { emitToUser, emitToStaff } from './realtime/channels.js';
@@ -365,6 +367,7 @@ app.use('/api/search', globalSearchRoutes);
 app.use('/api/site360', site360Routes);
 app.use('/api/vobi', vobiRoutes);
 app.use('/api/vobi-feed', vobiFeedRoutes);
+app.use('/api/vobi-exec-summary', vobiExecSummaryRoutes);
 app.use('/api/vobi-vault', vobiVaultRoutes);
 app.use('/api/hr/insurance', hrInsuranceRoutes);
 app.use('/api/hr-self/insurance', hrSelfInsuranceRoutes);
@@ -3121,6 +3124,14 @@ server.listen(port, '0.0.0.0', async () => {
     void runVobiFeedSweep();
     setInterval(runVobiFeedSweep, 15 * 60 * 1000);
   }, 30 * 1000);
+
+  // Vobi Executive Summary — director/CTO/system-admin-only briefing, kept warm the same way
+  // (staggered 15s after the Live Ops sweep above so they don't both hit the Gemini feed key
+  // pool in the same instant), then every 15 minutes.
+  setTimeout(() => {
+    void runExecSummarySweep();
+    setInterval(runExecSummarySweep, 15 * 60 * 1000);
+  }, 45 * 1000);
 
   // Hospital Insurance annual reset — checks for policies past their end date once at
   // startup, then once every 24h (resets are date-based, not time-sensitive).

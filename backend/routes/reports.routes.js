@@ -5,9 +5,11 @@ import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
 const { getTicketReport } = require('../db.ticketing.cjs');
 const { getCashRequestReport } = require('../db.reports.cjs');
+const { getTransportReport } = require('../db.transportReport.cjs');
 import {
   TICKET_REPORT_ROLES,
   CASH_REPORT_ROLES,
+  TRANSPORT_REPORT_ROLES,
   userHasAnyRole,
 } from '../roles.js';
 
@@ -59,11 +61,12 @@ function canAccessReport(user, roles, reportType) {
   if (userHasAnyRole(user, roles)) return true;
   const position = normalize(user?.position);
   const units = getUnitSlugs(user);
-  if (position === 'director') return true;
+  if (position === 'director' || position === 'cto') return true;
   const isManagerOrSupervisor = position.includes('manager') || position.includes('supervisor');
   if (!isManagerOrSupervisor) return false;
   if (reportType === 'tickets') return units.some((unit) => ['noc', 'ip', 'ts', 'cx'].includes(unit));
   if (reportType === 'cash') return units.includes('finance');
+  if (reportType === 'transport') return units.includes('ts') || units.includes('tx');
   return false;
 }
 
@@ -107,6 +110,21 @@ router.get('/cash', requireReportAccess(CASH_REPORT_ROLES, 'cash'), async (req, 
   } catch (err) {
     console.error('GET /reports/cash error:', err);
     res.status(500).json({ error: err.message || 'Failed to load cash report' });
+  }
+});
+
+router.get('/transport', requireReportAccess(TRANSPORT_REPORT_ROLES, 'transport'), async (req, res) => {
+  try {
+    const report = await getTransportReport({
+      date_from: req.query.date_from ? String(req.query.date_from) : null,
+      date_to: req.query.date_to ? String(req.query.date_to) : null,
+      status: req.query.status ? String(req.query.status) : null,
+      type: req.query.type ? String(req.query.type) : null,
+    });
+    res.json({ success: true, ...report });
+  } catch (err) {
+    console.error('GET /reports/transport error:', err);
+    res.status(500).json({ error: err.message || 'Failed to load transport report' });
   }
 });
 

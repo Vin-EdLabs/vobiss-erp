@@ -296,7 +296,7 @@ function resolveDepartment(requestDepartment, userDepartment, userUnit) {
   return formatUnitLabel(userUnit);
 }
 
-async function gatherApprovals(segments) {
+async function gatherApprovals(segments, { includeCashAmounts = false } = {}) {
   const { rows: materialCash } = await pool.query(`
     SELECT r.id, r.type, r.created_by, r.department, r.purpose, r.total_amount, r.status, r.created_at,
            u.department AS user_department, u.unit AS user_unit
@@ -353,10 +353,11 @@ async function gatherApprovals(segments) {
       type: r.type,
       requester_full_name: r.created_by,
       department_unit: resolveDepartment(r.department, r.user_department, r.user_unit),
-      // Cash request amounts are financial data and never leave this feed — withheld here
-      // (not just asked-nicely of the model) so there's nothing for the narration to leak.
-      // Authorized users still see the real amount on the request's own page.
-      amount: r.type === 'cash_request' ? null : (r.total_amount != null ? Number(r.total_amount) : null),
+      // Cash request amounts are financial data and never leave the public feed — withheld
+      // here (not just asked-nicely of the model) so there's nothing for that narration to
+      // leak. The executive summary sweep explicitly opts back in via includeCashAmounts,
+      // since its readers (director/CTO/system admin) are already authorized to see them.
+      amount: (r.type === 'cash_request' && !includeCashAmounts) ? null : (r.total_amount != null ? Number(r.total_amount) : null),
       purpose: r.purpose,
       approval_stage: r.status,
       pending_on: approverInfo?.pending || [],
@@ -463,7 +464,7 @@ async function gatherConnections(recordRefs) {
   }));
 }
 
-async function gatherSinceLastUpdate(lastSweepAt) {
+async function gatherSinceLastUpdate(lastSweepAt, { includeCashAmounts = false } = {}) {
   if (!lastSweepAt) return { note: 'This is the first sweep — no prior update to compare against.' };
 
   const [ticketsClosed, requestsCompleted, srCompleted] = await Promise.all([
@@ -486,8 +487,8 @@ async function gatherSinceLastUpdate(lastSweepAt) {
     requests_completed: requestsCompleted.rows.map((r) => ({
       type: r.type,
       requester_full_name: r.created_by,
-      // Same withholding as gatherApprovals — cash amounts never reach the narration.
-      amount: r.type === 'cash_request' ? null : (r.total_amount != null ? Number(r.total_amount) : null),
+      // Same withholding as gatherApprovals (and same includeCashAmounts opt-in).
+      amount: (r.type === 'cash_request' && !includeCashAmounts) ? null : (r.total_amount != null ? Number(r.total_amount) : null),
     })),
     service_requests_completed: srCompleted.rows.map((pr) => ({
       sr_number: `SR-${String(pr.id).padStart(4, '0')}`,
@@ -496,7 +497,7 @@ async function gatherSinceLastUpdate(lastSweepAt) {
   };
 }
 
-export async function buildVobiFeedSnapshot() {
+export async function buildVobiFeedSnapshot({ includeCashAmounts = false } = {}) {
   await ensureVobiFeedTable();
 
   const [segments, lastRow] = await Promise.all([
@@ -508,7 +509,7 @@ export async function buildVobiFeedSnapshot() {
   const [tickets, serviceRequests, approvals, fieldActivities, lowStock] = await Promise.all([
     gatherTickets(segments),
     gatherServiceRequests(segments),
-    gatherApprovals(segments),
+    gatherApprovals(segments, { includeCashAmounts }),
     gatherFieldActivities(),
     gatherLowStock(),
   ]);
@@ -521,7 +522,7 @@ export async function buildVobiFeedSnapshot() {
   ];
   const [connections, sinceLastUpdate] = await Promise.all([
     gatherConnections(allRefs),
-    gatherSinceLastUpdate(lastSweepAt),
+    gatherSinceLastUpdate(lastSweepAt, { includeCashAmounts }),
   ]);
 
   return {

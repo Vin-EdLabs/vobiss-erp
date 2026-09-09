@@ -533,6 +533,51 @@ export async function listMyReports(userId) {
   return rows;
 }
 
+/** Same query as listMyReports, generalized to any employee — for HR/Director/CTO/System Admin
+ *  looking up a specific person's history rather than their own. Company-scoped like
+ *  listHrAccessible so a director never sees another tenant's staff. */
+export async function listReportsForEmployee(employeeId, viewer = null) {
+  const params = [employeeId];
+  let where = `employee_id = $1`;
+  if (viewer && !isSystemAdminAccount(viewer)) {
+    params.push(viewer.company || 'CW');
+    where += ` AND company = $${params.length}`;
+  }
+  const { rows } = await pool.query(`SELECT * FROM performance_reports WHERE ${where} ORDER BY created_at DESC`, params);
+  return rows;
+}
+
+/** Type-ahead staff search for the Employee Performance page — searches active users by name,
+ *  company-scoped like listHrAccessible/listReportsForEmployee. Not limited to people who
+ *  already have a report, so a director can confirm "does this person have one yet" too. */
+export async function searchEmployeesForPerformance(q, viewer = null) {
+  const like = `%${String(q || '').trim()}%`;
+  const params = [like];
+  let where = `deleted_at IS NULL AND (
+    first_name ILIKE $1 OR last_name ILIKE $1 OR username ILIKE $1
+    OR (first_name || ' ' || last_name) ILIKE $1
+  )`;
+  if (viewer && !isSystemAdminAccount(viewer)) {
+    params.push(viewer.company || 'CW');
+    where += ` AND company = $${params.length}`;
+  }
+  const { rows } = await pool.query(
+    `SELECT id, first_name, last_name, username, position, unit, units
+     FROM users
+     WHERE ${where}
+     ORDER BY first_name, last_name
+     LIMIT 20`,
+    params
+  );
+  return rows.map((r) => ({
+    id: r.id,
+    name: `${r.first_name || ''} ${r.last_name || ''}`.trim() || r.username,
+    username: r.username,
+    position: r.position,
+    unit: r.unit,
+  }));
+}
+
 /** HR gets automatic access the moment a report reaches CTO — not before. Not unit-scoped, but
  *  still company-scoped (unless the caller is a true System Admin) so PTEL's HR never sees
  *  C&W's reports or vice versa. */

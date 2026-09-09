@@ -425,6 +425,9 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
     const onVobiSeenUpdate = (payload: unknown) => {
       window.dispatchEvent(new CustomEvent('vobi:seen-update', { detail: payload }));
     };
+    const onVobiExecSummaryUpdate = (payload: unknown) => {
+      window.dispatchEvent(new CustomEvent('vobi:exec-summary-update', { detail: payload }));
+    };
 
     socket.on('connect', onConnect);
     socket.on('disconnect', onDisconnect);
@@ -433,6 +436,7 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
     socket.on('vobi:feed-update', onVobiFeedUpdate);
     socket.on('vobi:reaction-update', onVobiReactionUpdate);
     socket.on('vobi:seen-update', onVobiSeenUpdate);
+    socket.on('vobi:exec-summary-update', onVobiExecSummaryUpdate);
 
     return () => {
       socket.off('connect', onConnect);
@@ -442,6 +446,7 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
       socket.off('vobi:feed-update', onVobiFeedUpdate);
       socket.off('vobi:reaction-update', onVobiReactionUpdate);
       socket.off('vobi:seen-update', onVobiSeenUpdate);
+      socket.off('vobi:exec-summary-update', onVobiExecSummaryUpdate);
       socket.disconnect();
       if (socketRef.current === socket) socketRef.current = null;
     };

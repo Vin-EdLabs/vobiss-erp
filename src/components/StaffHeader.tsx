@@ -17,6 +17,7 @@ import {
   RadioTower,
 } from 'lucide-react';
 import { VobiLiveOpsPanel } from '@/components/VobiLiveOpsPanel';
+import { VobiExecSummaryPanel } from '@/components/VobiExecSummaryPanel';
 import { getVobiFeed } from '@/api/vobiFeed';
 import { useQueryClient } from '@tanstack/react-query';
 import { timeOfDayGreeting } from '@/components/ui/greeting-banner';
@@ -25,7 +26,7 @@ import { toast } from 'sonner';
 import { useAuth } from '@/context/AuthContext';
 import { useVobi } from '@/context/VobiContext';
 import { useVobiAmbientStore } from '@/stores/vobiAmbientStore';
-import { SYSTEM_ADMIN_LABEL } from '@/config/roles';
+import { SYSTEM_ADMIN_LABEL, isSystemAdminAccount } from '@/config/roles';
 import {
   getNotifications,
   markNotificationAsRead,
@@ -130,6 +131,11 @@ const StaffHeader: React.FC<StaffHeaderProps> = ({
   }));
 
   const isDark = theme === 'dark';
+  const isExecutiveUser =
+    isSystemAdminAccount(user) ||
+    ['director', 'cto'].includes(String(user?.role || user?.main_role || '').trim().toLowerCase()) ||
+    (Array.isArray(user?.roles) && user.roles.some((r) => ['director', 'cto'].includes(String(r || '').trim().toLowerCase()))) ||
+    ['director', 'cto'].includes(String(user?.position || '').trim().toLowerCase());
   const notifUnread = notifications.filter((n) => !n.read).length;
   const unreadCount = notifUnread + chatUnread;
   const [now, setNow] = useState(() => new Date());
@@ -401,7 +407,8 @@ const StaffHeader: React.FC<StaffHeaderProps> = ({
         </Link>
       </div>
 
-      <div className="flex min-w-0 flex-1 items-center justify-center px-1">
+      <div className="flex min-w-0 flex-1 items-center justify-center gap-2 px-1">
+        {isExecutiveUser && <VobiExecSummaryPanel />}
         <TodoPanel />
       </div>
 

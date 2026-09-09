@@ -1034,14 +1034,28 @@ export function canViewRequest(request, user, userUnits) {
   return false;
 }
 
-/** Project unit + superadmin see full pipeline on detail */
+/** Director/CTO get the same unrestricted view access as System Admin everywhere a service
+ *  request can be opened — they don't need a unit membership or a sidebar entry for it, only
+ *  System Admin can act on their behalf per the segregation-of-duties rule. This governs VIEWING
+ *  only; approval/stage-transition routes are separate functions and are untouched by this. */
+function isExecutiveViewer(user) {
+  if (isSystemAdminAccount(user)) return true;
+  const role = String(user?.main_role || user?.role || '').toLowerCase();
+  const roles = Array.isArray(user?.roles) ? user.roles.map((r) => String(r || '').toLowerCase()) : [];
+  const position = String(user?.position || '').trim().toLowerCase();
+  return role === 'director' || role === 'cto' || roles.includes('director') || roles.includes('cto') || position === 'director' || position === 'cto';
+}
+
+/** Project unit + superadmin + Director/CTO see full pipeline on detail */
 export function canViewFullPipeline(user, userUnits) {
   if (user.role === 'superadmin' || user.main_role === 'superadmin') return true;
+  if (isExecutiveViewer(user)) return true;
   return userUnits.includes('project');
 }
 
 export function canViewRequestV2(request, user, userUnits) {
   if (user.role === 'superadmin' || user.main_role === 'superadmin') return true;
+  if (isExecutiveViewer(user)) return true;
   if (canViewFullPipeline(user, userUnits)) return true;
 
   const designRoles = [user?.role, user?.main_role, ...(Array.isArray(user?.roles) ? user.roles : [])]

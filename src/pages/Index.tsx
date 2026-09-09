@@ -92,6 +92,9 @@ import ReportsHub from './staff/reports/ReportsHub';
 import TicketReport from './staff/reports/TicketReport';
 import CashReport from './staff/reports/CashReport';
 import ServiceRequestReport from './staff/reports/ServiceRequestReport';
+import TransportReport from './staff/reports/TransportReport';
+import SiteReport from './staff/reports/SiteReport';
+import EmployeePerformanceSearch from './performance/EmployeeSearch';
 
 // NOC DASHBOARD
 import NOCDashboard from './staff/noc/Dashboard';
@@ -218,6 +221,7 @@ import {
   TICKET_REPORT_ROLES,
   CASH_REPORT_ROLES,
   SERVICE_REQUEST_REPORT_ROLES,
+  TRANSPORT_REPORT_ROLES,
   REPORT_SYSTEM_ROLES,
 } from '../config/roles';
 
@@ -816,6 +820,14 @@ const Index = () => {
                 }
               />
               <Route
+                path="/director/employee-performance"
+                element={
+                  <ProtectedRoute allowedRoles={[...EXEC_ROLES, 'hr']} allowedUnits={['hr']} allowedPositions={['HR']}>
+                    <EmployeePerformanceSearch />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
                 path="/site360/:id"
                 element={
                   <ProtectedRoute allowedRoles={[...EXEC_ROLES, 'hr']} allowedUnits={['hr']} allowedPositions={['HR']}>
@@ -1085,6 +1097,25 @@ const Index = () => {
                     allowedPositions={['Director', 'Project Manager', 'TX Manager', 'IP Manager', 'NOC Manager', 'Sales Manager', 'Design Manager', 'Project Supervisor', 'TX Supervisor', 'IP Supervisor', 'NOC Supervisor', 'Design Supervisor']}
                   >
                     <ServiceRequestReport />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/staff/reports/transport"
+                element={
+                  <ProtectedRoute
+                    allowedRoles={TRANSPORT_REPORT_ROLES}
+                    allowedPositions={['Director']}
+                  >
+                    <TransportReport />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/staff/reports/site"
+                element={
+                  <ProtectedRoute allowedRoles={[...EXEC_ROLES, 'hr']} allowedUnits={['hr']} allowedPositions={['HR']}>
+                    <SiteReport />
                   </ProtectedRoute>
                 }
               />

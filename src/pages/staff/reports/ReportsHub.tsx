@@ -1,14 +1,18 @@
 import React, { useMemo } from 'react';
 import { Link } from 'react-router-dom';
-import { Ticket, ChevronRight, DollarSign, BarChart3, Network, Package } from 'lucide-react';
+import { Ticket, ChevronRight, DollarSign, BarChart3, Network, Package, Truck, MapPin } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import {
   TICKET_REPORT_ROLES,
   CASH_REPORT_ROLES,
   SERVICE_REQUEST_REPORT_ROLES,
   REPORTS_ROLES,
+  TRANSPORT_REPORT_ROLES,
+  EXEC_ROLES,
   getUserRoles,
 } from '@/config/roles';
+
+const SITE_REPORT_ROLES: string[] = [...EXEC_ROLES, 'hr'];
 
 type ReportCard = {
   title: string;
@@ -56,6 +60,24 @@ const ALL_REPORTS: ReportCard[] = [
     accent: 'from-emerald-500 to-teal-700',
     roles: REPORTS_ROLES,
   },
+  {
+    title: 'Transport Report',
+    description:
+      'Transport Requests, Fuel Requests, and Vehicle Rental Requests — requested and completed — in one unified view.',
+    path: '/staff/reports/transport',
+    icon: Truck,
+    accent: 'from-indigo-500 to-blue-700',
+    roles: TRANSPORT_REPORT_ROLES,
+  },
+  {
+    title: 'Site Report',
+    description:
+      'Pick a site and see its full history — tickets, materials, cash, overtime, projects, and field work — plus the client it belongs to.',
+    path: '/staff/reports/site',
+    icon: MapPin,
+    accent: 'from-pink-500 to-rose-600',
+    roles: SITE_REPORT_ROLES,
+  },
 ];
 
 export default function ReportsHub() {
@@ -72,7 +94,7 @@ export default function ReportsHub() {
       : []),
   ].filter(Boolean);
   const position = String(user?.position || '').trim().toLowerCase();
-  const isGlobal = userRoles.includes('superadmin') || position === 'director' || userRoles.includes('director') || userRoles.includes('cto');
+  const isGlobal = userRoles.includes('superadmin') || position === 'director' || position === 'cto' || userRoles.includes('director') || userRoles.includes('cto');
   const isManagerOrSupervisor = position.includes('manager') || position.includes('supervisor');
   const hasAnyUnit = (...values: string[]) => values.some((value) => units.includes(value));
 
@@ -93,6 +115,9 @@ export default function ReportsHub() {
         if (card.path === '/reports') {
           return hasAnyUnit('procurement');
         }
+        if (card.path === '/staff/reports/site') {
+          return position === 'hr' || hasAnyUnit('hr');
+        }
         return false;
       }),
     [userRoles, isGlobal, isManagerOrSupervisor, units.join('|')]
@@ -107,7 +132,7 @@ export default function ReportsHub() {
           </p>
           <h1 className="mt-1 text-3xl font-bold text-slate-900">Reports</h1>
           <p className="mt-2 text-slate-600">
-            Central hub for ticket, inventory, and cash advance reporting.
+            Central hub for ticket, inventory, cash, transport, service request, and site reporting.
           </p>
         </div>
 

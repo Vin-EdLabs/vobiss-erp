@@ -6,6 +6,7 @@ import { fileURLToPath } from 'url';
 import { authenticateToken } from '../middleware/auth.js';
 import { getRealtimeIo } from '../realtime/channels.js';
 import { notifyUnit, notifyMany } from '../services/unitNotify.js';
+import { isSystemAdminAccount } from '../roles.js';
 // Server-side LibreOffice conversion is temporarily disabled — reserved for a future unified
 // DOCX/PPTX viewer upgrade. Not deleted, just no longer invoked from the upload route below.
 // import { convertDocumentToPdf } from '../services/performanceDocumentConversion.js';
@@ -14,7 +15,7 @@ import {
   listPeriods, createPeriod, getPeriodById,
   createReport, getReportById, submitReport, reviewAndForward, sendBackToRevision, finalizeReport,
   listQueueForUser, listMyReports, listHrAccessible, listRecentActivityForUser, addDocument, getDocumentById,
-  getActiveWeights,
+  getActiveWeights, listReportsForEmployee, searchEmployeesForPerformance,
 } from '../db/performanceReports.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -62,6 +63,12 @@ router.use(authenticateToken);
 function isHrStaff(user) {
   const role = String(user?.main_role || user?.role || '').toLowerCase();
   return role === 'hr' || unitsOfUser(user).includes('hr');
+}
+
+/** HR staff, Director/CTO, and System Admin — the audience for cross-employee performance
+ *  browsing (HR access, employee search, single-employee history). Nobody else. */
+function isHrOrExecUser(user) {
+  return isHrStaff(user) || isSystemAdminAccount(user) || tierOfUser(user) === 'cto';
 }
 
 function authorName(user) {
@@ -206,11 +213,32 @@ router.get('/my-activity', async (req, res) => {
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// ---- HR access — automatic once a report reaches CTO ----
+// ---- HR / executive access — automatic once a report reaches CTO. HR staff, Director/CTO,
+// and System Admin can all browse this; nobody else. ----
 router.get('/hr-access', async (req, res) => {
   try {
-    if (!isHrStaff(req.user)) return res.status(403).json({ error: 'HR Access is available to HR staff only' });
+    if (!isHrOrExecUser(req.user)) return res.status(403).json({ error: 'HR or executive access required' });
     res.json(await listHrAccessible({ status: req.query.status, period_id: req.query.period_id, unit: req.query.unit }, req.user));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ---- Employee Performance Search — HR/Director/CTO/System Admin look up one person's full
+// report history by name, instead of only browsing everything at the CTO/done stage. ----
+router.get('/employee-search', async (req, res) => {
+  try {
+    if (!isHrOrExecUser(req.user)) return res.status(403).json({ error: 'HR or executive access required' });
+    const q = String(req.query.q || '').trim();
+    if (q.length < 2) return res.json([]);
+    res.json(await searchEmployeesForPerformance(q, req.user));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.get('/by-employee/:employeeId', async (req, res) => {
+  try {
+    if (!isHrOrExecUser(req.user)) return res.status(403).json({ error: 'HR or executive access required' });
+    const employeeId = parseInt(req.params.employeeId, 10);
+    if (!Number.isFinite(employeeId)) return res.status(400).json({ error: 'Invalid employee id' });
+    res.json(await listReportsForEmployee(employeeId, req.user));
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

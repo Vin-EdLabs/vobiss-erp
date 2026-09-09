@@ -302,6 +302,13 @@ cd "d:\vobiss store\vobiss-inventory-hub\backend"
 node server.js
 ```
 
+**Do this once per code change, not on every restart.** `npm install` and `npm run build` together can take several minutes — that cost should only be paid when the code actually changed, never on a routine reboot or restart. Use the two scripts at the repo root to keep that split explicit:
+
+- `.\deploy.ps1` — installs dependencies (frontend + backend) and rebuilds `dist/`. Run this after every `git pull` / code change, and once on a brand-new machine. Slow, by design.
+- `.\start.ps1` — starts the backend, which serves the already-built `dist/` and the API. Run this for every routine start/restart/reboot. Fast (seconds) — it does no install or build, and fails fast with a clear message if `deploy.ps1` was never run.
+
+If the office server is rebuilding on every start, that's the reason first-time page loads feel slow — it's rebuilding the whole frontend before anything is served, not something users are waiting on live. Switching the startup task/shortcut to `start.ps1` (and only running `deploy.ps1` after deploying new code) removes that wait entirely.
+
 ## Operational Caveats
 
 - Backend startup initializes database structures and background services.

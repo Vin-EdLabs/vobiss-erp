@@ -121,6 +121,18 @@ export const listHrAccessible = (params?: { status?: string; period_id?: number;
   return prFetch(`/hr-access${qs ? `?${qs}` : ''}`);
 };
 
+export interface EmployeeSearchResult {
+  id: number;
+  name: string;
+  username: string;
+  position: string | null;
+  unit: string | null;
+}
+export const searchEmployeesForPerformance = (q: string): Promise<EmployeeSearchResult[]> =>
+  prFetch(`/employee-search?q=${encodeURIComponent(q)}`);
+export const getEmployeePerformance = (employeeId: number | string): Promise<PerformanceReport[]> =>
+  prFetch(`/by-employee/${employeeId}`);
+
 export interface RecentActivityItem {
   report_id: number;
   action: string;

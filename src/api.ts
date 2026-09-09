@@ -2248,6 +2248,37 @@ export const cxApi = {
     return await response.json();
   },
 
+  getTransportReport: async (params?: {
+    date_from?: string;
+    date_to?: string;
+    status?: string;
+    type?: 'transport_request' | 'fuel_request' | 'vehicle_rental';
+  }): Promise<{
+    success: boolean;
+    summary: {
+      total_requests: number;
+      total_amount: number;
+      completed_count: number;
+      pending_count: number;
+      by_type: Record<string, number>;
+    };
+    charts?: {
+      by_status: { name: string; value: number; color?: string }[];
+      by_type: { name: string; value: number; color?: string }[];
+      volume_by_month: { month: string; count: number; amount: number }[];
+    };
+    requests: any[];
+  }> => {
+    const q = new URLSearchParams();
+    if (params?.date_from) q.set('date_from', params.date_from);
+    if (params?.date_to) q.set('date_to', params.date_to);
+    if (params?.status) q.set('status', params.status);
+    if (params?.type) q.set('type', params.type);
+    const suffix = q.toString() ? `?${q.toString()}` : '';
+    const response = await apiFetch(`${API_URL}/reports/transport${suffix}`);
+    return await response.json();
+  },
+
   // Get all tickets (for CX/Staff view)
   getAllTickets: async (params?: {
     status?: string;

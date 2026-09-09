@@ -36,7 +36,7 @@ const userHasAnyPosition = (user: any, positions: string[]) => {
 };
 
 const isDirectorAccess = (user: any) =>
-  userHasAnyRole(user, ['director', 'cto']) || userHasAnyPosition(user, ['Director']);
+  userHasAnyRole(user, ['director', 'cto']) || userHasAnyPosition(user, ['Director', 'CTO']);
 
 const pathMatches = (pathname: string, prefixes: string[]) =>
   prefixes.some((path) => pathname === path || pathname.startsWith(`${path}/`));

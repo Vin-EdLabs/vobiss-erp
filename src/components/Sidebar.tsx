@@ -601,6 +601,13 @@ const Sidebar = ({
       hasSystemWideMode ||
       isGlobalPosition ||
       isProcurement;
+    const canViewTransportReports =
+      hasSystemWideMode ||
+      isGlobalPosition;
+    const canViewSiteReports =
+      hasSystemWideMode ||
+      isGlobalPosition ||
+      isHrUser;
     const canApproveMaterialInSidebar =
       hasSystemWideMode || isGlobalPosition || !!user?.permissions?.realm_material_approver;
     const canApproveCashInSidebar =
@@ -635,6 +642,8 @@ const Sidebar = ({
       ...(canViewCashReports ? [{ icon: DollarSign, label: 'Cash Report', path: '/staff/reports/cash' }] : []),
       ...(canViewServiceRequestReports ? [{ icon: Network, label: 'Service Request Report', path: '/staff/reports/service-requests' }] : []),
       ...(canViewInventoryReports ? [{ icon: Package, label: 'Inventory Report', path: '/reports' }] : []),
+      ...(canViewTransportReports ? [{ icon: Truck, label: 'Transport Report', path: '/staff/reports/transport' }] : []),
+      ...(canViewSiteReports ? [{ icon: MapPin, label: 'Site Report', path: '/staff/reports/site' }] : []),
     ];
     const reportSystemSection =
       reportSubItems.length > 1
@@ -1216,6 +1225,7 @@ const Sidebar = ({
         directorEscalationSection,
         directorTicketsSection,
         { icon: Search, label: 'Global Search', path: '/director/search' },
+        { icon: Users, label: 'Employee Performance', path: '/director/employee-performance' },
         systemSettingsSection,
       ], [dashboard, items, categories, lowStock, itemsOut, requestForms, itemReturns, issueItem, inventoryReport]);
       baseItems = [hrSection, ...baseItems];
@@ -1243,7 +1253,6 @@ const Sidebar = ({
       ]);
       baseItems = [
         directorDashboard,
-        transportSection,
         directorProjectRequestsSection,
         ...(directorReportSystemSection ? [directorReportSystemSection] : []),
         approvalsSection,
@@ -1253,6 +1262,7 @@ const Sidebar = ({
         directorTicketsSection,
         { icon: MapPin, label: 'Field Engineer Map', path: '/field/map' },
         { icon: Search, label: 'Global Search', path: '/director/search' },
+        { icon: Users, label: 'Employee Performance', path: '/director/employee-performance' },
         { icon: AuditIcon, label: 'Audit Logs', path: '/audit-logs' },
         { icon: Activity, label: 'Workflow Performance', path: '/workflow-performance' },
       ];
@@ -1385,7 +1395,7 @@ const Sidebar = ({
   };
 
   const navItemClass = (active: boolean, extra = '') =>
-    `group relative flex h-[34px] items-center rounded-[var(--radius-sm)] text-[13px] font-normal transition-colors duration-150 ${
+    `group relative flex h-[34px] items-center rounded-[var(--radius-sm)] text-[13px] font-normal transition-colors duration-150 mb-1 ${
       compact ? 'justify-center mx-1 px-0' : 'mx-1.5 px-2.5'
     } ${
       active

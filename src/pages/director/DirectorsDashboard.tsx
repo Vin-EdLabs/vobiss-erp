@@ -7,6 +7,7 @@ import {
   ArrowUpRight,
   TrendingUp,
   AlertTriangle,
+  AlertOctagon,
   ClipboardList,
   Clock,
   Activity,
@@ -15,6 +16,8 @@ import {
   Download,
   Zap,
   Bell,
+  Truck,
+  Award,
 } from 'lucide-react';
 import { Bar, Line } from 'react-chartjs-2';
 import {
@@ -31,7 +34,8 @@ import {
 } from 'chart.js';
 import { useToast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
-import { getItems, getItemsOut, getLowStockItems, getDashboardStats, getRequests } from '../../api';
+import { getItems, getItemsOut, getLowStockItems, getDashboardStats, getRequests, cxApi } from '../../api';
+import { listQueue } from '@/api/performanceReports';
 import { chartJsBarOptions, chartJsLineOptions, useChartTheme } from '@/lib/chartDefaults';
 import { StatCard as UiStatCard } from '@/components/ui/stat-card';
 import { GreetingBanner, OutlinePill } from '@/components/ui/greeting-banner';
@@ -45,6 +49,9 @@ interface DirectorStats {
   cashDisbursedToday: number;
   pendingCashApprovals: number;
   pendingInventoryRequests: number;
+  escalatedTickets: number;
+  transportActivity: number;
+  pendingPerformanceReviews: number;
 }
 
 const DirectorsDashboard: React.FC = () => {
@@ -60,6 +67,9 @@ const DirectorsDashboard: React.FC = () => {
     cashDisbursedToday: 0,
     pendingCashApprovals: 0,
     pendingInventoryRequests: 0,
+    escalatedTickets: 0,
+    transportActivity: 0,
+    pendingPerformanceReviews: 0,
   });
   const [pendingDirectorCount, setPendingDirectorCount] = useState(0);
   const [trend, setTrend] = useState<{ [key: string]: string }>({});
@@ -85,13 +95,16 @@ const DirectorsDashboard: React.FC = () => {
   const loadData = async () => {
     setLoading(true);
     try {
-      const [itemsRes, itemsOutRes, lowStockRes, dashStatsRes, requestsRes] =
+      const [itemsRes, itemsOutRes, lowStockRes, dashStatsRes, requestsRes, escalationsRes, transportRes, performanceQueueRes] =
         await Promise.allSettled([
           getItems(),
           getItemsOut(),
           getLowStockItems(),
           getDashboardStats(),
           getRequests(),
+          cxApi.getAllTickets({ escalation_stage: 'director' }),
+          cxApi.getTransportReport({}),
+          listQueue(),
         ]);
 
       const items = itemsRes.status === 'fulfilled' ? itemsRes.value : [];
@@ -102,6 +115,18 @@ const DirectorsDashboard: React.FC = () => {
           ? dashStatsRes.value
           : { totalItems: 0, totalCategories: 0, itemsOut: 0, lowStockItems: 0, pendingRequests: 0 };
       const requests = requestsRes.status === 'fulfilled' ? requestsRes.value : [];
+
+      // Cross-functional signals — escalated tickets, transport activity, and performance
+      // reviews waiting on this director — so the dashboard isn't inventory/cash-only.
+      const escalationRows: any[] =
+        escalationsRes.status === 'fulfilled'
+          ? (escalationsRes.value as any)?.data || (escalationsRes.value as any)?.tickets || (Array.isArray(escalationsRes.value) ? escalationsRes.value : [])
+          : [];
+      const escalatedTickets = escalationRows.length;
+      const transportActivity =
+        transportRes.status === 'fulfilled' ? transportRes.value?.summary?.total_requests || 0 : 0;
+      const pendingPerformanceReviews =
+        performanceQueueRes.status === 'fulfilled' ? performanceQueueRes.value.length : 0;
 
       const now = new Date();
       const todayStart = new Date(now);
@@ -224,6 +249,9 @@ const DirectorsDashboard: React.FC = () => {
         cashDisbursedToday,
         pendingCashApprovals: pendingCashApprovals.length,
         pendingInventoryRequests: pendingInventoryRequests.length,
+        escalatedTickets,
+        transportActivity,
+        pendingPerformanceReviews,
       };
 
       // Simple faux-trend: compare to 7-day average when possible
@@ -233,6 +261,9 @@ const DirectorsDashboard: React.FC = () => {
       trendMap.cashDisbursedToday = `${cashDisbursedToday > 0 ? '+' : ''}${cashDisbursedToday.toFixed(2)} vs 0`;
       trendMap.pendingCashApprovals = `${pendingCashApprovals.length} waiting`;
       trendMap.pendingInventoryRequests = `${pendingInventoryRequests.length} waiting`;
+      trendMap.escalatedTickets = escalatedTickets > 0 ? 'needs review' : 'all clear';
+      trendMap.transportActivity = 'requests + fuel + rentals';
+      trendMap.pendingPerformanceReviews = pendingPerformanceReviews > 0 ? 'awaiting your review' : 'all clear';
 
       // Activity timeline: mix of cash + inventory + items out
       const activities: any[] = [];
@@ -536,53 +567,83 @@ const DirectorsDashboard: React.FC = () => {
           </div>
         )}
 
-        {/* Top Executive Summary Cards */}
-        <div className="grid grid-cols-2 gap-2.5 md:grid-cols-3 xl:grid-cols-5">
-          <StatCard
-            icon={Package}
-            title="Total Inventory Items"
-            value={stats.totalItems.toLocaleString()}
-            trendText={trend.totalItems}
-            path="/inventory"
-            tone="border-blue-400/30 bg-gradient-to-br from-blue-700 via-blue-600 to-cyan-500"
-            accentIndex={0}
-          />
-          <StatCard
-            icon={ArrowUpRight}
-            title="Items Issued Today"
-            value={stats.itemsIssuedToday.toString()}
-            trendText={trend.itemsIssuedToday}
-            path="/items-out"
-            tone="border-violet-400/30 bg-gradient-to-br from-violet-700 via-fuchsia-600 to-pink-500"
-            accentIndex={1}
-          />
-          <StatCard
-            icon={DollarSign}
-            title="Cash Disbursed Today (GHS)"
-            value={stats.cashDisbursedToday.toFixed(2)}
-            trendText={trend.cashDisbursedToday}
-            path="/finance-approvals"
-            tone="border-emerald-400/30 bg-gradient-to-br from-emerald-700 via-teal-600 to-cyan-500"
-            accentIndex={2}
-          />
-          <StatCard
-            icon={ClipboardList}
-            title="Pending Cash Approvals"
-            value={stats.pendingCashApprovals.toString()}
-            trendText={trend.pendingCashApprovals}
-            path="/cash-approvals"
-            tone="border-amber-400/30 bg-gradient-to-br from-amber-600 via-orange-600 to-red-500"
-            accentIndex={3}
-          />
-          <StatCard
-            icon={AlertTriangle}
-            title="Pending Inventory Requests"
-            value={stats.pendingInventoryRequests.toString()}
-            trendText={trend.pendingInventoryRequests}
-            path="/material-approvals"
-            tone="border-rose-400/30 bg-gradient-to-br from-rose-700 via-red-600 to-orange-500"
-            accentIndex={4}
-          />
+        {/* Company Pulse — cross-functional, not just inventory/cash */}
+        <div>
+          <p className="mb-2 text-[10px] font-bold uppercase tracking-[0.2em] text-amber-600">Company Pulse</p>
+          <div className="grid grid-cols-2 gap-2.5 md:grid-cols-4">
+            <StatCard
+              icon={AlertOctagon}
+              title="Escalated Tickets"
+              value={stats.escalatedTickets.toString()}
+              trendText={trend.escalatedTickets}
+              path="/staff/director/escalations"
+              tone="border-red-400/30 bg-gradient-to-br from-red-700 via-rose-600 to-orange-500"
+              accentIndex={5}
+            />
+            <StatCard
+              icon={ClipboardList}
+              title="Pending Cash Approvals"
+              value={stats.pendingCashApprovals.toString()}
+              trendText={trend.pendingCashApprovals}
+              path="/cash-approvals"
+              tone="border-amber-400/30 bg-gradient-to-br from-amber-600 via-orange-600 to-red-500"
+              accentIndex={3}
+            />
+            <StatCard
+              icon={AlertTriangle}
+              title="Pending Inventory Requests"
+              value={stats.pendingInventoryRequests.toString()}
+              trendText={trend.pendingInventoryRequests}
+              path="/material-approvals"
+              tone="border-rose-400/30 bg-gradient-to-br from-rose-700 via-red-600 to-orange-500"
+              accentIndex={4}
+            />
+            <StatCard
+              icon={DollarSign}
+              title="Cash Disbursed Today (GHS)"
+              value={stats.cashDisbursedToday.toFixed(2)}
+              trendText={trend.cashDisbursedToday}
+              path="/finance-approvals"
+              tone="border-emerald-400/30 bg-gradient-to-br from-emerald-700 via-teal-600 to-cyan-500"
+              accentIndex={2}
+            />
+            <StatCard
+              icon={Truck}
+              title="Transport Activity"
+              value={stats.transportActivity.toString()}
+              trendText={trend.transportActivity}
+              path="/staff/reports/transport"
+              tone="border-indigo-400/30 bg-gradient-to-br from-indigo-700 via-blue-600 to-cyan-500"
+              accentIndex={6}
+            />
+            <StatCard
+              icon={Award}
+              title="Pending Performance Reviews"
+              value={stats.pendingPerformanceReviews.toString()}
+              trendText={trend.pendingPerformanceReviews}
+              path="/performance-reports/executive"
+              tone="border-purple-400/30 bg-gradient-to-br from-purple-700 via-violet-600 to-fuchsia-500"
+              accentIndex={7}
+            />
+            <StatCard
+              icon={Package}
+              title="Total Inventory Items"
+              value={stats.totalItems.toLocaleString()}
+              trendText={trend.totalItems}
+              path="/inventory"
+              tone="border-blue-400/30 bg-gradient-to-br from-blue-700 via-blue-600 to-cyan-500"
+              accentIndex={0}
+            />
+            <StatCard
+              icon={ArrowUpRight}
+              title="Items Issued Today"
+              value={stats.itemsIssuedToday.toString()}
+              trendText={trend.itemsIssuedToday}
+              path="/items-out"
+              tone="border-violet-400/30 bg-gradient-to-br from-violet-700 via-fuchsia-600 to-pink-500"
+              accentIndex={1}
+            />
+          </div>
         </div>
 
         <div className="grid grid-cols-1 gap-5 lg:grid-cols-5">
@@ -826,65 +887,26 @@ const DirectorsDashboard: React.FC = () => {
           </div>
         </div>
 
-        {/* Read-only full inventory view for directors */}
-        <div className="bg-white rounded-2xl border border-gray-200 shadow-[var(--shadow-md)] p-5">
-          <div className="flex justify-between items-center mb-4">
-            <button
-              type="button"
-              onClick={() => navigate('/inventory')}
-              className="flex items-center gap-2 text-lg font-semibold text-slate-900 transition hover:text-amber-700"
-            >
-              <Package className="h-5 w-5 text-amber-500" />
-              All Inventory (Read Only)
-            </button>
-            <span className="text-xs text-slate-500">
-              {allItems.length.toLocaleString()} item{allItems.length === 1 ? '' : 's'}
+        {/* Full inventory detail lives in Inventory Report — this page stays an overview, not
+            a second copy of the item catalogue. */}
+        <button
+          type="button"
+          onClick={() => navigate('/inventory')}
+          className="flex w-full items-center justify-between rounded-2xl border border-gray-200 bg-white p-4 text-left shadow-[var(--shadow-md)] transition hover:border-amber-300 hover:bg-amber-50/40"
+        >
+          <span className="flex items-center gap-3">
+            <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-amber-100 text-amber-600">
+              <Package className="h-4.5 w-4.5" />
             </span>
-          </div>
-          <div className="overflow-x-auto max-h-[420px] rounded-xl border border-gray-200">
-            <table className="w-full text-sm">
-              <thead className="bg-slate-50 text-slate-500">
-                <tr>
-                  <th className="px-3 py-2.5 text-left font-medium">Item</th>
-                  <th className="px-3 py-2.5 text-left font-medium">Category</th>
-                  <th className="px-3 py-2.5 text-right font-medium">Quantity</th>
-                  <th className="px-3 py-2.5 text-right font-medium">Low Stock Threshold</th>
-                </tr>
-              </thead>
-              <tbody>
-                {allItems.length === 0 ? (
-                  <tr>
-                    <td colSpan={4} className="px-3 py-6 text-center text-slate-500">
-                      No inventory items found.
-                    </td>
-                  </tr>
-                ) : (
-                  allItems.map((item: any) => (
-                    <tr
-                      key={item.id}
-                      onClick={() => navigate('/inventory')}
-                      className="cursor-pointer border-t border-gray-200 hover:bg-amber-50/60"
-                    >
-                      <td className="px-3 py-2.5 text-slate-800 font-medium">{item.name}</td>
-                      <td className="px-3 py-2.5 text-slate-700">
-                        {item.category_name || item.category || '—'}
-                      </td>
-                      <td className="px-3 py-2.5 text-right text-amber-600 font-semibold">
-                        {item.quantity}
-                      </td>
-                      <td className="px-3 py-2.5 text-right text-slate-500">
-                        {item.low_stock_threshold ?? '—'}
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-          <p className="mt-3 text-xs text-slate-500">
-            Full visibility of stock levels — read only.
-          </p>
-        </div>
+            <span>
+              <span className="block text-sm font-semibold text-slate-900">Full Inventory</span>
+              <span className="block text-xs text-slate-500">
+                {allItems.length.toLocaleString()} item{allItems.length === 1 ? '' : 's'} — open the full read-only catalogue
+              </span>
+            </span>
+          </span>
+          <span className="text-xs font-semibold text-amber-600">Open →</span>
+        </button>
 
         {/* Approvals Snapshot, Recent Activity & Requests Overview — expanded */}
         <div className="space-y-6">

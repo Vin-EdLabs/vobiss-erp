@@ -285,6 +285,12 @@ export const INVENTORY_REPORT_ROLES = [
   'cto',
 ];
 
+export const TRANSPORT_REPORT_ROLES = [
+  'superadmin',
+  'director',
+  'cto',
+];
+
 export function userHasAnyRole(user, roles) {
   if (!user || !roles?.length) return false;
   const list = new Set();

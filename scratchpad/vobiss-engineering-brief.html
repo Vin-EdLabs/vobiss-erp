@@ -1,0 +1,445 @@
+<title>VOBISS Engineering Brief</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;0,6..72,700;1,6..72,400;1,6..72,500&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+  :root{
+    --paper:#efede6;
+    --paper-raised:#ffffff;
+    --ink:#1a1c20;
+    --ink-soft:#5b5f66;
+    --ink-faint:#8b8f95;
+    --line:#dedad1;
+    --line-soft:#e8e5dd;
+    --accent:#b5651d;
+    --accent-soft:#f0e0cf;
+    --signal:#2e6e8e;
+    --signal-soft:#dfe9ee;
+    --good:#3f7d53;
+    --good-soft:#e0ede3;
+    --warn:#a9791b;
+    --warn-soft:#f1e6cc;
+    --critical:#b23b3b;
+    --critical-soft:#f3dfdd;
+    --shadow: 0 1px 2px rgba(26,28,32,0.04), 0 8px 24px -12px rgba(26,28,32,0.18);
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --paper:#14161a;
+      --paper-raised:#1c1f24;
+      --ink:#ece9e2;
+      --ink-soft:#a3a8b0;
+      --ink-faint:#787d84;
+      --line:#2c2f35;
+      --line-soft:#25282e;
+      --accent:#e08a45;
+      --accent-soft:#3a2c1e;
+      --signal:#7fbcd8;
+      --signal-soft:#1f2e35;
+      --good:#79c393;
+      --good-soft:#1c2e22;
+      --warn:#e2b563;
+      --warn-soft:#332a17;
+      --critical:#e58787;
+      --critical-soft:#332020;
+      --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 8px 24px -12px rgba(0,0,0,0.5);
+    }
+  }
+  :root[data-theme="dark"]{
+    --paper:#14161a;
+    --paper-raised:#1c1f24;
+    --ink:#ece9e2;
+    --ink-soft:#a3a8b0;
+    --ink-faint:#787d84;
+    --line:#2c2f35;
+    --line-soft:#25282e;
+    --accent:#e08a45;
+    --accent-soft:#3a2c1e;
+    --signal:#7fbcd8;
+    --signal-soft:#1f2e35;
+    --good:#79c393;
+    --good-soft:#1c2e22;
+    --warn:#e2b563;
+    --warn-soft:#332a17;
+    --critical:#e58787;
+    --critical-soft:#332020;
+    --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 8px 24px -12px rgba(0,0,0,0.5);
+  }
+
+  *{box-sizing:border-box;}
+  body{
+    background:var(--paper);
+    color:var(--ink);
+    font-family:'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif;
+    line-height:1.55;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:840px;margin:0 auto;padding:64px 24px 96px;}
+
+  h1,h2,h3{font-family:'Newsreader', Georgia, serif; text-wrap:balance; color:var(--ink); margin:0;}
+  .mono{font-family:'IBM Plex Mono', ui-monospace, monospace;}
+
+  /* ---------- Masthead ---------- */
+  .masthead{padding-bottom:36px; border-bottom:1px solid var(--line);}
+  .eyebrow{
+    font-family:'IBM Plex Mono', monospace; font-size:12px; letter-spacing:.14em; text-transform:uppercase;
+    color:var(--accent); font-weight:600; margin-bottom:14px; display:flex; align-items:center; gap:10px;
+  }
+  .eyebrow::before{content:"";width:20px;height:1px;background:var(--accent);display:inline-block;}
+  h1.title{font-size:44px; font-weight:600; line-height:1.08; letter-spacing:-.01em;}
+  .dek{font-size:17px; color:var(--ink-soft); max-width:56ch; margin-top:16px;}
+  .meta-line{
+    margin-top:22px; display:flex; flex-wrap:wrap; gap:6px 18px; font-family:'IBM Plex Mono',monospace;
+    font-size:12.5px; color:var(--ink-faint);
+  }
+  .meta-line b{color:var(--ink-soft); font-weight:600;}
+
+  /* ---------- Stat strip ---------- */
+  .stats{
+    margin-top:34px; display:grid; grid-template-columns:repeat(4,1fr); gap:1px;
+    background:var(--line); border:1px solid var(--line); border-radius:10px; overflow:hidden;
+  }
+  .stat{background:var(--paper-raised); padding:18px 16px;}
+  .stat .n{font-family:'Newsreader',serif; font-size:30px; font-weight:600; font-variant-numeric:tabular-nums; line-height:1;}
+  .stat .l{margin-top:8px; font-size:12.5px; color:var(--ink-soft); line-height:1.4;}
+  .stat.warn .n{color:var(--warn);}
+  .stat.good .n{color:var(--good);}
+  .stat.signal .n{color:var(--signal);}
+  .stat.accent .n{color:var(--accent);}
+
+  /* ---------- Section headers ---------- */
+  .section{margin-top:64px;}
+  .section-head{display:flex; align-items:baseline; justify-content:space-between; gap:24px; margin-bottom:8px;}
+  .section-head h2{font-size:28px; font-weight:600;}
+  .section-tag{font-family:'IBM Plex Mono',monospace; font-size:12px; color:var(--ink-faint); white-space:nowrap;}
+  .section-intro{color:var(--ink-soft); max-width:64ch; margin-top:10px; margin-bottom:32px; font-size:15.5px;}
+
+  /* ---------- Approval chain diagram ---------- */
+  .diagram-card{
+    background:var(--paper-raised); border:1px solid var(--line); border-radius:12px;
+    padding:28px 24px 22px; margin:28px 0 40px; box-shadow:var(--shadow);
+  }
+  .diagram-caption{font-size:12.5px; color:var(--ink-faint); margin-top:14px; font-family:'IBM Plex Mono',monospace;}
+  .diagram-caption b{color:var(--ink-soft);}
+
+  /* ---------- Findings list ---------- */
+  .finding{
+    display:grid; grid-template-columns:120px 1fr; gap:22px;
+    padding:24px 0; border-top:1px solid var(--line-soft);
+  }
+  .finding:first-of-type{border-top:1px solid var(--line);}
+  .finding-meta{display:flex; flex-direction:column; gap:8px;}
+  .chip{
+    display:inline-flex; align-items:center; justify-content:center; height:22px; padding:0 9px;
+    border-radius:999px; font-family:'IBM Plex Mono',monospace; font-size:11px; font-weight:600;
+    letter-spacing:.03em; text-transform:uppercase; white-space:nowrap; width:fit-content;
+  }
+  .chip.critical{background:var(--critical-soft); color:var(--critical);}
+  .chip.high{background:var(--warn-soft); color:var(--warn);}
+  .chip.medium{background:var(--signal-soft); color:var(--signal);}
+  .chip.low{background:var(--good-soft); color:var(--good);}
+  .chip.impact-high{background:var(--good-soft); color:var(--good);}
+  .chip.impact-medium{background:var(--signal-soft); color:var(--signal);}
+  .effort{font-family:'IBM Plex Mono',monospace; font-size:11px; color:var(--ink-faint);}
+  .finding h3{font-size:18px; font-weight:600; margin-bottom:8px;}
+  .finding p{margin:0; color:var(--ink-soft); font-size:15px; max-width:66ch;}
+  .finding p + p{margin-top:10px;}
+  .finding .fix{color:var(--ink); font-size:14.5px; margin-top:12px; padding-left:14px; border-left:2px solid var(--accent);}
+  .finding .fix b{color:var(--accent); font-family:'IBM Plex Mono',monospace; font-size:11px; letter-spacing:.04em; text-transform:uppercase; display:block; margin-bottom:4px;}
+
+  /* ---------- Bet cards ---------- */
+  .bets-grid{display:grid; grid-template-columns:1fr 1fr; gap:16px;}
+  .bet{
+    background:var(--paper-raised); border:1px solid var(--line); border-radius:14px; padding:22px;
+    display:flex; flex-direction:column; gap:12px; box-shadow:var(--shadow);
+  }
+  .bet-top{display:flex; align-items:flex-start; justify-content:space-between; gap:10px;}
+  .bet-num{font-family:'IBM Plex Mono',monospace; font-size:12px; color:var(--ink-faint);}
+  .bet h3{font-size:19px; font-weight:600; line-height:1.25;}
+  .bet p{margin:0; color:var(--ink-soft); font-size:14.5px;}
+  .bet-tags{display:flex; gap:8px; margin-top:auto; padding-top:6px;}
+  .bet-why{
+    margin-top:2px; font-size:13px; color:var(--ink); background:var(--accent-soft);
+    border-radius:8px; padding:10px 12px; line-height:1.5;
+  }
+  .bet-why b{font-family:'IBM Plex Mono',monospace; font-size:10.5px; text-transform:uppercase; letter-spacing:.04em; color:var(--accent); display:block; margin-bottom:4px;}
+  .bet.lead{grid-column:1 / -1;}
+  .bet.lead .bet-top h3{font-size:22px;}
+
+  /* ---------- Closing ---------- */
+  .closing{
+    margin-top:64px; padding:28px 26px; border-radius:14px; background:var(--paper-raised);
+    border:1px solid var(--line); box-shadow:var(--shadow);
+  }
+  .closing h2{font-size:20px; margin-bottom:10px;}
+  .closing p{color:var(--ink-soft); font-size:15px; max-width:66ch;}
+  .closing p + p{margin-top:10px;}
+  .signoff{margin-top:20px; font-family:'IBM Plex Mono',monospace; font-size:12px; color:var(--ink-faint);}
+
+  @media (max-width:680px){
+    .wrap{padding:40px 18px 72px;}
+    h1.title{font-size:32px;}
+    .stats{grid-template-columns:1fr 1fr;}
+    .finding{grid-template-columns:1fr; gap:10px;}
+    .bets-grid{grid-template-columns:1fr;}
+    .bet.lead{grid-column:auto;}
+  }
+</style>
+
+<div class="wrap">
+
+  <header class="masthead">
+    <div class="eyebrow">Internal Engineering Review</div>
+    <h1 class="title">The VOBISS Brief</h1>
+    <p class="dek">A findings-and-bets memo written straight out of this build session: what's fragile enough to fix before it bites, and what's worth pitching to leadership next.</p>
+    <div class="meta-line">
+      <span><b>System</b> VOBISS ERP — C&amp;W / PTEL operations platform</span>
+      <span><b>Scope</b> Segregation-of-duties, Overtime, Leave, Material/Transport Requests, Global Search, Site 360</span>
+      <span><b>Prepared</b> for internal review, not external distribution</span>
+    </div>
+
+    <div class="stats">
+      <div class="stat good">
+        <div class="n">6</div>
+        <div class="l">request types now share one no-self-approval rule</div>
+      </div>
+      <div class="stat signal">
+        <div class="n">4</div>
+        <div class="l">modules rebuilt on real Site/Client search this session</div>
+      </div>
+      <div class="stat warn">
+        <div class="n">3</div>
+        <div class="l">modules still storing Site/Client as free text</div>
+      </div>
+      <div class="stat accent">
+        <div class="n">2</div>
+        <div class="l">new cross-module views: Global Search, Site 360</div>
+      </div>
+    </div>
+  </header>
+
+  <!-- ============ SECTION A — FOUNDATIONS ============ -->
+  <section class="section">
+    <div class="section-head">
+      <h2>Foundations</h2>
+      <span class="section-tag mono">six findings, ranked by blast radius</span>
+    </div>
+    <p class="section-intro">These aren't hypothetical. Each one is something the system actually did during this session — a request that could approve itself, a route that silently blocked the wrong staff, a notification that needed a manual refresh. Fixing the pattern once is cheaper than finding each instance again.</p>
+
+    <div class="diagram-card">
+      <svg viewBox="0 0 720 150" width="100%" role="img" aria-label="Overtime approval chain, showing the tier-skip rule">
+        <defs>
+          <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill="var(--ink-faint)"></path>
+          </marker>
+          <marker id="arrow-accent" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill="var(--accent)"></path>
+          </marker>
+        </defs>
+        <style>
+          .node-box{fill:var(--paper); stroke:var(--line); stroke-width:1.2;}
+          .node-box.skip{stroke:var(--accent); stroke-dasharray:3 3;}
+          .node-label{font-family:'IBM Plex Mono',monospace; font-size:12px; fill:var(--ink); text-anchor:middle;}
+          .edge{stroke:var(--ink-faint); stroke-width:1.3; fill:none; marker-end:url(#arrow);}
+          .edge-skip{stroke:var(--accent); stroke-width:1.3; fill:none; stroke-dasharray:4 4; marker-end:url(#arrow-accent);}
+          .cap{font-family:'IBM Plex Mono',monospace; font-size:10.5px; fill:var(--ink-faint); text-anchor:middle;}
+        </style>
+        <rect x="10" y="20" width="120" height="40" rx="8" class="node-box"></rect>
+        <text x="70" y="45" class="node-label">Supervisor</text>
+        <rect x="200" y="20" width="120" height="40" rx="8" class="node-box"></rect>
+        <text x="260" y="45" class="node-label">Manager</text>
+        <rect x="390" y="20" width="120" height="40" rx="8" class="node-box"></rect>
+        <text x="450" y="45" class="node-label">HR</text>
+        <rect x="580" y="20" width="120" height="40" rx="8" class="node-box"></rect>
+        <text x="640" y="45" class="node-label">Finance</text>
+
+        <path d="M130,40 L200,40" class="edge"></path>
+        <path d="M320,40 L390,40" class="edge"></path>
+        <path d="M510,40 L580,40" class="edge"></path>
+
+        <path d="M70,60 C70,110 260,110 260,60" class="edge-skip"></path>
+        <text x="165" y="128" class="cap" fill="var(--accent)">a Supervisor's own request skips straight to Manager</text>
+      </svg>
+      <div class="diagram-caption">The rule this session shipped for Overtime — already correct in Leave, missing in Overtime until now. <b>Nobody approves their own tier.</b> The only override is System Admin.</div>
+    </div>
+
+    <div class="finding">
+      <div class="finding-meta">
+        <span class="chip critical">Critical</span>
+        <span class="effort">High effort</span>
+      </div>
+      <div>
+        <h3>Seven approval flows, seven separate implementations</h3>
+        <p>Leave, Overtime, Material Requests, Cash Requests, Vehicle Rental, Fuel, and Transport Requests each hand-roll their own "who can act on this stage," "what's next," and "who gets notified" logic. The same three bug classes — a self-approval loophole, a stalled realtime notification, a route mounted in the wrong order — had to be found and patched separately in more than one of them this session.</p>
+        <div class="fix"><b>Fix</b>One shared workflow engine — stage list, actor resolver, transition notifier — that every request type configures instead of reimplementing. Closing a bug class once instead of per-module.</div>
+      </div>
+    </div>
+
+    <div class="finding">
+      <div class="finding-meta">
+        <span class="chip high">High</span>
+        <span class="effort">Medium effort</span>
+      </div>
+      <div>
+        <h3>Site/Client standardization is roughly two-thirds done</h3>
+        <p>Tickets, Material/Cash Requests, Overtime, Project Requests, and Field Work now point at a real <span class="mono">site_id</span>. Fuel Requests, Vehicle Rental, and NOC Incident Notes still store site and client as typed text — invisible to Site 360 and Global Search, and open to the exact drift problem the standardization was meant to close (the same site logged three different ways).</p>
+        <div class="fix"><b>Fix</b>The reusable pieces already exist — the same Site search component and search endpoints built this session for Material Requests and Transport. Wiring the remaining three is integration work, not new invention.</div>
+      </div>
+    </div>
+
+    <div class="finding">
+      <div class="finding-meta">
+        <span class="chip critical">Critical</span>
+        <span class="effort">High effort</span>
+      </div>
+      <div>
+        <h3>No automated coverage on the paths that move money and approvals</h3>
+        <p>Every fix this session was verified by hand: mint a token, call the API, check the database, delete the test row. That's real verification — but it doesn't persist. Nothing stops the self-approval loophole, or the route-shadowing bug that recurred twice in one session, from quietly coming back on the next change.</p>
+        <div class="fix"><b>Fix</b>Start narrow: integration tests over the approval engines and route-mount order, not full coverage everywhere. The highest blast-radius paths — cash execution, approval chains — are worth more test weight than anything else in the system.</div>
+      </div>
+    </div>
+
+    <div class="finding">
+      <div class="finding-meta">
+        <span class="chip high">High</span>
+        <span class="effort">Low effort</span>
+      </div>
+      <div>
+        <h3>Route order is a live footgun, not a one-time mistake</h3>
+        <p>Express matches the first mounted prefix. <span class="mono">/api/hr</span> mounted before <span class="mono">/api/hr/overtime</span> silently applied HR-only middleware to a route meant for any staff member — and that exact class of bug showed up more than once this session, in different modules, before anyone noticed the symptom.</p>
+        <div class="fix"><b>Fix</b>Enforce most-specific-prefix-first as a lint rule or a small route registry, so it's structurally impossible rather than a thing to remember.</div>
+      </div>
+    </div>
+
+    <div class="finding">
+      <div class="finding-meta">
+        <span class="chip medium">Medium</span>
+        <span class="effort">Low effort</span>
+      </div>
+      <div>
+        <h3>Notifications need three call sites to agree, every time</h3>
+        <p>A correct notification is an in-app record, a realtime socket emit, and a push send — miss the socket emit and the page just looks stale until someone manually refreshes. That's precisely what the Leave feature did before it was patched to match the pattern Overtime got right from the start.</p>
+        <div class="fix"><b>Fix</b>Make the existing shared notifier the only legal way to notify anyone — no module re-pairs the three calls by hand again.</div>
+      </div>
+    </div>
+
+    <div class="finding">
+      <div class="finding-meta">
+        <span class="chip medium">Medium</span>
+        <span class="effort">Low effort</span>
+      </div>
+      <div>
+        <h3>The dev environment can go down for reasons that have nothing to do with the app</h3>
+        <p>The Vite dev server crashed twice in this session from an uncaught file-watcher error on a sibling git worktree's lock file — a tooling artifact, not an application bug, but indistinguishable from one until someone reads the stack trace.</p>
+        <div class="fix"><b>Fix</b>Exclude tooling directories (worktrees, lock files) from the dev server's file watcher. Small, but it removes a whole category of false "why is the app down" moments.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ SECTION B — BETS ============ -->
+  <section class="section">
+    <div class="section-head">
+      <h2>Bets worth pitching</h2>
+      <span class="section-tag mono">built on infrastructure that already exists</span>
+    </div>
+    <p class="section-intro">None of these start from zero. Each one leans on something already shipped this session or earlier — the Site 360 aggregation layer, the reference-linking registry, Vobi's live feed, the PDF pipeline — so the pitch to leadership isn't "give us six months," it's "we already built the foundation."</p>
+
+    <div class="bets-grid">
+      <div class="bet lead">
+        <div class="bet-top">
+          <div>
+            <span class="bet-num mono">01</span>
+            <h3>One inbox for everything waiting on you</h3>
+          </div>
+        </div>
+        <p>Right now a manager checks Leave, Overtime, Material, Cash, Vehicle, Fuel, and Transport approval queues one at a time. A single "My Approvals" view — aggregating every pending action across all seven, reusing the exact registry pattern built this session for Global Search and Site 360 — is the one change every approver in the company would notice on day one.</p>
+        <div class="bet-why"><b>Why this lands</b>It's the cheapest big win on this list: no new data model, no new permissions — just one screen that reads what already exists across seven modules.</div>
+        <div class="bet-tags">
+          <span class="chip impact-high">High impact</span>
+          <span class="effort">Low–medium effort</span>
+        </div>
+      </div>
+
+      <div class="bet">
+        <div class="bet-top">
+          <div>
+            <span class="bet-num mono">02</span>
+            <h3>Executive Command Center</h3>
+          </div>
+        </div>
+        <p>A live, role-gated dashboard on top of the Site 360 layer: ticket density by region, SLA-breach forecasting, overtime cost trend, and requests stuck longer than usual at a given stage.</p>
+        <div class="bet-why"><b>Why this lands</b>It's the screen a CTO opens in a board meeting.</div>
+        <div class="bet-tags">
+          <span class="chip impact-high">High impact</span>
+          <span class="effort">Medium effort</span>
+        </div>
+      </div>
+
+      <div class="bet">
+        <div class="bet-top">
+          <div>
+            <span class="bet-num mono">03</span>
+            <h3>A health score, per site</h3>
+          </div>
+        </div>
+        <p>Site 360 already has every touchpoint a site generates. Rolling that into one score — ticket frequency, incident recency, OT load, SLA compliance — turns an account review from a hunch into a number.</p>
+        <div class="bet-why"><b>Why this lands</b>Sales and account teams get a data-backed answer to "is this client site actually healthy?"</div>
+        <div class="bet-tags">
+          <span class="chip impact-medium">Medium–high impact</span>
+          <span class="effort">Medium effort</span>
+        </div>
+      </div>
+
+      <div class="bet">
+        <div class="bet-top">
+          <div>
+            <span class="bet-num mono">04</span>
+            <h3>Vobi starts flagging anomalies, not just narrating</h3>
+          </div>
+        </div>
+        <p>The live ops feed already tells the story of what happened. The next step is judgment: "Site X — three fault tickets in seven days," "OT spend up 40% this month," "cash request velocity 2× normal for this region."</p>
+        <div class="bet-why"><b>Why this lands</b>Same Gemini pipeline already running — this is a new prompt, not a new system.</div>
+        <div class="bet-tags">
+          <span class="chip impact-high">High impact</span>
+          <span class="effort">Medium effort</span>
+        </div>
+      </div>
+
+      <div class="bet">
+        <div class="bet-top">
+          <div>
+            <span class="bet-num mono">05</span>
+            <h3>Field app that survives a dead signal</h3>
+          </div>
+        </div>
+        <p>Field engineers already do GPS check-in. Making that installable and offline-capable — actions queue on a dead signal, sync the moment it returns — is a visible, concrete win for crews working sites with patchy coverage.</p>
+        <div class="bet-why"><b>Why this lands</b>It's the difference between "the app doesn't work at the tower site" and it just working.</div>
+        <div class="bet-tags">
+          <span class="chip impact-high">High impact</span>
+          <span class="effort">Medium–high effort</span>
+        </div>
+      </div>
+
+      <div class="bet">
+        <div class="bet-top">
+          <div>
+            <span class="bet-num mono">06</span>
+            <h3>KPI packs that show up in leadership's inbox</h3>
+          </div>
+        </div>
+        <p>The PDF pipeline already built for payslips, leave, and overtime can just as easily generate a weekly or monthly leadership pack — OT spend by department, SLA compliance by unit, transport utilization — and email it automatically.</p>
+        <div class="bet-why"><b>Why this lands</b>Near-zero new UI, and it's the kind of thing that gets forwarded to the board.</div>
+        <div class="bet-tags">
+          <span class="chip impact-medium">Medium impact</span>
+          <span class="effort">Low effort</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <div class="closing">
+    <h2>Where I'd start</h2>
+    <p>The approval-inbox and the shared workflow engine are the two highest-leverage moves on this whole page — one is the most visible thing you could ship next, the other is what stops today's bug classes from coming back. Everything else compounds on top of those two.</p>
+    <p>Nothing above is invented for effect: every finding is something the system actually did this session, and every bet reuses something already built rather than proposing a new foundation.</p>
+    <div class="signoff">— compiled from direct build-and-verify work on the VOBISS codebase</div>
+  </div>
+
+</div>

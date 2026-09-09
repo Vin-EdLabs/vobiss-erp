@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { AlertCircle, CheckCircle2, Clock, FileText, Layers, Search, TrendingUp } from 'lucide-react';
+import { ArrowLeft, Download, Layers, RefreshCw, Search } from 'lucide-react';
 import {
   Bar,
   BarChart,
@@ -16,15 +16,6 @@ import {
   YAxis,
 } from 'recharts';
 import { listProjectRequests, listSalesRequests, listDesignRequests, type ProjectRequest } from '@/api/project';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
 import { ServiceRequestReportButton } from '@/components/production/ServiceRequestReportPanel';
 
 /** The 360° Service Request Flow's real stages, keyed off current_stage (not "which endpoint
@@ -78,11 +69,17 @@ function money(value?: number | null) {
   return `GHS ${n.toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
 }
 
-function statusClass(status: string) {
-  if (status === 'completed' || status === 'noc_approved') return 'bg-emerald-50 text-emerald-700 ring-emerald-200';
-  if (status === 'rejected') return 'bg-rose-50 text-rose-700 ring-rose-200';
-  if (status === 'integrated' || status === 'ongoing') return 'bg-blue-50 text-blue-700 ring-blue-200';
-  return 'bg-amber-50 text-amber-700 ring-amber-200';
+function statusBadge(status: string) {
+  const map: Record<string, string> = {
+    completed: 'bg-emerald-100 text-emerald-800',
+    noc_approved: 'bg-emerald-100 text-emerald-800',
+    rejected: 'bg-red-100 text-red-800',
+    integrated: 'bg-blue-100 text-blue-800',
+    ongoing: 'bg-blue-100 text-blue-800',
+    pending: 'bg-amber-100 text-amber-800',
+    submitted_to_sales: 'bg-purple-100 text-purple-800',
+  };
+  return map[status] || 'bg-slate-100 text-slate-700';
 }
 
 export default function ServiceRequestReport() {
@@ -169,7 +166,7 @@ export default function ServiceRequestReport() {
         acc[row.status] = (acc[row.status] || 0) + 1;
         return acc;
       }, {})
-    ).map(([key, count]) => ({ key, name: STATUS_LABELS[key] || key, count }));
+    ).map(([key, count]) => ({ key, name: STATUS_LABELS[key] || key, value: count, color: STATUS_COLORS[key] }));
 
     const byUnit = REPORT_UNITS.map((u) => ({
       unit: u.label,
@@ -199,228 +196,269 @@ export default function ServiceRequestReport() {
     };
   }, [filteredRows]);
 
+  const exportCsv = () => {
+    const headers = ['ID', 'Customer', 'Site', 'Stage', 'Status', 'Service', 'Value', 'Created'];
+    const lines = filteredRows.map((row) =>
+      [
+        row.id,
+        `"${(row.customer_name || '').replace(/"/g, '""')}"`,
+        `"${(row.site_name || row.location || '').replace(/"/g, '""')}"`,
+        row.report_unit_label,
+        row.status,
+        `"${(row.service_type || row.bandwidth || '').replace(/"/g, '""')}"`,
+        Number(row.mrc || 0) + Number(row.nrc || 0),
+        row.created_at,
+      ].join(',')
+    );
+    const blob = new Blob([[headers.join(','), ...lines].join('\n')], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `service-request-report-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   return (
-    <div className="min-h-full bg-gradient-to-br from-slate-50 via-white to-cyan-50/60 p-6">
-      <div className="mx-auto max-w-7xl space-y-6">
-        <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[var(--shadow-md)]">
-          <div className="bg-gradient-to-r from-cyan-700 via-blue-700 to-indigo-800 p-6 text-white">
-            <p className="text-xs font-semibold uppercase tracking-widest text-cyan-100">Report System</p>
-            <div className="mt-2 flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
-              <div>
-                <h1 className="text-3xl font-bold">Service Request Report</h1>
-                <p className="mt-2 max-w-3xl text-sm text-cyan-50">
-                  The 360° Service Request Flow, mapped end to end — search any SR across Sales, Design,
-                  Project, TX, IP, and NOC, then open its full lifecycle report.
-                </p>
-              </div>
-              <Button onClick={() => void load()} variant="secondary" className="bg-white text-slate-900 hover:bg-cyan-50">
-                Refresh
-              </Button>
-            </div>
+    <div className="min-h-full bg-gradient-to-br from-slate-50 via-white to-cyan-50/30 p-4 sm:p-6">
+      <div className="mx-auto max-w-[1400px]">
+        <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <Link
+              to="/staff/reports"
+              className="mb-2 inline-flex items-center gap-1 text-sm font-medium text-indigo-600 hover:text-indigo-800"
+            >
+              <ArrowLeft className="h-4 w-4" />
+              Report System
+            </Link>
+            <p className="text-xs font-semibold uppercase tracking-widest text-cyan-600">
+              Report System · Service Delivery
+            </p>
+            <h1 className="text-3xl font-bold text-slate-900">Service Request Report</h1>
+            <p className="mt-1 max-w-2xl text-slate-600">
+              The 360° Service Request Flow, mapped end to end — search any SR across Sales, Design,
+              Project, TX, IP, and NOC, then open its full lifecycle report.
+            </p>
           </div>
-
-          <div className="grid gap-4 border-b border-slate-100 p-5 sm:grid-cols-2 lg:grid-cols-5">
-            {[
-              { label: 'Total', value: stats.total, icon: FileText, tone: 'text-slate-700 bg-slate-100' },
-              { label: 'Active', value: stats.active, icon: Clock, tone: 'text-blue-700 bg-blue-100' },
-              { label: 'Completed', value: stats.completed, icon: CheckCircle2, tone: 'text-emerald-700 bg-emerald-100' },
-              { label: 'Rejected', value: stats.rejected, icon: AlertCircle, tone: 'text-rose-700 bg-rose-100' },
-              { label: 'MRC + NRC', value: money(stats.revenue), icon: TrendingUp, tone: 'text-indigo-700 bg-indigo-100' },
-            ].map((item) => (
-              <div key={item.label} className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
-                <div className="flex items-center gap-3">
-                  <div className={`rounded-xl p-2 ${item.tone}`}>
-                    <item.icon className="h-4 w-4" />
-                  </div>
-                  <div>
-                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{item.label}</p>
-                    <p className="mt-1 text-xl font-bold text-slate-900">{item.value}</p>
-                  </div>
-                </div>
-              </div>
-            ))}
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={exportCsv}
+              disabled={filteredRows.length === 0}
+              className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-medium shadow-sm hover:bg-slate-50 disabled:opacity-50"
+            >
+              <Download className="h-4 w-4" />
+              Export CSV
+            </button>
+            <button
+              type="button"
+              onClick={() => void load()}
+              className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-medium shadow-sm hover:bg-slate-50"
+            >
+              <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+              Refresh
+            </button>
           </div>
+        </div>
 
-          <div className="grid gap-5 border-b border-slate-100 p-5 lg:grid-cols-3">
-            <ChartCard title="Status Distribution" subtitle="Open, completed, and rejected work">
-              <ResponsiveContainer width="100%" height={230}>
+        {error && (
+          <div className="mb-6 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">{error}</div>
+        )}
+
+        <div className="mb-6 flex flex-wrap items-end gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-[var(--shadow-md)]">
+          <div>
+            <label className="mb-1 block text-xs font-medium text-slate-500">Stage</label>
+            <select
+              value={unit}
+              onChange={(e) => setUnit(e.target.value)}
+              className="rounded-lg border border-slate-200 px-3 py-2 text-sm"
+            >
+              <option value="all">All stages</option>
+              {REPORT_UNITS.map((u) => (
+                <option key={u.slug} value={u.slug}>{u.label}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-medium text-slate-500">Status</label>
+            <select
+              value={status}
+              onChange={(e) => setStatus(e.target.value)}
+              className="rounded-lg border border-slate-200 px-3 py-2 text-sm"
+            >
+              <option value="all">All statuses</option>
+              {Object.entries(STATUS_LABELS).map(([value, label]) => (
+                <option key={value} value={value}>{label}</option>
+              ))}
+            </select>
+          </div>
+          <button
+            type="button"
+            onClick={() => { setSearch(''); setStatus('all'); setUnit('all'); }}
+            className="rounded-lg bg-cyan-600 px-4 py-2 text-sm font-medium text-white hover:bg-cyan-700"
+          >
+            Clear filters
+          </button>
+        </div>
+
+        <div className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+          <StatCard label="Total requests" value={stats.total} accentIndex={0} />
+          <StatCard label="Active" value={stats.active} accentIndex={3} />
+          <StatCard label="Completed" value={stats.completed} accentIndex={1} />
+          <StatCard label="Rejected" value={stats.rejected} accentIndex={4} />
+          <StatCard label="MRC + NRC value" value={money(stats.revenue)} isText accentIndex={2} />
+        </div>
+
+        {!loading && (
+          <div className="mb-8 grid gap-5 lg:grid-cols-3">
+            <ChartCard title="Status distribution">
+              <ResponsiveContainer width="100%" height={220}>
                 <PieChart>
-                  <Pie
-                    data={chartData.byStatus}
-                    dataKey="count"
-                    nameKey="name"
-                    innerRadius={58}
-                    outerRadius={86}
-                    paddingAngle={3}
-                  >
+                  <Pie data={chartData.byStatus} dataKey="value" nameKey="name" outerRadius={80} label>
                     {chartData.byStatus.map((entry) => (
-                      <Cell key={entry.key} fill={STATUS_COLORS[entry.key] || '#64748b'} />
+                      <Cell key={entry.key} fill={entry.color || '#64748b'} />
                     ))}
                   </Pie>
                   <Tooltip />
                 </PieChart>
               </ResponsiveContainer>
-              <div className="mt-3 flex flex-wrap gap-2">
-                {chartData.byStatus.map((entry) => (
-                  <span key={entry.key} className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-700">
-                    {entry.name}: {entry.count}
-                  </span>
-                ))}
-              </div>
             </ChartCard>
 
-            <ChartCard title="Requests By Stage" subtitle="Volume across every stage of the flow">
-              <ResponsiveContainer width="100%" height={260}>
+            <ChartCard title="Requests by stage">
+              <ResponsiveContainer width="100%" height={220}>
                 <BarChart data={chartData.byUnit}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                  <XAxis dataKey="unit" tick={{ fontSize: 12 }} />
-                  <YAxis allowDecimals={false} tick={{ fontSize: 12 }} />
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="unit" tick={{ fontSize: 10 }} />
+                  <YAxis allowDecimals={false} />
                   <Tooltip />
-                  <Bar dataKey="requests" radius={[8, 8, 0, 0]} fill="#0891b2" />
+                  <Bar dataKey="requests" radius={[4, 4, 0, 0]} fill="#0891b2" />
                 </BarChart>
               </ResponsiveContainer>
             </ChartCard>
 
-            <ChartCard title="Request Flow" subtitle="Created vs completed trend">
-              <ResponsiveContainer width="100%" height={260}>
-                <LineChart data={chartData.flow}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                  <XAxis dataKey="period" tick={{ fontSize: 11 }} />
-                  <YAxis allowDecimals={false} tick={{ fontSize: 12 }} />
-                  <Tooltip />
-                  <Line type="monotone" dataKey="requests" stroke="#2563eb" strokeWidth={3} dot={false} />
-                  <Line type="monotone" dataKey="completed" stroke="#059669" strokeWidth={3} dot={false} />
-                </LineChart>
-              </ResponsiveContainer>
-            </ChartCard>
+            {chartData.flow.length > 0 && (
+              <ChartCard title="Request flow">
+                <ResponsiveContainer width="100%" height={220}>
+                  <LineChart data={chartData.flow}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="period" tick={{ fontSize: 10 }} />
+                    <YAxis allowDecimals={false} />
+                    <Tooltip />
+                    <Line type="monotone" dataKey="requests" name="Created" stroke="#2563eb" strokeWidth={2} dot={false} />
+                    <Line type="monotone" dataKey="completed" name="Completed" stroke="#059669" strokeWidth={2} dot={false} />
+                  </LineChart>
+                </ResponsiveContainer>
+              </ChartCard>
+            )}
           </div>
+        )}
 
-          <div className="grid gap-3 border-b border-slate-100 p-5 lg:grid-cols-[1fr_180px_180px_auto]">
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-              <Input
-                className="pl-9"
-                placeholder="Search customer, site, region, circuit, requester..."
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-              />
-            </div>
-            <Select value={unit} onValueChange={setUnit}>
-              <SelectTrigger>
-                <SelectValue placeholder="Stage" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All stages</SelectItem>
-                {REPORT_UNITS.map((u) => (
-                  <SelectItem key={u.slug} value={u.slug}>{u.label}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Select value={status} onValueChange={setStatus}>
-              <SelectTrigger>
-                <SelectValue placeholder="Status" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All statuses</SelectItem>
-                {Object.entries(STATUS_LABELS).map(([value, label]) => (
-                  <SelectItem key={value} value={value}>{label}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Button variant="outline" onClick={() => { setSearch(''); setStatus('all'); setUnit('all'); }}>
-              Clear
-            </Button>
-          </div>
+        <div className="mb-4 relative max-w-md">
+          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+          <input
+            type="search"
+            placeholder="Search customer, site, region, circuit, requester..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="w-full rounded-xl border border-slate-200 bg-white py-2 pl-10 pr-3 text-sm shadow-sm"
+          />
+        </div>
 
-          {error ? (
-            <div className="p-8 text-center text-sm text-rose-600">{error}</div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="min-w-full divide-y divide-slate-100 text-sm">
-                <thead className="bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
-                  <tr>
-                    <th className="px-4 py-3">Request</th>
-                    <th className="px-4 py-3">Customer / Site</th>
-                    <th className="px-4 py-3">Stage</th>
-                    <th className="px-4 py-3">Status</th>
-                    <th className="px-4 py-3">Service</th>
-                    <th className="px-4 py-3 text-right">Value</th>
-                    <th className="px-4 py-3">Created</th>
-                    <th className="px-4 py-3">Action</th>
+        <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[var(--shadow-md)]">
+          <table className="w-full min-w-[900px] text-sm">
+            <thead className="bg-slate-50 text-left text-xs font-semibold uppercase text-slate-500">
+              <tr>
+                <th className="px-3 py-3">Request</th>
+                <th className="px-3 py-3">Customer / Site</th>
+                <th className="px-3 py-3">Stage</th>
+                <th className="px-3 py-3">Status</th>
+                <th className="px-3 py-3">Service</th>
+                <th className="px-3 py-3 text-right">Value</th>
+                <th className="px-3 py-3">Created</th>
+                <th className="px-3 py-3 text-right">Details</th>
+              </tr>
+            </thead>
+            <tbody>
+              {loading ? (
+                <tr>
+                  <td colSpan={8} className="py-16 text-center text-slate-500">Loading service requests…</td>
+                </tr>
+              ) : filteredRows.length === 0 ? (
+                <tr>
+                  <td colSpan={8} className="py-16 text-center text-slate-500">No service requests match your filters.</td>
+                </tr>
+              ) : (
+                filteredRows.map((row) => (
+                  <tr key={`${row.report_unit}-${row.id}`} className="border-t border-slate-100 hover:bg-slate-50/50">
+                    <td className="px-3 py-3 font-medium text-slate-900">#{row.id}</td>
+                    <td className="px-3 py-3">
+                      <p className="font-medium text-slate-900">{row.customer_name || '-'}</p>
+                      <p className="text-xs text-slate-500">{row.site_name || row.location || '-'}</p>
+                    </td>
+                    <td className="px-3 py-3">
+                      <span className="inline-flex items-center gap-1 rounded-full bg-cyan-50 px-2 py-1 text-xs font-semibold text-cyan-700">
+                        <Layers className="h-3 w-3" />
+                        {row.report_unit_label}
+                      </span>
+                    </td>
+                    <td className="px-3 py-3">
+                      <span className={`rounded-full px-2 py-0.5 text-xs font-medium capitalize ${statusBadge(row.status)}`}>
+                        {STATUS_LABELS[row.status] || row.status}
+                      </span>
+                    </td>
+                    <td className="px-3 py-3 text-slate-600">{row.service_type || row.bandwidth || '-'}</td>
+                    <td className="px-3 py-3 text-right font-semibold text-slate-900">
+                      {money(Number(row.mrc || 0) + Number(row.nrc || 0))}
+                    </td>
+                    <td className="px-3 py-3 text-xs text-slate-600">{formatDate(row.created_at)}</td>
+                    <td className="px-3 py-3">
+                      <div className="flex items-center justify-end gap-3">
+                        <Link
+                          to={`/project-request/${row.id}`}
+                          className="text-xs font-medium text-indigo-600 hover:text-indigo-800"
+                        >
+                          View
+                        </Link>
+                        <ServiceRequestReportButton requestId={row.id} variant="ghost" size="sm" />
+                      </div>
+                    </td>
                   </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100 bg-white">
-                  {loading ? (
-                    <tr>
-                      <td colSpan={8} className="px-4 py-10 text-center text-slate-500">Loading service requests...</td>
-                    </tr>
-                  ) : filteredRows.length === 0 ? (
-                    <tr>
-                      <td colSpan={8} className="px-4 py-10 text-center text-slate-500">No service requests match your filters.</td>
-                    </tr>
-                  ) : (
-                    filteredRows.map((row) => (
-                      <tr key={`${row.report_unit}-${row.id}`} className="hover:bg-slate-50/80">
-                        <td className="px-4 py-3 font-semibold text-slate-900">#{row.id}</td>
-                        <td className="px-4 py-3">
-                          <p className="font-medium text-slate-900">{row.customer_name || '-'}</p>
-                          <p className="text-xs text-slate-500">{row.site_name || row.location || '-'}</p>
-                        </td>
-                        <td className="px-4 py-3">
-                          <span className="inline-flex items-center gap-1 rounded-full bg-cyan-50 px-2 py-1 text-xs font-semibold text-cyan-700">
-                            <Layers className="h-3 w-3" />
-                            {row.report_unit_label}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3">
-                          <span className={`inline-flex rounded-full px-2 py-1 text-xs font-semibold ring-1 ${statusClass(row.status)}`}>
-                            {STATUS_LABELS[row.status] || row.status}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3 text-slate-600">{row.service_type || row.bandwidth || '-'}</td>
-                        <td className="px-4 py-3 text-right font-medium text-slate-800">
-                          {money(Number(row.mrc || 0) + Number(row.nrc || 0))}
-                        </td>
-                        <td className="px-4 py-3 text-slate-600">{formatDate(row.created_at)}</td>
-                        <td className="px-4 py-3">
-                          <div className="flex items-center gap-3">
-                            <Link
-                              to={`/project-request/${row.id}`}
-                              className="text-sm font-semibold text-indigo-600 hover:text-indigo-800"
-                            >
-                              Open
-                            </Link>
-                            <ServiceRequestReportButton requestId={row.id} variant="ghost" size="sm" />
-                          </div>
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-          )}
+                ))
+              )}
+            </tbody>
+          </table>
         </div>
       </div>
     </div>
   );
 }
 
-function ChartCard({
-  title,
-  subtitle,
-  children,
+function StatCard({
+  label,
+  value,
+  isText,
+  accentIndex = 0,
 }: {
-  title: string;
-  subtitle: string;
-  children: React.ReactNode;
+  label: string;
+  value: string | number;
+  isText?: boolean;
+  accentIndex?: number;
 }) {
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-[var(--shadow-md)]">
-      <div className="mb-4">
-        <h2 className="text-base font-semibold text-slate-900">{title}</h2>
-        <p className="text-xs text-slate-500">{subtitle}</p>
-      </div>
+    <div
+      className="rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] px-5 py-[18px]"
+      style={{ borderLeftWidth: 3, borderLeftColor: ['var(--accent-green)', 'var(--accent-purple)', 'var(--accent-amber)', 'var(--accent-blue)', 'var(--accent-red)'][accentIndex % 5] }}
+    >
+      <p className="text-[10px] font-medium uppercase tracking-widest text-[var(--text-muted)]">{label}</p>
+      <p className={`mt-2.5 font-bold leading-none text-[var(--text-primary)] ${isText ? 'text-xl' : 'text-2xl'}`}>{value}</p>
+    </div>
+  );
+}
+
+function ChartCard({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-4 shadow-[var(--shadow-md)]">
+      <h3 className="mb-3 text-sm font-semibold text-[var(--text-primary)]">{title}</h3>
       {children}
     </div>
   );
