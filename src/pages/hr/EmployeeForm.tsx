@@ -147,12 +147,17 @@ export function EmployeeForm({
               ))}
             </select>
           </Field>
-          <Field label="Position" optional hint="Choose Staff if they have no specific title.">
-            <select className={inputClass} value={form.position} onChange={(e) => update({ position: e.target.value })}>
-              {optionsWithCurrent(POSITION_OPTIONS, form.position).map((opt) => (
-                <option key={opt.value || 'none'} value={opt.value}>{opt.label}</option>
-              ))}
-            </select>
+          <Field
+            label="Position"
+            optional
+            hint="Free text — just a job title for their profile. It has no effect on system access; set that in User Role & Management instead."
+          >
+            <input
+              className={inputClass}
+              placeholder="e.g. Staff, Senior Engineer, Team Lead…"
+              value={form.position}
+              onChange={(e) => update({ position: e.target.value })}
+            />
           </Field>
         </div>
         <Field label="Line manager">

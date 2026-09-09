@@ -513,6 +513,10 @@ router.post('/:id/approve', async (req, res) => {
     const userRole = String(req.user.role || req.user.main_role || '').toLowerCase();
     const isAdmin = ['admin', 'superadmin'].includes(userRole);
 
+    if (Number(request.requester_id) === userId && !isSystemAdminAccount(req.user)) {
+      return res.status(403).json({ error: 'You cannot approve your own fuel request.' });
+    }
+
     const userName =
       formatPersonName(req.user, req.user.username);
     const selectedApprovers = Array.isArray(request.selected_approver_ids) ? request.selected_approver_ids.map(Number) : [];
@@ -650,6 +654,10 @@ router.post('/:id/reject', async (req, res) => {
     const userName =
       formatPersonName(req.user, req.user.username);
 
+    if (Number(request.requester_id) === userId && !isSystemAdminAccount(req.user)) {
+      return res.status(403).json({ error: 'You cannot reject your own fuel request.' });
+    }
+
     await pool.query(
       `UPDATE fuel_requests
        SET status = 'Rejected', current_stage = 'rejected', rejected_at = NOW(), rejected_by = $2, rejection_reason = $3, updated_at = NOW()
@@ -709,6 +717,10 @@ router.post('/:id/issue-cash', async (req, res) => {
     const userId = Number(req.user.id);
     const userName =
       formatPersonName(req.user, req.user.username);
+
+    if (Number(request.requester_id) === userId && !isSystemAdminAccount(req.user)) {
+      return res.status(403).json({ error: 'You cannot issue cash for your own fuel request.' });
+    }
 
     await pool.query(
       `UPDATE fuel_requests
@@ -835,6 +847,10 @@ router.post('/:id/complete', async (req, res) => {
     const userId = Number(req.user.id);
     const userName =
       formatPersonName(req.user, req.user.username);
+
+    if (Number(request.requester_id) === userId && !isSystemAdminAccount(req.user)) {
+      return res.status(403).json({ error: 'You cannot complete your own fuel request.' });
+    }
 
     if (!request.receipt_url) {
       return res.status(400).json({ error: 'Cannot complete request without an uploaded fuel receipt.' });

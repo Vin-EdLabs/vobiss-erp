@@ -1989,11 +1989,20 @@ async function searchTickets(searchTerm) {
       t.ticket_id,
       t.title,
       t.status,
+      c.id AS customer_id,
       c.customer_name,
-      p.project_name
+      p.project_name,
+      t.site_id,
+      s.site_name,
+      s.site_code,
+      s.region,
+      s.site_address,
+      s.latitude,
+      s.longitude
     FROM tickets t
     JOIN customers c ON t.customer_id = c.id
     JOIN projects p ON t.project_id = p.id
+    LEFT JOIN customer_sites s ON s.id = t.site_id
     WHERE t.ticket_id ILIKE $1
       OR REPLACE(REPLACE(LOWER(t.ticket_id), '-', ''), ' ', '') ILIKE $2
       OR t.title ILIKE $1

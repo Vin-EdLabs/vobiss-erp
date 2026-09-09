@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { useNavigate } from 'react-router-dom';
 import {
   Search,
   Ticket,
@@ -17,6 +18,7 @@ import {
   AlertTriangle,
   FileCheck,
   Network,
+  MapPin,
 } from 'lucide-react';
 import { globalExecutiveSearch, type GlobalSearchResult } from '@/api/globalSearch';
 import { cn } from '@/lib/utils';
@@ -26,6 +28,7 @@ const KIND_META: Record<
   string,
   { label: string; icon: React.ElementType; chip: string }
 > = {
+  site: { label: 'Sites', icon: MapPin, chip: 'bg-pink-100 text-pink-800' },
   ticket: { label: 'Tickets', icon: Ticket, chip: 'bg-blue-100 text-blue-800' },
   cash_request: { label: 'Cash requests', icon: Banknote, chip: 'bg-emerald-100 text-emerald-800' },
   material_request: { label: 'Material requests', icon: Package, chip: 'bg-amber-100 text-amber-800' },
@@ -65,6 +68,7 @@ export function GlobalExecutiveSearch({
   className,
   autoFocus = false,
 }: Props) {
+  const navigate = useNavigate();
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<GlobalSearchResult[]>([]);
   const [loading, setLoading] = useState(false);
@@ -154,6 +158,10 @@ export function GlobalExecutiveSearch({
 
   const openFlow = (item: GlobalSearchResult) => {
     setOpen(false);
+    if (item.kind === 'site') {
+      navigate(item.href);
+      return;
+    }
     setFlowTarget({ type: KIND_TO_REGISTRY_TYPE[item.kind] || item.kind, id: item.id });
   };
 
@@ -208,7 +216,7 @@ export function GlobalExecutiveSearch({
 
       {!loading && !error && flatResults.length === 0 && (
         <p className="px-4 py-6 text-center text-sm text-slate-500">
-          No matches for &ldquo;{trimmed}&rdquo;. Try a ticket code (TCK-…), request #, or customer name.
+          No matches for &ldquo;{trimmed}&rdquo;. Try a site name, ticket code (TCK-…), request #, or client name.
         </p>
       )}
 
@@ -274,14 +282,15 @@ export function GlobalExecutiveSearch({
     <div ref={wrapRef} className={cn('relative', isPage ? 'w-full max-w-3xl' : 'w-full', className)}>
       <div
         className={cn(
-          'flex items-center gap-2 rounded-xl border bg-white shadow-sm transition focus-within:border-blue-400 focus-within:ring-2 focus-within:ring-blue-500/30',
-          isPage ? 'border-slate-200 px-4 py-3' : 'border-slate-200 px-3 py-2'
+          'group flex items-center gap-2.5 rounded-xl border bg-white shadow-sm transition-all duration-200',
+          'focus-within:border-transparent focus-within:shadow-md focus-within:ring-2 focus-within:ring-blue-500/40',
+          isPage ? 'border-slate-200 px-4 py-3.5' : 'border-slate-200 px-3 py-2 hover:border-slate-300'
         )}
       >
         {loading ? (
           <Loader2 className="h-4 w-4 shrink-0 animate-spin text-blue-600" />
         ) : (
-          <Search className="h-4 w-4 shrink-0 text-slate-400" />
+          <Search className="h-4 w-4 shrink-0 text-slate-400 transition-colors group-focus-within:text-blue-500" />
         )}
         <input
           ref={inputRef}
@@ -297,8 +306,8 @@ export function GlobalExecutiveSearch({
           onKeyDown={onKeyDown}
           placeholder={
             isPage
-              ? 'Search TCK, request #, cash, material, customer…'
-              : 'Search tickets, requests, cash…'
+              ? 'Search by site, ticket, request #, cash, or client…'
+              : 'Search sites, tickets, requests, cash…'
           }
           className={cn(
             'min-w-0 flex-1 border-0 bg-transparent outline-none placeholder:text-slate-400',
@@ -308,11 +317,16 @@ export function GlobalExecutiveSearch({
           aria-expanded={showPanel}
           aria-autocomplete="list"
         />
+        {!isPage && (
+          <kbd className="hidden shrink-0 rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[10px] font-medium text-slate-400 sm:inline-block">
+            ⏎
+          </kbd>
+        )}
       </div>
 
       {isPage && (
         <p className="mt-2 text-xs text-slate-500">
-          Start typing — e.g. <strong>TCK</strong>, <strong>24</strong>, <strong>cash</strong>, or a customer name.
+          Start with a <strong>site name</strong> for the full picture — client, tickets, materials, overtime, and more in one view. Also matches <strong>TCK</strong> codes, request #s, and client names.
         </p>
       )}
 

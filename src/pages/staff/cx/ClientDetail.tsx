@@ -1,6 +1,6 @@
 ﻿import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { ArrowLeft, Copy, KeyRound, MapPin, Pencil, Plus, RotateCcw, Unlink } from 'lucide-react';
+import { ArrowLeft, Copy, KeyRound, MapPin, Pencil, Plus, RotateCcw } from 'lucide-react';
 import { toast } from 'sonner';
 import { cxApi } from '@/api';
 import { Button } from '@/components/ui/button';
@@ -20,6 +20,7 @@ const EMPTY_SITE_EDIT = {
   service_type: SERVICE_TYPES[0],
   ip_address: '',
   connection_status: 'Pending',
+  gps_coordinates: '',
 };
 
 function connectionClass(status?: string) {
@@ -159,6 +160,7 @@ const ClientDetailPage: React.FC = () => {
       service_type: site.service_type || SERVICE_TYPES[0],
       ip_address: site.ip_address || '',
       connection_status: site.connection_status || 'Pending',
+      gps_coordinates: site.gps_coordinates || '',
     });
     if (!editOpen) setEditOpen(true);
   };
@@ -174,6 +176,10 @@ const ClientDetailPage: React.FC = () => {
       toast.error('Site name is required');
       return;
     }
+    if (!siteForm.gps_coordinates.trim()) {
+      toast.error('Site coordinates are required');
+      return;
+    }
     setSaving(true);
     try {
       await cxApi.updateSite(editingSiteId, siteForm);
@@ -182,22 +188,6 @@ const ClientDetailPage: React.FC = () => {
       await load();
     } catch (err: any) {
       toast.error(err?.message || 'Failed to update site');
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const unlinkSite = async (siteId: number, siteName: string) => {
-    if (!confirm(`Unlink “${siteName}” from this client? The site stays in the registry.`)) return;
-    setSaving(true);
-    try {
-      await cxApi.updateSite(siteId, { customer_id: null });
-      toast.success('Site unlinked');
-      if (editingSiteId === siteId) cancelSiteEdit();
-      await load();
-      await loadUnassignedSites();
-    } catch (err: any) {
-      toast.error(err?.message || 'Failed to unlink site');
     } finally {
       setSaving(false);
     }
@@ -509,6 +499,15 @@ const ClientDetailPage: React.FC = () => {
                               <Label>IP Address</Label>
                               <Input value={siteForm.ip_address} onChange={(e) => setSiteForm((f) => ({ ...f, ip_address: e.target.value }))} />
                             </div>
+                            <div className="md:col-span-2">
+                              <Label>GPS Coordinates *</Label>
+                              <Input
+                                value={siteForm.gps_coordinates}
+                                onChange={(e) => setSiteForm((f) => ({ ...f, gps_coordinates: e.target.value }))}
+                                placeholder="Paste from Google Maps — e.g. 5.6037, -0.1870, a maps link, or DMS"
+                                required
+                              />
+                            </div>
                             <div>
                               <Label>Status</Label>
                               <Select value={siteForm.connection_status} onValueChange={(v) => setSiteForm((f) => ({ ...f, connection_status: v }))}>
@@ -543,9 +542,6 @@ const ClientDetailPage: React.FC = () => {
                           <div className="flex shrink-0 gap-2">
                             <Button type="button" size="sm" variant="outline" onClick={() => startEditSite(site)}>
                               Edit
-                            </Button>
-                            <Button type="button" size="sm" variant="outline" onClick={() => void unlinkSite(site.id, site.site_name)}>
-                              <Unlink className="mr-1 h-3.5 w-3.5" /> Unlink
                             </Button>
                           </div>
                         </div>

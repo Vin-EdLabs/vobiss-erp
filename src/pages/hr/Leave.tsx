@@ -1,12 +1,16 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Plus } from 'lucide-react';
+import { ChevronDown, ChevronUp, Plus } from 'lucide-react';
 import { toast } from 'sonner';
 import { hrApi, HR_QUERY } from '@/api/hr';
+import { leaveApi } from '@/api/leave';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Avatar, EmptyState, Field, HrPageHeader, StatusBadge, TableSkeleton, inputClass, AttachmentLink, TruncatedReason, RequestDetailDialog, YearSelect } from './components';
+import { Avatar, EmptyState, Field, HrPageHeader, StatCard, StatusBadge, TableSkeleton, inputClass, AttachmentLink, TruncatedReason, YearSelect } from './components';
+import { LeaveCategoryConfig } from '@/components/hr/Leave/LeaveCategoryConfig';
+import { LeaveApprovalCard } from '@/components/hr/Leave/LeaveApprovalCard';
 
 const LEAVE_TYPES = ['Annual', 'Sick', 'Emergency', 'Maternity', 'Paternity', 'Unpaid'];
 
@@ -29,6 +33,37 @@ function leaveRank(row: any) {
   return 3;
 }
 
+function stageLabel(stage?: string | null) {
+  if (!stage) return '—';
+  if (stage === 'approved') return 'Approved';
+  if (stage === 'declined') return 'Declined';
+  if (stage === 'cancelled') return 'Cancelled';
+  return stage.charAt(0).toUpperCase() + stage.slice(1);
+}
+
+function MiniDetail({ label, value }: { label: string; value?: React.ReactNode }) {
+  return (
+    <div>
+      <p className="text-[10px] font-medium uppercase tracking-wide text-[var(--text-muted)]">{label}</p>
+      <p className="mt-0.5 text-sm font-medium text-[var(--text-primary)]">{value ?? '—'}</p>
+    </div>
+  );
+}
+
+/** Fetches and renders one self-service request's full inline detail — same design used on the
+ *  Leave Request page, embedded (no popup) inside this row's accordion. */
+function NewFlowExpandedDetail({ id, canAct, onResolved }: { id: number; canAct: boolean; onResolved: () => void }) {
+  const detailQ = useQuery({
+    queryKey: ['leave', 'detail', 'hr', id],
+    queryFn: () => leaveApi.requestDetail(id),
+    ...HR_QUERY,
+  });
+  if (detailQ.isLoading || !detailQ.data) {
+    return <div className="h-24 animate-pulse rounded-[var(--radius)] bg-[var(--surface-secondary)]" />;
+  }
+  return <LeaveApprovalCard request={detailQ.data} scope="hr" canAct={canAct} hideHeader onResolved={onResolved} />;
+}
+
 function weekdayCount(start: string, end: string) {
   if (!start || !end) return 0;
   const s = new Date(start);
@@ -43,6 +78,8 @@ function weekdayCount(start: string, end: string) {
 
 const HrLeave = () => {
   const qc = useQueryClient();
+  const { id: targetIdParam } = useParams();
+  const targetId = targetIdParam ? Number(targetIdParam) : null;
   const now = new Date();
   const [month, setMonth] = useState(now.getMonth() + 1);
   const [year, setYear] = useState(now.getFullYear());
@@ -59,7 +96,7 @@ const HrLeave = () => {
   const [dayDetail, setDayDetail] = useState<string | null>(null);
   const [rejectId, setRejectId] = useState<number | null>(null);
   const [rejectReason, setRejectReason] = useState('');
-  const [detail, setDetail] = useState<any | null>(null);
+  const [expandedKey, setExpandedKey] = useState<string | null>(targetId ? `newflow-${targetId}` : null);
 
   const [leaveTab, setLeaveTab] = useState('applications');
   const employeesQ = useQuery({ queryKey: ['hr', 'employees'], queryFn: () => hrApi.employees(), ...HR_QUERY });
@@ -85,7 +122,21 @@ const HrLeave = () => {
     queryFn: () => hrApi.leaveRequests(),
     ...HR_QUERY,
   });
-  const pendingCount = (reqQ.data || []).filter((r: any) => String(r.status).toLowerCase() === 'pending').length;
+  // Multi-stage self-service requests (reliever → supervisor → manager → CTO → HR) — the same
+  // hr_leave_requests rows as reqQ, but the ones still mid-flow (current_stage set). Reviewed
+  // and, once it's HR's turn, approved right here in Applications — not a separate tab.
+  const newFlowQ = useQuery({
+    queryKey: ['hr', 'leave-newflow'],
+    queryFn: () => leaveApi.allRequests(),
+    ...HR_QUERY,
+  });
+  const overviewQ = useQuery({ queryKey: ['hr', 'leave-overview'], queryFn: () => leaveApi.overview(), ...HR_QUERY });
+  const pendingCount =
+    (reqQ.data || []).filter((r: any) => String(r.status).toLowerCase() === 'pending').length +
+    (newFlowQ.data?.requests || []).filter((r: any) => String(r.status).toLowerCase() === 'pending').length;
+
+  // One unified list — self-service multi-stage requests, legacy single-stage requests, and
+  // manual HR-entered records all live together under "Leave Records" now, sorted together.
   const allRows = useMemo(() => {
     const requests = (reqQ.data || []).map((r: any) => ({
       ...r,
@@ -93,8 +144,17 @@ const HrLeave = () => {
       reason: r.reason,
       status: String(r.status || '').toLowerCase(),
     }));
+    const newFlow = (newFlowQ.data?.requests || []).map((r: any) => ({
+      ...r,
+      source: 'newflow',
+      full_name: r.employee_name,
+      department: r.department,
+      photo_url: r.employee_photo_url,
+      reason: r.reason,
+      status: String(r.status || '').toLowerCase(),
+    }));
     const approvedKeys = new Set(
-      requests
+      [...requests, ...newFlow]
         .filter((r: any) => r.status === 'approved')
         .map(leaveMatchKey)
     );
@@ -106,17 +166,20 @@ const HrLeave = () => {
         reason: r.notes,
         status: String(r.status || '').toLowerCase(),
       }));
-    let list = [...requests, ...records];
+    let list = [...newFlow, ...requests, ...records];
     if (filters.employee_id) list = list.filter((r: any) => String(r.employee_id) === String(filters.employee_id));
     if (filters.leave_type) list = list.filter((r: any) => r.leave_type === filters.leave_type);
     if (filters.status) list = list.filter((r: any) => String(r.status).toLowerCase() === filters.status);
     list.sort((a: any, b: any) => {
       const rank = leaveRank(a) - leaveRank(b);
       if (rank) return rank;
+      const aActionable = a.source === 'newflow' && a.status === 'pending' && a.current_stage === 'hr';
+      const bActionable = b.source === 'newflow' && b.status === 'pending' && b.current_stage === 'hr';
+      if (aActionable !== bActionable) return aActionable ? -1 : 1;
       return String(b.created_at || b.start_date || '').localeCompare(String(a.created_at || a.start_date || ''));
     });
     return list;
-  }, [reqQ.data, leaveQ.data, filters]);
+  }, [reqQ.data, newFlowQ.data, leaveQ.data, filters]);
 
   const createMut = useMutation({
     mutationFn: () => hrApi.createLeave({ ...form, employee_id: Number(form.employee_id), days: weekdayCount(form.start_date, form.end_date) }),
@@ -135,7 +198,7 @@ const HrLeave = () => {
       qc.invalidateQueries({ queryKey: ['hr'] });
       setRejectId(null);
       setRejectReason('');
-      setDetail(null);
+      setExpandedKey(null);
     },
     onError: (e: Error) => toast.error(e.message),
   });
@@ -146,6 +209,34 @@ const HrLeave = () => {
       qc.invalidateQueries({ queryKey: ['hr'] });
     },
   });
+  const refreshNewFlow = () => {
+    qc.invalidateQueries({ queryKey: ['hr', 'leave-newflow'] });
+    qc.invalidateQueries({ queryKey: ['leave', 'detail'] });
+    qc.invalidateQueries({ queryKey: ['hr', 'leave-overview'] });
+  };
+
+  // Leave notifications arrive over the same live socket channel every other HR feature uses —
+  // when a new request is submitted or advances stage, refresh instantly instead of requiring
+  // HR to manually reload the page.
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const url = (e as CustomEvent)?.detail?.url as string | undefined;
+      if (!url || url.startsWith('/hr-self/leave') || url.startsWith('/hr/leave')) refreshNewFlow();
+    };
+    window.addEventListener('staff:notifications-changed', handler);
+    return () => window.removeEventListener('staff:notifications-changed', handler);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // A notification like "Leave Request Needs Your Action" deep-links to /hr/leave/:id — once
+  // the Leave Records list has loaded, scroll straight to that request.
+  useEffect(() => {
+    if (!targetId) return;
+    if (!newFlowQ.data) return;
+    const el = document.getElementById(`leave-row-${targetId}`);
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [targetId, newFlowQ.data]);
 
   const daysInMonth = new Date(year, month, 0).getDate();
   const firstDow = new Date(year, month - 1, 1).getDay();
@@ -178,9 +269,29 @@ const HrLeave = () => {
           <TabsTrigger value="applications">Applications{pendingCount > 0 ? ` (${pendingCount})` : ''}</TabsTrigger>
           <TabsTrigger value="balances">Balances</TabsTrigger>
           <TabsTrigger value="calendar">Calendar</TabsTrigger>
+          <TabsTrigger value="categories">Categories</TabsTrigger>
         </TabsList>
 
         <TabsContent value="applications">
+          {overviewQ.data && (
+            <div className="mb-4 grid gap-3 sm:grid-cols-3">
+              <StatCard label="Pending Requests" value={overviewQ.data.pendingCount} accentIndex={2} />
+              <StatCard
+                label="Top Category This Year"
+                value={overviewQ.data.byCategory[0]?.leave_type || '—'}
+                hint={overviewQ.data.byCategory[0] ? `${overviewQ.data.byCategory[0].count} request(s)` : undefined}
+                accentIndex={0}
+              />
+              <StatCard
+                label="Stuck Longest At"
+                value={overviewQ.data.byStage[0] ? stageLabel(overviewQ.data.byStage[0].current_stage) : '—'}
+                hint={overviewQ.data.byStage[0] ? `${overviewQ.data.byStage[0].count} pending here` : undefined}
+                accentIndex={3}
+              />
+            </div>
+          )}
+
+          <h3 className="mb-2 text-sm font-semibold text-[var(--text-primary)]">Leave Records</h3>
           <div className="mb-4 grid gap-3 rounded-xl border bg-white p-3 shadow-[var(--shadow-md)] md:grid-cols-3">
             <select className={inputClass} value={filters.employee_id} onChange={(e) => setFilters({ ...filters, employee_id: e.target.value })}>
               <option value="">All employees</option>
@@ -197,7 +308,7 @@ const HrLeave = () => {
               <option value="rejected">Rejected</option>
             </select>
           </div>
-          {(reqQ.isLoading || leaveQ.isLoading) && !reqQ.data && !leaveQ.data ? <TableSkeleton /> : allRows.length === 0 ? (
+          {(reqQ.isLoading || leaveQ.isLoading || newFlowQ.isLoading) && !reqQ.data && !leaveQ.data && !newFlowQ.data ? <TableSkeleton /> : allRows.length === 0 ? (
             <EmptyState title="No leave records" action={<Button onClick={() => setOpen(true)}>Add Leave Record</Button>} />
           ) : (
             <div className="overflow-x-auto rounded-xl border bg-white shadow-[var(--shadow-md)]">
@@ -212,44 +323,94 @@ const HrLeave = () => {
                     <th className="px-4 py-3">Reason</th>
                     <th className="px-4 py-3">Attachment</th>
                     <th className="px-4 py-3">Submitted</th>
+                    <th className="px-4 py-3">Stage</th>
                     <th className="px-4 py-3">Status</th>
-                    <th className="px-4 py-3">Actions</th>
+                    <th className="px-4 py-3" />
                   </tr>
                 </thead>
                 <tbody>
-                  {allRows.map((r: any) => (
-                    <tr
-                      key={`${r.source}-${r.id}`}
-                      className="cursor-pointer border-b hover:bg-[var(--surface-hover)]"
-                      onClick={() => setDetail(r)}
-                    >
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-2"><Avatar name={r.full_name} src={r.photo_url} size="sm" /><span>{r.full_name}</span></div>
-                      </td>
-                      <td className="px-4 py-3">{r.leave_type}</td>
-                      <td className="px-4 py-3">{String(r.start_date).slice(0, 10)}</td>
-                      <td className="px-4 py-3">{String(r.end_date).slice(0, 10)}</td>
-                      <td className="px-4 py-3">{r.days}</td>
-                      <td className="px-4 py-3"><TruncatedReason text={r.reason} onOpen={() => setDetail(r)} /></td>
-                      <td className="px-4 py-3"><AttachmentLink url={r.attachment_url} name={r.attachment_name} /></td>
-                      <td className="px-4 py-3">{r.created_at ? new Date(r.created_at).toLocaleDateString() : '—'}</td>
-                      <td className="px-4 py-3" title={r.rejection_reason || ''}><StatusBadge status={r.status} /></td>
-                      <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
-                        {r.status === 'pending' && r.source === 'request' && (
-                          <div className="flex gap-1">
-                            <Button size="sm" onClick={() => reviewMut.mutate({ id: r.id, status: 'approved' })}>Approve</Button>
-                            <Button size="sm" variant="destructive" onClick={() => setRejectId(r.id)}>Reject</Button>
-                          </div>
-                        )}
-                        {r.status === 'pending' && r.source === 'record' && (
-                          <div className="flex gap-1">
-                            <Button size="sm" onClick={() => statusMut.mutate({ id: r.id, status: 'Approved' })}>Approve</Button>
-                            <Button size="sm" variant="outline" onClick={() => statusMut.mutate({ id: r.id, status: 'Rejected' })}>Reject</Button>
-                          </div>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
+                  {allRows.map((r: any) => {
+                    const key = `${r.source}-${r.id}`;
+                    const isExpanded = expandedKey === key;
+                    const toggle = () => setExpandedKey((k) => (k === key ? null : key));
+                    return [
+                        <tr key={key} id={r.source === 'newflow' ? `leave-row-${r.id}` : undefined} className="cursor-pointer border-b hover:bg-[var(--surface-hover)]" onClick={toggle}>
+                          <td className="px-4 py-3">
+                            <div className="flex items-center gap-2"><Avatar name={r.full_name} src={r.photo_url} size="sm" /><span>{r.full_name}</span></div>
+                          </td>
+                          <td className="px-4 py-3">{r.leave_type}</td>
+                          <td className="px-4 py-3">{String(r.start_date).slice(0, 10)}</td>
+                          <td className="px-4 py-3">{String(r.end_date).slice(0, 10)}</td>
+                          <td className="px-4 py-3">{r.days}</td>
+                          <td className="px-4 py-3"><TruncatedReason text={r.reason} onOpen={toggle} /></td>
+                          <td className="px-4 py-3"><AttachmentLink url={r.attachment_url} name={r.attachment_name} /></td>
+                          <td className="px-4 py-3">{r.created_at ? new Date(r.created_at).toLocaleDateString() : '—'}</td>
+                          <td className="px-4 py-3">{r.source === 'newflow' ? stageLabel(r.current_stage) : '—'}</td>
+                          <td className="px-4 py-3" title={r.rejection_reason || ''}><StatusBadge status={r.status} /></td>
+                          <td className="px-4 py-3 text-center" onClick={(e) => e.stopPropagation()}>
+                            <button type="button" onClick={toggle} className="text-[var(--primary)]" aria-label="Toggle details">
+                              {isExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                            </button>
+                          </td>
+                        </tr>,
+                        isExpanded && (
+                          <tr key={`${key}-detail`} className="border-b bg-[var(--surface-secondary)]">
+                            <td colSpan={11} className="px-4 py-4">
+                              {r.source === 'newflow' ? (
+                                <NewFlowExpandedDetail
+                                  id={r.id}
+                                  canAct={r.status === 'pending' && r.current_stage === 'hr'}
+                                  onResolved={refreshNewFlow}
+                                />
+                              ) : (
+                                <div className="space-y-3">
+                                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                                    <MiniDetail label="Employee" value={r.full_name} />
+                                    <MiniDetail label="Department" value={r.department} />
+                                    <MiniDetail label="Leave Type" value={r.leave_type} />
+                                    <MiniDetail label="Days" value={r.days} />
+                                    <MiniDetail label="From" value={String(r.start_date).slice(0, 10)} />
+                                    <MiniDetail label="To" value={String(r.end_date).slice(0, 10)} />
+                                    <MiniDetail label="Submitted" value={r.created_at ? new Date(r.created_at).toLocaleString() : '—'} />
+                                    <MiniDetail label="Status" value={<StatusBadge status={r.status} />} />
+                                  </div>
+                                  <div>
+                                    <p className="text-[10px] font-medium uppercase tracking-wide text-[var(--text-muted)]">Reason</p>
+                                    <p className="mt-1 whitespace-pre-wrap rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] p-3 text-sm text-[var(--text-primary)]">
+                                      {r.reason || '—'}
+                                    </p>
+                                  </div>
+                                  {r.rejection_reason && (
+                                    <div>
+                                      <p className="text-[10px] font-medium uppercase tracking-wide text-[var(--text-muted)]">Rejection Reason</p>
+                                      <p className="mt-1 text-sm text-[var(--accent-red)]">{r.rejection_reason}</p>
+                                    </div>
+                                  )}
+                                  {r.attachment_url && (
+                                    <div>
+                                      <p className="text-[10px] font-medium uppercase tracking-wide text-[var(--text-muted)]">Attachment</p>
+                                      <AttachmentLink url={r.attachment_url} name={r.attachment_name} />
+                                    </div>
+                                  )}
+                                  {r.status === 'pending' && r.source === 'request' && (
+                                    <div className="flex justify-end gap-2">
+                                      <Button size="sm" onClick={() => reviewMut.mutate({ id: r.id, status: 'approved' })} disabled={reviewMut.isPending}>Approve</Button>
+                                      <Button size="sm" variant="destructive" onClick={() => setRejectId(r.id)}>Reject</Button>
+                                    </div>
+                                  )}
+                                  {r.status === 'pending' && r.source === 'record' && (
+                                    <div className="flex justify-end gap-2">
+                                      <Button size="sm" onClick={() => statusMut.mutate({ id: r.id, status: 'Approved' })} disabled={statusMut.isPending}>Approve</Button>
+                                      <Button size="sm" variant="outline" onClick={() => statusMut.mutate({ id: r.id, status: 'Rejected' })} disabled={statusMut.isPending}>Reject</Button>
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+                            </td>
+                          </tr>
+                        ),
+                      ];
+                  })}
                 </tbody>
               </table>
             </div>
@@ -329,6 +490,10 @@ const HrLeave = () => {
             </div>
           )}
         </TabsContent>
+
+        <TabsContent value="categories">
+          <LeaveCategoryConfig />
+        </TabsContent>
       </Tabs>
 
       <Dialog open={open} onOpenChange={setOpen}>
@@ -364,39 +529,6 @@ const HrLeave = () => {
         </DialogContent>
       </Dialog>
 
-      <RequestDetailDialog
-        open={!!detail}
-        onClose={() => setDetail(null)}
-        title="Leave request details"
-        status={detail?.status}
-        rejectionReason={detail?.rejection_reason}
-        reason={detail?.reason}
-        attachmentUrl={detail?.attachment_url}
-        attachmentName={detail?.attachment_name}
-        fields={[
-          { label: 'Employee', value: detail?.full_name },
-          { label: 'Department', value: detail?.department },
-          { label: 'Leave type', value: detail?.leave_type },
-          { label: 'Days', value: detail?.days },
-          { label: 'From', value: detail?.start_date ? String(detail.start_date).slice(0, 10) : '—' },
-          { label: 'To', value: detail?.end_date ? String(detail.end_date).slice(0, 10) : '—' },
-          { label: 'Submitted', value: detail?.created_at ? new Date(detail.created_at).toLocaleString() : '—' },
-        ]}
-        actions={
-          detail?.status === 'pending' && detail?.source === 'request' ? (
-            <>
-              <Button size="sm" onClick={() => reviewMut.mutate({ id: detail.id, status: 'approved' })} disabled={reviewMut.isPending}>Approve</Button>
-              <Button size="sm" variant="destructive" onClick={() => { setRejectId(detail.id); setDetail(null); }}>Reject</Button>
-            </>
-          ) : detail?.status === 'pending' && detail?.source === 'record' ? (
-            <>
-              <Button size="sm" onClick={() => statusMut.mutate({ id: detail.id, status: 'Approved' })} disabled={statusMut.isPending}>Approve</Button>
-              <Button size="sm" variant="outline" onClick={() => statusMut.mutate({ id: detail.id, status: 'Rejected' })} disabled={statusMut.isPending}>Reject</Button>
-            </>
-          ) : null
-        }
-      />
-
       <Dialog open={rejectId != null} onOpenChange={() => setRejectId(null)}>
         <DialogContent>
           <DialogHeader><DialogTitle>Reject leave request</DialogTitle></DialogHeader>
@@ -412,6 +544,7 @@ const HrLeave = () => {
           </Button>
         </DialogContent>
       </Dialog>
+
     </div>
   );
 };

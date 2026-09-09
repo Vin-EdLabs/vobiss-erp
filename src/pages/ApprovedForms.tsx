@@ -307,7 +307,7 @@ const ApprovedForms: React.FC = () => {
                 <thead className="bg-[var(--surface-secondary)]">
                   <tr>
                     <th className="px-6 py-3 text-left text-sm font-medium text-[var(--text-muted)]">ID</th>
-                    <th className="px-6 py-3 text-left text-sm font-medium text-[var(--text-muted)]">Project</th>
+                    <th className="px-6 py-3 text-left text-sm font-medium text-[var(--text-muted)]">Site Name</th>
                     <th className="px-6 py-3 text-left text-sm font-medium text-[var(--text-muted)]">Team Leader</th>
                     <th className="px-6 py-3 text-left text-sm font-medium text-[var(--text-muted)]">Created By</th>
                     <th className="px-6 py-3 text-left text-sm font-medium text-[var(--text-muted)]">Type</th>

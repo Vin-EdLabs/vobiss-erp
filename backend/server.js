@@ -84,18 +84,26 @@ import chatActionsRoutes from './routes/chatActions.js';
 import chatAdminRoutes from './routes/chatAdmin.js';
 import chatContextRoutes from './routes/chatContext.js';
 import globalSearchRoutes from './routes/globalSearch.routes.js';
+import site360Routes from './routes/site360.routes.js';
 import vobiRoutes from './routes/vobi.js';
 import vobiFeedRoutes from './routes/vobiFeed.js';
 import vobiVaultRoutes from './routes/vobiVault.routes.js';
 import hrRoutes from './routes/hr.js';
 import hrSelfRoutes from './routes/hrSelf.js';
+import hrInsuranceRoutes from './routes/hrInsurance.js';
+import hrSelfInsuranceRoutes from './routes/hrSelfInsurance.js';
+import hrLeaveRoutes from './routes/hrLeave.js';
+import hrSelfLeaveRoutes from './routes/hrSelfLeave.js';
+import hrOvertimeRoutes from './routes/hrOvertime.js';
 import fuelRequestsRoutes from './routes/fuel_requests.js';
 import vehicleRequestsRoutes from './routes/vehicle_requests.js';
 import referenceLinksRoutes from './routes/reference_links.js';
 import referencesRoutes from './routes/references.js';
 import { registerTodoRoutes } from './routes/todos.js';
 import { initHrSchema, seedHrDemo } from './db/hr.js';
+import { initOvertimeSchema } from './db/overtime.js';
 import { initFieldSchema } from './db/field.js';
+import { ensureInsuranceTables, runAnnualResetSweep } from './services/insurance.js';
 import { initChat, ensureUserChatMembership } from './services/chatInit.js';
 import {
   postRequestSystemMessage,
@@ -354,9 +362,15 @@ app.use('/api/chat', chatActionsRoutes);
 app.use('/api/chat/admin', chatAdminRoutes);
 app.use('/api/chat/context', chatContextRoutes);
 app.use('/api/search', globalSearchRoutes);
+app.use('/api/site360', site360Routes);
 app.use('/api/vobi', vobiRoutes);
 app.use('/api/vobi-feed', vobiFeedRoutes);
 app.use('/api/vobi-vault', vobiVaultRoutes);
+app.use('/api/hr/insurance', hrInsuranceRoutes);
+app.use('/api/hr-self/insurance', hrSelfInsuranceRoutes);
+app.use('/api/hr/leave', hrLeaveRoutes);
+app.use('/api/hr-self/leave', hrSelfLeaveRoutes);
+app.use('/api/hr/overtime', hrOvertimeRoutes);
 app.use('/api/hr', hrRoutes);
 app.use('/api/hr-self', hrSelfRoutes);
 app.use('/api/transport/fuel-requests', fuelRequestsRoutes);
@@ -728,7 +742,9 @@ async function notifyRequestRealtime(requestId, action, meta = {}) {
   await initDB();
   await getRealmApprovers();
   await initHrSchema(pool);
+  await initOvertimeSchema(pool);
   await initFieldSchema(pool);
+  await ensureInsuranceTables();
   await initChat();
   await migrateUserRoleConstraint(pool);
   await seedHrDemo(pool);
@@ -1285,9 +1301,46 @@ app.get('/api/transport/requests', authenticateToken, attachTenant, async (req, 
 
 app.post('/api/transport/requests', authenticateToken, async (req, res) => {
   try {
-    const { site_name, location, client_name, engineer_id, purpose, selected_approver_ids } = req.body || {};
-    if (!site_name || !location || !client_name) {
-      return res.status(400).json({ error: 'Site name, location, and client name are required.' });
+    const { location, engineer_id, purpose, selected_approver_ids, ticket_id, site_id } = req.body || {};
+    if (!location) {
+      return res.status(400).json({ error: 'Location is required.' });
+    }
+
+    // Client/Site standardization — never trust client-supplied site/client text. A linked
+    // ticket must already carry a real Client and Site; a directly-searched site brings its
+    // Client along automatically since every site belongs to exactly one client.
+    let resolvedSiteId = null;
+    let resolvedClientId = null;
+    let site_name = null;
+    let client_name = null;
+    if (ticket_id) {
+      const tk = await pool.query('SELECT id, ticket_id, customer_id, site_id FROM tickets WHERE id = $1', [ticket_id]);
+      const ticketRow = tk.rows[0];
+      if (!ticketRow) return res.status(400).json({ error: 'The selected ticket could not be found.' });
+      if (!ticketRow.customer_id || !ticketRow.site_id) {
+        return res.status(400).json({ error: `Ticket ${ticketRow.ticket_id} is missing a Client or Site — please update the ticket before using it for a transport request.` });
+      }
+      const siteInfo = await pool.query(
+        `SELECT s.id, s.site_name, c.id AS client_id, c.customer_name
+         FROM customer_sites s JOIN customers c ON c.id = s.customer_id WHERE s.id = $1`,
+        [ticketRow.site_id]
+      );
+      const site = siteInfo.rows[0];
+      if (!site) return res.status(400).json({ error: 'The ticket\'s site could not be found — please update the ticket.' });
+      resolvedSiteId = site.id; site_name = site.site_name;
+      resolvedClientId = site.client_id; client_name = site.customer_name;
+    } else if (site_id) {
+      const siteInfo = await pool.query(
+        `SELECT s.id, s.site_name, c.id AS client_id, c.customer_name
+         FROM customer_sites s JOIN customers c ON c.id = s.customer_id WHERE s.id = $1`,
+        [site_id]
+      );
+      const site = siteInfo.rows[0];
+      if (!site) return res.status(400).json({ error: 'The selected site could not be found.' });
+      resolvedSiteId = site.id; site_name = site.site_name;
+      resolvedClientId = site.client_id; client_name = site.customer_name;
+    } else {
+      return res.status(400).json({ error: 'Search and select an existing ticket or site — Client and Site come from it automatically.' });
     }
 
     const config = await getWorkflowConfig();
@@ -1323,9 +1376,10 @@ app.post('/api/transport/requests', authenticateToken, async (req, res) => {
       `INSERT INTO transport_requests (
         requester_id, requester_name, site_name, location, client_name, engineer_id, purpose,
         status, current_stage, selected_approver_ids,
-        reference_type, reference_id, reference_number, reference_title, reference_status, company
+        reference_type, reference_id, reference_number, reference_title, reference_status,
+        site_id, client_id, company
       )
-       VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', 'approver', $8::jsonb, $9, $10, $11, $12, $13,
+       VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', 'approver', $8::jsonb, $9, $10, $11, $12, $13, $14, $15,
         COALESCE((SELECT company FROM users WHERE id = $1), 'CW'))
        RETURNING *`,
       [
@@ -1342,6 +1396,8 @@ app.post('/api/transport/requests', authenticateToken, async (req, res) => {
         linkedReference.reference_number,
         linkedReference.reference_title,
         linkedReference.reference_status,
+        resolvedSiteId,
+        resolvedClientId,
       ]
     );
     const request = result.rows[0];
@@ -3065,4 +3121,9 @@ server.listen(port, '0.0.0.0', async () => {
     void runVobiFeedSweep();
     setInterval(runVobiFeedSweep, 15 * 60 * 1000);
   }, 30 * 1000);
+
+  // Hospital Insurance annual reset — checks for policies past their end date once at
+  // startup, then once every 24h (resets are date-based, not time-sensitive).
+  void runAnnualResetSweep();
+  setInterval(runAnnualResetSweep, 24 * 60 * 60 * 1000);
 });

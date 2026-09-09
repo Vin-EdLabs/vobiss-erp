@@ -68,8 +68,9 @@ const CreateStaffTicketPage: React.FC = () => {
   const [selectedProject, setSelectedProject] = useState<number | ''>('');
   const [selectedCustomer, setSelectedCustomer] = useState<number | ''>('');
   const [selectedSite, setSelectedSite] = useState<number | ''>('');
-  const [clientSites, setClientSites] = useState<any[]>([]);
-  const [loadingSites, setLoadingSites] = useState(false);
+  const [selectedSiteInfo, setSelectedSiteInfo] = useState<any | null>(null);
+  const [siteResults, setSiteResults] = useState<any[]>([]);
+  const [siteHasNoClient, setSiteHasNoClient] = useState(false);
 
   const [title, setTitle] = useState('');
   const [category, setCategory] = useState('general');
@@ -82,6 +83,7 @@ const CreateStaffTicketPage: React.FC = () => {
 
   const [projectSearch, setProjectSearch] = useState('');
   const [customerSearch, setCustomerSearch] = useState('');
+  const [siteSearch, setSiteSearch] = useState('');
 
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
@@ -99,31 +101,28 @@ const CreateStaffTicketPage: React.FC = () => {
   }, showForm);
 
   useEffect(() => {
-    if (!selectedCustomer) {
-      setClientSites([]);
-      setSelectedSite('');
+    if (!siteSearch.trim() || selectedSite) {
+      setSiteResults([]);
       return;
     }
     let cancelled = false;
-    setLoadingSites(true);
-    cxApi
-      .getClientSites(selectedCustomer)
-      .then((res) => {
-        if (cancelled) return;
-        const list = Array.isArray(res?.data) ? res.data : Array.isArray(res) ? res : [];
-        setClientSites(list);
-        setSelectedSite('');
-      })
-      .catch(() => {
-        if (!cancelled) setClientSites([]);
-      })
-      .finally(() => {
-        if (!cancelled) setLoadingSites(false);
-      });
+    const timer = window.setTimeout(() => {
+      cxApi
+        .searchSites(siteSearch)
+        .then((res) => {
+          if (cancelled) return;
+          const list = Array.isArray(res?.data) ? res.data : Array.isArray(res) ? res : [];
+          setSiteResults(list);
+        })
+        .catch(() => {
+          if (!cancelled) setSiteResults([]);
+        });
+    }, 250);
     return () => {
       cancelled = true;
+      window.clearTimeout(timer);
     };
-  }, [selectedCustomer]);
+  }, [siteSearch, selectedSite]);
 
   useVobiFormState({
     formKey: 'ticket-create',
@@ -221,16 +220,32 @@ const CreateStaffTicketPage: React.FC = () => {
     );
   }, [projects, projectSearch]);
 
-  const filteredCustomers = useMemo(() => {
-    return customers.filter(c =>
-      (!selectedProject || c.project_id === selectedProject) &&
-      (
-        c.customer_code.toLowerCase().includes(customerSearch.toLowerCase()) ||
-        c.customer_name.toLowerCase().includes(customerSearch.toLowerCase()) ||
-        (c.project_name || '').toLowerCase().includes(customerSearch.toLowerCase())
-      )
-    );
-  }, [customers, customerSearch, selectedProject]);
+  const selectSite = (s: any) => {
+    setSelectedSite(s.id);
+    setSelectedSiteInfo(s);
+    setSiteSearch(`${s.site_code ? `${s.site_code} — ` : ''}${s.site_name}`);
+    setSiteResults([]);
+    if (s.customer_id) {
+      setSelectedCustomer(s.customer_id);
+      setSelectedProject(s.project_id || '');
+      setCustomerSearch(`${s.client_code ? `${s.client_code} — ` : ''}${s.client_name || ''}`);
+      setSiteHasNoClient(false);
+    } else {
+      setSelectedCustomer('');
+      setCustomerSearch('');
+      setSiteHasNoClient(true);
+    }
+  };
+
+  const clearSite = () => {
+    setSelectedSite('');
+    setSelectedSiteInfo(null);
+    setSiteSearch('');
+    setSiteResults([]);
+    setSelectedCustomer('');
+    setCustomerSearch('');
+    setSiteHasNoClient(false);
+  };
 
   const suggestedTags = useMemo(
     () =>
@@ -293,15 +308,15 @@ const CreateStaffTicketPage: React.FC = () => {
 
       const ticketId = newTicket.ticket?.ticket_id || newTicket.ticket_id || 'N/A';
       const customerInfo = customers.find(c => c.id === selectedCustomer);
-      const siteInfo = clientSites.find((s) => s.id === selectedSite);
+      const siteInfo = selectedSiteInfo;
 
       // Assume current logged-in user (you can get this from auth context later)
       const currentUserName = teamMembers.find(m => m.email === localStorage.getItem('userEmail'))?.fullName || 'You';
 
       const newEntry: CreatedTicket = {
         ticket_id: ticketId,
-        customer_name: customerInfo?.customer_name || 'Unknown',
-        customer_code: customerInfo?.customer_code || 'N/A',
+        customer_name: siteInfo?.client_name || customerInfo?.customer_name || 'Unknown',
+        customer_code: siteInfo?.client_code || customerInfo?.customer_code || 'N/A',
         site_name: siteInfo?.site_name || 'No site',
         site_code: siteInfo?.site_code || 'N/A',
         priority,
@@ -323,7 +338,10 @@ const CreateStaffTicketPage: React.FC = () => {
       setSelectedProject('');
       setSelectedCustomer('');
       setSelectedSite('');
-      setClientSites([]);
+      setSelectedSiteInfo(null);
+      setSiteResults([]);
+      setSiteHasNoClient(false);
+      setSiteSearch('');
       setCustomerSearch('');
       setProjectSearch('');
       setShowForm(false);
@@ -403,12 +421,12 @@ const CreateStaffTicketPage: React.FC = () => {
         <div className="bg-[var(--accent-green-light)] border border-[#e0c4a0] rounded-xl p-6 mb-8 text-sm text-[var(--primary-hover)]">
           <p className="font-semibold text-base mb-3">Quick Guide:</p>
           <p className="mb-4">
-            Click the Create Ticket button → select a customer → choose the receiving unit → fill details → submit. Project is optional context and is filled from the customer.
+            Click the Create Ticket button → search for the site → the client fills in automatically → choose the receiving unit → fill details → submit.
           </p>
 
           <p className="font-semibold text-base mb-2">Detailed Steps:</p>
           <ol className="list-decimal list-inside space-y-2 ml-4">
-            <li>Choose a customer first. Use project only as an optional filter.</li>
+            <li>Search for and select the site first — the client name fills in automatically.</li>
             <li>Write a clear title and detailed description.</li>
             <li>Set category, priority, and route the ticket to a unit.</li>
             <li>Click "Create Ticket" to submit.</li>
@@ -423,67 +441,85 @@ const CreateStaffTicketPage: React.FC = () => {
         {showForm && (
           <div className="bg-white rounded-xl shadow-[var(--shadow-md)] border border-gray-200 p-6 mb-10">
             <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-2 gap-6" noValidate>
-              {/* Client Select */}
-              <div>
+              {/* Site Search — every ticket must reference a real, existing Site; type-to-search
+                  globally across all clients' sites, never free text. The Client auto-fills from
+                  the selected site's linked customer once one is picked. */}
+              <div className="relative">
+                <label className="block text-sm font-medium text-gray-700 mb-1.5">Site *</label>
+                <div className="relative">
+                  <input
+                    data-vobi-field="siteSearch"
+                    type="text"
+                    value={siteSearch}
+                    onChange={(e) => {
+                      setSiteSearch(e.target.value);
+                      if (selectedSite) {
+                        setSelectedSite('');
+                        setSelectedSiteInfo(null);
+                        setSelectedCustomer('');
+                        setCustomerSearch('');
+                        setSiteHasNoClient(false);
+                      }
+                    }}
+                    placeholder="Search for a site..."
+                    className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-sm"
+                    autoComplete="off"
+                    required
+                  />
+                  <Search className="absolute left-3 top-3 w-4 h-4 text-gray-400" />
+                </div>
+                <input type="hidden" data-vobi-field="selectedSite" value={selectedSite} readOnly />
+                {siteSearch && !selectedSite && siteResults.length > 0 && (
+                  <div className="absolute z-20 mt-1 w-full max-h-64 overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-lg">
+                    {siteResults.map((s) => (
+                      <button
+                        key={s.id}
+                        type="button"
+                        className="block w-full px-3 py-2 text-left text-sm hover:bg-gray-50"
+                        onMouseDown={() => selectSite(s)}
+                      >
+                        <div>
+                          <span className="font-semibold">{s.site_code ? `${s.site_code} — ` : ''}{s.site_name}</span>
+                          {s.connection_status ? ` (${s.connection_status})` : ''}
+                        </div>
+                        <div className="text-xs text-gray-500">{s.client_name || 'No client linked'}</div>
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {selectedSite && (
+                  <button
+                    type="button"
+                    className="mt-1 text-xs font-medium text-blue-600 hover:underline"
+                    onClick={clearSite}
+                  >
+                    Change site
+                  </button>
+                )}
+              </div>
+
+              {/* Client — read-only, auto-filled from the selected site's linked customer. Only
+                  Sales can create/edit Client & Site records, so this never accepts free text. */}
+              <div className="relative">
                 <label className="block text-sm font-medium text-gray-700 mb-1.5">Client *</label>
                 <div className="relative">
                   <input
-                    data-vobi-field="customerSearch"
                     type="text"
                     value={customerSearch}
-                    onChange={(e) => setCustomerSearch(e.target.value)}
-                    placeholder="Search clients..."
-                    className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-sm"
+                    placeholder={selectedSite ? '' : 'Select a site first'}
+                    disabled
+                    readOnly
+                    className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg text-sm bg-gray-50 text-gray-700"
                   />
                   <Search className="absolute left-3 top-2.5 w-4 h-4 text-gray-400" />
                 </div>
-                <select
-                  data-vobi-field="selectedCustomer"
-                  value={selectedCustomer}
-                  onChange={(e) => {
-                    const val = Number(e.target.value) || '';
-                    setSelectedCustomer(val);
-                    const customer = customers.find(c => c.id === val);
-                    setSelectedProject(customer?.project_id || '');
-                  }}
-                  className="w-full mt-2 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-sm"
-                  required
-                >
-                  <option value="">Select client</option>
-                  {filteredCustomers.map(c => (
-                    <option key={c.id} value={c.id}>
-                      {c.customer_code} — {c.customer_name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Site Select */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1.5">Site</label>
-                <select
-                  data-vobi-field="selectedSite"
-                  value={selectedSite}
-                  onChange={(e) => setSelectedSite(Number(e.target.value) || '')}
-                  className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-sm"
-                  disabled={!selectedCustomer || loadingSites}
-                >
-                  <option value="">
-                    {!selectedCustomer
-                      ? 'Select a client first'
-                      : loadingSites
-                        ? 'Loading sites…'
-                        : clientSites.length === 0
-                          ? 'No sites for this client'
-                          : 'Select site (optional)'}
-                  </option>
-                  {clientSites.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.site_code} — {s.site_name}
-                      {s.connection_status ? ` (${s.connection_status})` : ''}
-                    </option>
-                  ))}
-                </select>
+                <input type="hidden" data-vobi-field="customerSearch" value={customerSearch} readOnly />
+                <input type="hidden" data-vobi-field="selectedCustomer" value={selectedCustomer} readOnly />
+                {siteHasNoClient && (
+                  <p className="mt-1 text-xs font-medium text-red-600">
+                    This site has no client linked. Ask Sales to link a client to this site before creating a ticket for it.
+                  </p>
+                )}
               </div>
 
               {/* Title, Category, Priority, Assign To, Description... (unchanged) */}

@@ -198,6 +198,84 @@ export async function initHrSchema(pool) {
   await pool.query(`ALTER TABLE hr_form_requests ADD COLUMN IF NOT EXISTS attachment_url TEXT`);
   await pool.query(`ALTER TABLE hr_form_requests ADD COLUMN IF NOT EXISTS attachment_name TEXT`);
 
+  // Multi-stage leave approval upgrade — extends the existing self-service hr_leave_requests
+  // table in place rather than replacing it, so every pre-existing row (current_stage stays
+  // NULL for those — "legacy flat" — see backend/services/leave.js) keeps working untouched.
+  await pool.query(`ALTER TABLE hr_leave_requests ADD COLUMN IF NOT EXISTS contact_during_leave TEXT`);
+  await pool.query(`ALTER TABLE hr_leave_requests ADD COLUMN IF NOT EXISTS reliever_id INTEGER REFERENCES hr_employees(id) ON DELETE SET NULL`);
+  await pool.query(`ALTER TABLE hr_leave_requests ADD COLUMN IF NOT EXISTS employee_signature TEXT`);
+  await pool.query(`ALTER TABLE hr_leave_requests ADD COLUMN IF NOT EXISTS leaver_tier VARCHAR(20)`);
+  // Named per-request approver for these two stages — users(id), not hr_employees(id): unit/role
+  // data (main_role, role, position, unit, units) lives on the users table, which is also what
+  // listTierCandidates() in db/performanceReports.js already queries and returns.
+  await pool.query(`ALTER TABLE hr_leave_requests ADD COLUMN IF NOT EXISTS supervisor_approver_id INTEGER REFERENCES users(id) ON DELETE SET NULL`);
+  await pool.query(`ALTER TABLE hr_leave_requests ADD COLUMN IF NOT EXISTS manager_approver_id INTEGER REFERENCES users(id) ON DELETE SET NULL`);
+  await pool.query(`ALTER TABLE hr_leave_requests ADD COLUMN IF NOT EXISTS current_stage VARCHAR(20)`);
+  await pool.query(`ALTER TABLE hr_leave_requests ADD COLUMN IF NOT EXISTS declined_reason TEXT`);
+  await pool.query(`ALTER TABLE hr_leave_requests ADD COLUMN IF NOT EXISTS declined_by_stage VARCHAR(20)`);
+  await pool.query(`ALTER TABLE hr_leave_requests ADD COLUMN IF NOT EXISTS completed_at TIMESTAMPTZ`);
+  await pool.query(`ALTER TABLE hr_leave_requests ADD COLUMN IF NOT EXISTS submitted_at TIMESTAMPTZ`);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS hr_leave_request_history (
+      id SERIAL PRIMARY KEY,
+      leave_request_id INTEGER NOT NULL REFERENCES hr_leave_requests(id) ON DELETE CASCADE,
+      stage VARCHAR(20) NOT NULL CHECK (stage IN ('reliever','supervisor','manager','cto','hr')),
+      actor_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      actor_name TEXT,
+      action VARCHAR(20) NOT NULL CHECK (action IN ('submitted','confirmed','approved','declined','acknowledged','cancelled')),
+      reason TEXT,
+      acted_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      waiting_duration_minutes INTEGER
+    )
+  `);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_hr_leave_request_history_request ON hr_leave_request_history(leave_request_id)`);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS hr_public_holidays (
+      id SERIAL PRIMARY KEY,
+      holiday_date DATE NOT NULL,
+      name TEXT NOT NULL,
+      company_id VARCHAR(20) NOT NULL DEFAULT 'ALL',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await pool.query(`ALTER TABLE hr_public_holidays ALTER COLUMN company_id SET DEFAULT 'ALL'`);
+  await pool.query(`
+    DO $$ BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'hr_public_holidays_date_company_uniq'
+      ) THEN
+        ALTER TABLE hr_public_holidays
+          ADD CONSTRAINT hr_public_holidays_date_company_uniq UNIQUE (holiday_date, company_id);
+      END IF;
+    END $$;
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS hr_leave_categories (
+      id SERIAL PRIMARY KEY,
+      name TEXT NOT NULL,
+      max_days_per_year INTEGER NOT NULL DEFAULT 0,
+      max_requests_per_year INTEGER NOT NULL DEFAULT 0,
+      company VARCHAR(20) NOT NULL DEFAULT 'ALL',
+      is_active BOOLEAN NOT NULL DEFAULT true,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await pool.query(`ALTER TABLE hr_leave_categories ALTER COLUMN company SET DEFAULT 'ALL'`);
+  await pool.query(`
+    DO $$ BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'hr_leave_categories_name_company_uniq'
+      ) THEN
+        ALTER TABLE hr_leave_categories
+          ADD CONSTRAINT hr_leave_categories_name_company_uniq UNIQUE (name, company);
+      END IF;
+    END $$;
+  `);
+
   await pool.query(`
     CREATE TABLE IF NOT EXISTS hr_settings (
       id SERIAL PRIMARY KEY,
@@ -390,6 +468,72 @@ export async function initHrSchema(pool) {
   await addCompanyColumn('hr_employees');
   await addCompanyColumn('hr_payroll');
   await addCompanyColumn('hr_settings');
+
+  await seedLeaveCategoriesFromLegacyDefaults(pool);
+  await seedGhanaPublicHolidays(pool);
+}
+
+/** One-time seed — preserves current LEAVE_TYPES/DEFAULT_LEAVE_BALANCES behavior as the
+ *  starting rows in the new HR-configurable table, then hr_leave_categories becomes the live
+ *  source of truth. Safe to call on every boot — ON CONFLICT DO NOTHING per (name, company). */
+export async function seedLeaveCategoriesFromLegacyDefaults(pool) {
+  for (const name of LEAVE_TYPES) {
+    await pool.query(
+      `INSERT INTO hr_leave_categories (name, max_days_per_year, max_requests_per_year, company)
+       VALUES ($1, $2, $3, 'ALL')
+       ON CONFLICT (name, company) DO NOTHING`,
+      [name, DEFAULT_LEAVE_BALANCES[name] ?? 0, name === 'Unpaid' ? 12 : 4]
+    );
+  }
+}
+
+const GHANA_PUBLIC_HOLIDAYS_BY_YEAR = {
+  2026: [
+    ['2026-01-01', "New Year's Day"],
+    ['2026-01-07', 'Constitution Day'],
+    ['2026-03-06', "Independence Day"],
+    ['2026-04-03', 'Good Friday'],
+    ['2026-04-06', 'Easter Monday'],
+    ['2026-05-01', 'May Day'],
+    ['2026-08-04', 'Founders’ Day'],
+    ['2026-09-21', 'Kwame Nkrumah Memorial Day'],
+    ['2026-12-01', 'Farmers’ Day'],
+    ['2026-12-25', 'Christmas Day'],
+    ['2026-12-26', 'Boxing Day'],
+  ],
+  2027: [
+    ['2027-01-01', "New Year's Day"],
+    ['2027-01-07', 'Constitution Day'],
+    ['2027-03-06', 'Independence Day'],
+    ['2027-03-26', 'Good Friday'],
+    ['2027-03-29', 'Easter Monday'],
+    ['2027-05-01', 'May Day'],
+    ['2027-08-04', 'Founders’ Day'],
+    ['2027-09-21', 'Kwame Nkrumah Memorial Day'],
+    ['2027-12-01', 'Farmers’ Day'],
+    ['2027-12-25', 'Christmas Day'],
+    ['2027-12-27', 'Boxing Day (observed)'],
+  ],
+};
+
+/** Seeds a starting set of Ghana public holidays (current + next year) as company_id='ALL'
+ *  (applies everywhere). HR can add/edit/remove via the Leave Categories admin routes — this
+ *  is just a sane default so business-day counting isn't empty on first boot. Movable feast
+ *  dates (Eid, etc.) are intentionally omitted from the static seed; add them via the admin UI. */
+export async function seedGhanaPublicHolidays(pool) {
+  const years = [new Date().getFullYear(), new Date().getFullYear() + 1];
+  for (const year of years) {
+    const holidays = GHANA_PUBLIC_HOLIDAYS_BY_YEAR[year];
+    if (!holidays) continue;
+    for (const [date, name] of holidays) {
+      await pool.query(
+        `INSERT INTO hr_public_holidays (holiday_date, name, company_id)
+         VALUES ($1, $2, 'ALL')
+         ON CONFLICT (holiday_date, company_id) DO NOTHING`,
+        [date, name]
+      );
+    }
+  }
 }
 
 export async function ensureLeaveBalances(pool, employeeId, year = new Date().getFullYear()) {

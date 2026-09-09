@@ -82,10 +82,13 @@ export function PushNotificationSetup({ className }: { className?: string }) {
           requestPush();
         } else if (!cancelled && cfg && alreadyGranted) {
           // Already granted on a past visit — no permission prompt needed, but this is the one
-          // reliable moment (the app actually being opened) to ask the browser to re-check for
-          // a newer service worker. Waiting on the browser's own background timer isn't
-          // reliable for a PWA that might not be opened again for days or weeks.
+          // reliable moment (the app actually being opened) to quietly re-validate both push
+          // channels: ask the browser to re-check for a newer service worker (Firebase), and
+          // confirm the native webpush subscription still matches the server's current VAPID
+          // key — replacing it if a key rotation left it stale, instead of it just failing
+          // silently forever. Neither touches loading/UI state; this runs in the background.
           void refreshPushServiceWorker();
+          void enablePushNotifications().catch(() => {});
         }
       } catch {
         if (!cancelled) {

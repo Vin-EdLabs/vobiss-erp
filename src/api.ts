@@ -910,6 +910,7 @@ export const createRequest = async (
     ticket_id?: number | null;
     linked_cash_request_id?: number | null;
     linked_references?: { type: string; id: number }[];
+    siteId?: number | null;
   },
   selectedApproverIds?: number[] | null,
   type: 'material_request' | 'item_return' = 'material_request'
@@ -1403,6 +1404,8 @@ export interface TransportRequest {
   reference_number?: string | null;
   reference_title?: string | null;
   reference_status?: string | null;
+  site_id?: number | null;
+  client_id?: number | null;
   selected_approver_ids?: number[];
   my_decision?: string | null;
   my_acted_at?: string | null;
@@ -1586,9 +1589,9 @@ export const getTransportRequests = async (): Promise<TransportRequest[]> => {
 };
 
 export const createTransportRequest = async (payload: {
-  site_name: string;
   location: string;
-  client_name: string;
+  ticket_id?: number | null;
+  site_id?: number | null;
   engineer_id?: number | null;
   purpose?: string | null;
   selected_approver_ids?: number[];
@@ -2518,6 +2521,17 @@ export const cxApi = {
     if (!response.ok) {
       const err = await response.json().catch(() => ({}));
       throw new Error(err.error || 'Failed to load sites');
+    }
+    return await response.json();
+  },
+
+  /** Global site type-ahead across all clients — used by Site-first ticket creation, where the
+   *  Client auto-fills from the selected site's linked customer instead of being chosen first. */
+  searchSites: async (search: string): Promise<any> => {
+    const response = await apiFetch(`${API_URL}/cx/sites?search=${encodeURIComponent(search)}&pageSize=20`);
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      throw new Error(err.error || 'Failed to search sites');
     }
     return await response.json();
   },

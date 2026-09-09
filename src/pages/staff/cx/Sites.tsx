@@ -148,6 +148,14 @@ const SitesPage: React.FC = () => {
       toast.error('Site name is required');
       return;
     }
+    if (!form.customer_id) {
+      toast.error('Select the client this site belongs to');
+      return;
+    }
+    if (!form.gps_coordinates.trim()) {
+      toast.error('Site coordinates are required');
+      return;
+    }
     setSaving(true);
     try {
       const payload = {
@@ -185,7 +193,7 @@ const SitesPage: React.FC = () => {
           <div>
             <h1 className="text-3xl font-bold text-[var(--text-primary)]">Sites</h1>
             <p className="mt-1 text-[var(--text-muted)]">
-              Manage all network sites. Link them to clients when creating or editing a client.
+              Manage all network sites. Every site must be linked to a client with its GPS coordinates.
             </p>
           </div>
           <Button
@@ -237,14 +245,13 @@ const SitesPage: React.FC = () => {
                   />
                 </div>
                 <div>
-                  <Label>Link to Client (optional)</Label>
+                  <Label>Client *</Label>
                   <Select
-                    value={form.customer_id || 'none'}
-                    onValueChange={(v) => setForm((f) => ({ ...f, customer_id: v === 'none' ? '' : v }))}
+                    value={form.customer_id || undefined}
+                    onValueChange={(v) => setForm((f) => ({ ...f, customer_id: v }))}
                   >
-                    <SelectTrigger><SelectValue placeholder="Unassigned" /></SelectTrigger>
+                    <SelectTrigger><SelectValue placeholder="Select the client this site belongs to…" /></SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="none">Unassigned</SelectItem>
                       {clients.map((c) => (
                         <SelectItem key={c.id} value={String(c.id)}>
                           {c.company_name} ({c.customer_code})
@@ -252,6 +259,9 @@ const SitesPage: React.FC = () => {
                       ))}
                     </SelectContent>
                   </Select>
+                  <p className="mt-1 text-xs text-[var(--text-muted)]">
+                    Every site must belong to a client. Add the client first if it doesn't exist yet.
+                  </p>
                 </div>
                 <div className="md:col-span-2">
                   <Label>Site Address</Label>
@@ -302,11 +312,12 @@ const SitesPage: React.FC = () => {
                   />
                 </div>
                 <div className="md:col-span-2">
-                  <Label>GPS Coordinates</Label>
+                  <Label>GPS Coordinates *</Label>
                   <Input
                     value={form.gps_coordinates}
                     onChange={(e) => setForm((f) => ({ ...f, gps_coordinates: e.target.value }))}
                     placeholder="Paste from Google Maps — e.g. 5.6037, -0.1870, a maps link, or DMS"
+                    required
                   />
                   <p className="mt-1 text-xs text-[var(--text-muted)]">
                     Paste whatever you have — decimal coordinates, a Google Maps link, or degrees/minutes/seconds. We'll recognize it automatically.
@@ -387,13 +398,17 @@ const SitesPage: React.FC = () => {
                   <tr><td colSpan={8} className="px-4 py-10 text-center text-[var(--text-muted)]">No sites found.</td></tr>
                 ) : (
                   filtered.map((site) => (
-                    <tr key={site.id} className="hover:bg-[var(--surface-hover)]">
+                    <tr
+                      key={site.id}
+                      className="cursor-pointer hover:bg-[var(--surface-hover)]"
+                      onClick={() => startEdit(site)}
+                    >
                       <td className="px-4 py-3">
                         <span className="rounded-md bg-[var(--accent-green-light)] px-2 py-1 font-mono text-xs font-semibold text-[var(--primary)]">
                           {site.site_code}
                         </span>
                       </td>
-                      <td className="px-4 py-3 font-medium text-[var(--text-primary)]">{site.site_name}</td>
+                      <td className="px-4 py-3 font-medium text-[var(--primary)] hover:underline">{site.site_name}</td>
                       <td className="px-4 py-3 text-[var(--text-secondary)]">
                         <div className="flex items-center gap-1.5">
                           <span>{site.location || '—'}</span>
@@ -416,6 +431,7 @@ const SitesPage: React.FC = () => {
                         {site.customer_id ? (
                           <Link
                             to={`/staff/cx/clients/${site.customer_id}`}
+                            onClick={(e) => e.stopPropagation()}
                             className="font-medium text-[var(--primary)] hover:underline"
                           >
                             {site.client_name || site.client_code}
@@ -431,7 +447,7 @@ const SitesPage: React.FC = () => {
                       </td>
                       <td className="px-4 py-3 text-[var(--text-secondary)]">{site.ticket_count ?? 0}</td>
                       <td className="px-4 py-3">
-                        <Button size="sm" variant="outline" onClick={() => startEdit(site)}>Edit</Button>
+                        <Button size="sm" variant="outline" onClick={(e) => { e.stopPropagation(); startEdit(site); }}>Edit</Button>
                       </td>
                     </tr>
                   ))

@@ -426,12 +426,36 @@ async function linkSitesToClient(customerId, siteIds = [], dbClient = pool) {
   return res.rowCount;
 }
 
-async function siteInsertValues(data = {}) {
+/** A site can never exist without a client and GPS coordinates — a client, on the other hand,
+ *  can exist with zero sites linked (see createClient). `requireCustomer`/`requireCoordinates`
+ *  let the client-scoped creation path (which already has a guaranteed customerId) skip the
+ *  redundant customer_id check while still enforcing coordinates. */
+async function siteInsertValues(data = {}, { requireCustomer = true, requireCoordinates = true } = {}) {
   if (!data.site_name?.trim()) throw new Error('Site name is required');
+
   const gpsRaw = data.gps_coordinates?.trim() || null;
+  if (requireCoordinates && !gpsRaw) {
+    throw new Error('Site coordinates are required');
+  }
   const { parseCoordinates } = await loadGeo();
   const parsed = gpsRaw ? parseCoordinates(gpsRaw) : null;
+  if (gpsRaw && !parsed) {
+    throw new Error('Could not understand those coordinates — paste a Google Maps link, "lat, lng", or DMS');
+  }
+
+  let customerId = null;
+  if (data.customer_id !== undefined && data.customer_id !== null && data.customer_id !== '') {
+    customerId = parseInt(data.customer_id, 10);
+    if (!Number.isFinite(customerId) || customerId <= 0) throw new Error('Invalid client for site assignment');
+  }
+  if (requireCustomer) {
+    if (!customerId) throw new Error('A site must be linked to a client');
+    const cust = await pool.query(`SELECT id FROM customers WHERE id = $1 AND deleted_at IS NULL`, [customerId]);
+    if (!cust.rows[0]) throw new Error('Client not found');
+  }
+
   return {
+    customer_id: customerId,
     site_name: data.site_name.trim(),
     site_address: data.site_address?.trim() || null,
     location: data.location?.trim() || null,
@@ -448,15 +472,16 @@ async function siteInsertValues(data = {}) {
 
 async function createStandaloneSite(data = {}) {
   await load();
-  const fields = await siteInsertValues(data);
+  const fields = await siteInsertValues(data, { requireCustomer: true, requireCoordinates: true });
   const site_code = await nextSiteCode();
   const res = await pool.query(
     `INSERT INTO customer_sites
       (site_code, customer_id, site_name, site_address, location, region, bandwidth, service_type, ip_address, connection_status, gps_coordinates, latitude, longitude)
-     VALUES ($1,NULL,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
      RETURNING *`,
     [
       site_code,
+      fields.customer_id,
       fields.site_name,
       fields.site_address,
       fields.location,
@@ -475,7 +500,10 @@ async function createStandaloneSite(data = {}) {
 
 async function createSite(customerId, data = {}) {
   await load();
-  const fields = await siteInsertValues(data);
+  // customerId already comes from the client-scoped route (/clients/:id/sites) — skip the
+  // redundant customer_id-in-body check but still verify the client is real, and still require
+  // coordinates.
+  const fields = await siteInsertValues({ ...data, customer_id: customerId }, { requireCustomer: false, requireCoordinates: true });
   const cust = await pool.query(
     `SELECT id FROM customers WHERE id = $1 AND deleted_at IS NULL`,
     [customerId]
@@ -528,23 +556,25 @@ async function updateSiteById(siteId, fields = {}) {
       let val = fields[key];
       if (key === 'customer_id') {
         val = val === null || val === '' ? null : parseInt(val, 10);
-        if (val !== null && (!Number.isFinite(val) || val <= 0)) {
+        // A site can never end up unlinked — reassign it to a different client instead.
+        if (val === null) throw new Error('A site must stay linked to a client — reassign it to a different client instead of unlinking');
+        if (!Number.isFinite(val) || val <= 0) {
           throw new Error('Invalid client for site assignment');
         }
-        if (val !== null) {
-          const cust = await pool.query(
-            `SELECT id FROM customers WHERE id = $1 AND deleted_at IS NULL`,
-            [val]
-          );
-          if (!cust.rows[0]) throw new Error('Client not found');
-        }
+        const cust = await pool.query(
+          `SELECT id FROM customers WHERE id = $1 AND deleted_at IS NULL`,
+          [val]
+        );
+        if (!cust.rows[0]) throw new Error('Client not found');
       } else if (key === 'gps_coordinates') {
         val = typeof val === 'string' ? val.trim() || null : null;
+        if (!val) throw new Error('Site coordinates are required');
         const { parseCoordinates } = await loadGeo();
-        const parsed = val ? parseCoordinates(val) : null;
-        params.push(parsed?.lat ?? null);
+        const parsed = parseCoordinates(val);
+        if (!parsed) throw new Error('Could not understand those coordinates — paste a Google Maps link, "lat, lng", or DMS');
+        params.push(parsed.lat);
         sets.push(`latitude = $${params.length}`);
-        params.push(parsed?.lng ?? null);
+        params.push(parsed.lng);
         sets.push(`longitude = $${params.length}`);
       } else if (typeof val === 'string') {
         val = val.trim();
@@ -588,11 +618,13 @@ async function updateSite(customerId, siteId, fields = {}) {
       let val = typeof fields[key] === 'string' ? fields[key].trim() : fields[key];
       if (key === 'gps_coordinates') {
         val = val || null;
+        if (!val) throw new Error('Site coordinates are required');
         const { parseCoordinates } = await loadGeo();
-        const parsed = val ? parseCoordinates(val) : null;
-        params.push(parsed?.lat ?? null);
+        const parsed = parseCoordinates(val);
+        if (!parsed) throw new Error('Could not understand those coordinates — paste a Google Maps link, "lat, lng", or DMS');
+        params.push(parsed.lat);
         sets.push(`latitude = $${params.length}`);
-        params.push(parsed?.lng ?? null);
+        params.push(parsed.lng);
         sets.push(`longitude = $${params.length}`);
       }
       params.push(val);

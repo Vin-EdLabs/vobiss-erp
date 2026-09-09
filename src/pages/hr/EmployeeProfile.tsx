@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { Check, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { hrApi, HR_QUERY } from '@/api/hr';
@@ -17,11 +17,13 @@ import { EmployeeForm, emptyEmployeeForm, type EmployeeFormValues } from './Empl
 import { EmploymentRecord } from './EmploymentRecord';
 import { PayslipView } from '@/components/hr/PayslipView';
 import { EmployeePayrollTab } from './EmployeePayrollTab';
+import { HospitalInsuranceTab } from '@/components/hr/Insurance/HospitalInsuranceTab';
 import { API_URL } from '@/lib/api';
 
 const HrEmployeeProfile = () => {
   const { id } = useParams();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const qc = useQueryClient();
   const [editOpen, setEditOpen] = useState(false);
   const [form, setForm] = useState<EmployeeFormValues>(emptyEmployeeForm);
@@ -36,7 +38,7 @@ const HrEmployeeProfile = () => {
   const [attMonth, setAttMonth] = useState(now.getMonth() + 1);
   const [attYear, setAttYear] = useState(now.getFullYear());
 
-  const [tab, setTab] = useState('overview');
+  const [tab, setTab] = useState(searchParams.get('tab') || 'overview');
   const empQ = useQuery({ queryKey: ['hr', 'employee', id], queryFn: () => hrApi.employee(id!), enabled: !!id, ...HR_QUERY });
   const employeesQ = useQuery({ queryKey: ['hr', 'employees'], queryFn: () => hrApi.employees(), ...HR_QUERY });
   const leaveQ = useQuery({ queryKey: ['hr', 'emp-leave', id], queryFn: () => hrApi.employeeLeave(id!), enabled: !!id && tab === 'leave', ...HR_QUERY });
@@ -258,6 +260,7 @@ const HrEmployeeProfile = () => {
           <TabsTrigger value="overview">Overview</TabsTrigger>
           <TabsTrigger value="leave">Leave</TabsTrigger>
           <TabsTrigger value="payroll">Payroll</TabsTrigger>
+          <TabsTrigger value="insurance">Insurance</TabsTrigger>
           <TabsTrigger value="attendance">Attendance</TabsTrigger>
           <TabsTrigger value="documents">Documents</TabsTrigger>
         </TabsList>
@@ -338,6 +341,9 @@ const HrEmployeeProfile = () => {
         </TabsContent>
         <TabsContent value="payroll">
           {id && <EmployeePayrollTab employeeId={id} employee={emp} payslips={payslips} onOpenSlip={setSlip} />}
+        </TabsContent>
+        <TabsContent value="insurance">
+          {id && <HospitalInsuranceTab employeeId={id} canManage />}
         </TabsContent>
         <TabsContent value="attendance">
           <div className="mb-4 flex flex-wrap gap-2">

@@ -128,6 +128,7 @@ export interface LookupRow {
   location_name?: string;
   region?: string;
   customer_id?: number;
+  customer_name?: string;
   customer_code?: string;
   position?: string;
 }

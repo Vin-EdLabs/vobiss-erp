@@ -115,14 +115,24 @@ router.get('/arrivals', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// GET /api/field-work/sites?q= — searchable site picker for the assignment form.
+// GET /api/field-work/sites?q= — searchable site picker for the assignment form, and the
+// system-wide Client/Site standardization picker (search a site, get its owning client for free
+// — every site belongs to exactly one client, so this single lookup covers both).
 router.get('/sites', async (req, res) => {
   try {
     const q = String(req.query.q || '').trim();
     const params = [];
     let where = '';
-    if (q) { params.push(`%${q}%`); where = `WHERE site_name ILIKE $1 OR site_address ILIKE $1`; }
-    const rows = await pool.query(`SELECT id, site_name, site_address, region, customer_id, latitude, longitude FROM customer_sites ${where} ORDER BY site_name LIMIT 20`, params);
+    if (q) { params.push(`%${q}%`); where = `WHERE s.site_name ILIKE $1 OR s.site_address ILIKE $1 OR c.customer_name ILIKE $1`; }
+    const rows = await pool.query(
+      `SELECT s.id, s.site_name, s.site_address, s.region, s.customer_id, s.latitude, s.longitude,
+              c.customer_name, c.customer_code
+       FROM customer_sites s
+       LEFT JOIN customers c ON c.id = s.customer_id
+       ${where}
+       ORDER BY s.site_name LIMIT 20`,
+      params
+    );
     res.json(rows.rows);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });

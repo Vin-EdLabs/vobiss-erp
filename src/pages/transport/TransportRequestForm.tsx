@@ -1,19 +1,18 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { CheckCircle2, Clock3, FileText, Plus, Search, ShieldCheck, Truck, XCircle } from 'lucide-react';
-import { createTransportRequest, getTransportRequests, getUserDirectory, getRequestApproverIds, getWorkflowConfig, type TransportRequest } from '../../api';
+import { Building2, CheckCircle2, Clock3, FileText, MapPin, Plus, Search, ShieldCheck, Truck, XCircle } from 'lucide-react';
+import { createTransportRequest, getTransportRequests, getUserDirectory, getRequestApproverIds, getWorkflowConfig, cxApi, type TransportRequest } from '../../api';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import ReferencePicker from '@/components/transport/ReferencePicker';
 import { ReferenceBadge } from '@/components/transport/ReferenceBadge';
 import { PersonName } from '@/components/PersonName';
-import { referencePayload, type LinkedReference } from '@/lib/referenceLink';
 import { ReferenceLinkPicker } from '@/components/references/ReferenceLinkPicker';
 import { formatOwnReference, type ReferenceSummary } from '@/lib/referenceRegistry';
 import { CopyRefButton } from '@/components/CopyRefButton';
 import { Link, useLocation } from 'react-router-dom';
+import { searchTickets, type TicketSearchResult } from '@/api/overtime';
 
 const statusBadge: Record<string, string> = {
   pending: 'bg-amber-100 text-amber-800 border border-amber-200',
@@ -34,14 +33,74 @@ export default function TransportRequestForm() {
   const [approvers, setApprovers] = useState<Array<{ id: number; fullName: string; username?: string }>>([]);
   const [selectedApproverIds, setSelectedApproverIds] = useState<number[]>([]);
   const [form, setForm] = useState({
-    site_name: '',
     location: '',
-    client_name: '',
     engineer_id: '',
     purpose: '',
   });
-  const [linkedReference, setLinkedReference] = useState<LinkedReference | null>(null);
-  const [referenceError, setReferenceError] = useState('');
+
+  // Ticket Search (first) — Client and Site auto-fill from it. If no matching ticket, search
+  // and select a Site directly; its Client fills in automatically. Never free text.
+  const [ticketQuery, setTicketQuery] = useState('');
+  const [ticketOpen, setTicketOpen] = useState(false);
+  const [ticketResults, setTicketResults] = useState<TicketSearchResult[]>([]);
+  const [selectedTicket, setSelectedTicket] = useState<TicketSearchResult | null>(null);
+  const [siteQuery, setSiteQuery] = useState('');
+  const [siteOpen, setSiteOpen] = useState(false);
+  const [siteResults, setSiteResults] = useState<any[]>([]);
+  const [selectedSite, setSelectedSite] = useState<any | null>(null);
+
+  const resolvedSiteId: number | null = selectedTicket?.site_id ?? selectedSite?.id ?? null;
+  const resolvedSiteName: string = selectedTicket?.site_name || selectedSite?.site_name || '';
+  const resolvedClientName: string = selectedTicket ? selectedTicket.customer_name : (selectedSite?.client_name || '');
+  const resolvedRegion: string | null = selectedTicket?.region || selectedSite?.region || null;
+  const resolvedAddress: string | null = selectedTicket?.site_address || selectedSite?.site_address || null;
+
+  useEffect(() => {
+    if (!ticketQuery.trim() || selectedTicket) { setTicketResults([]); return; }
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      searchTickets(ticketQuery).then((r) => { if (!cancelled) setTicketResults(r); }).catch(() => { if (!cancelled) setTicketResults([]); });
+    }, 250);
+    return () => { cancelled = true; window.clearTimeout(timer); };
+  }, [ticketQuery, selectedTicket]);
+
+  useEffect(() => {
+    if (!siteQuery.trim() || selectedSite || selectedTicket) { setSiteResults([]); return; }
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      cxApi.searchSites(siteQuery)
+        .then((res: any) => { if (!cancelled) setSiteResults(Array.isArray(res?.data) ? res.data : Array.isArray(res) ? res : []); })
+        .catch(() => { if (!cancelled) setSiteResults([]); });
+    }, 250);
+    return () => { cancelled = true; window.clearTimeout(timer); };
+  }, [siteQuery, selectedSite, selectedTicket]);
+
+  const selectTicket = (t: TicketSearchResult) => {
+    setSelectedTicket(t);
+    setTicketQuery(t.ticket_id);
+    setTicketOpen(false);
+    setSelectedSite(null);
+    setSiteQuery('');
+    if (!form.location.trim() && t.site_address) setForm((f) => ({ ...f, location: t.site_address as string }));
+  };
+
+  const clearTicket = () => {
+    setSelectedTicket(null);
+    setTicketQuery('');
+  };
+
+  const selectSite = (s: any) => {
+    setSelectedSite(s);
+    setSiteQuery(s.site_name);
+    setSiteOpen(false);
+    if (!form.location.trim() && s.site_address) setForm((f) => ({ ...f, location: s.site_address }));
+  };
+
+  const clearSite = () => {
+    setSelectedSite(null);
+    setSiteQuery('');
+  };
+
   const [requireReference, setRequireReference] = useState(false);
   const location = useLocation();
   const fieldWorkLinks = (location.state as { fieldWorkLinks?: ReferenceSummary[] } | null)?.fieldWorkLinks;
@@ -114,16 +173,19 @@ export default function TransportRequestForm() {
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (!form.site_name.trim() || !form.location.trim() || !form.client_name.trim()) {
-      toast({ title: 'Missing fields', description: 'Site name, location, and client name are required.', variant: 'destructive' });
+    if (!resolvedSiteId) {
+      toast({ title: 'Site required', description: 'Search and select an existing ticket or site before submitting.', variant: 'destructive' });
+      return;
+    }
+    if (!form.location.trim()) {
+      toast({ title: 'Missing fields', description: 'Location is required.', variant: 'destructive' });
       return;
     }
     if (!selectedApproverIds.length) {
       toast({ title: 'Approval required', description: 'Select at least one transport approver before submitting the request.', variant: 'destructive' });
       return;
     }
-    if (requireReference && !linkedReference && linkedReferences.length === 0) {
-      setReferenceError('Select a ticket, project, or material request before submitting.');
+    if (requireReference && linkedReferences.length === 0) {
       toast({ title: 'Reference required', description: 'Link this request to an existing record.', variant: 'destructive' });
       return;
     }
@@ -131,19 +193,18 @@ export default function TransportRequestForm() {
     try {
       setSaving(true);
       await createTransportRequest({
-        site_name: form.site_name,
         location: form.location,
-        client_name: form.client_name,
+        ticket_id: selectedTicket?.id ?? null,
+        site_id: selectedTicket ? null : (selectedSite?.id ?? null),
         engineer_id: form.engineer_id ? Number(form.engineer_id) : null,
         purpose: form.purpose || null,
         selected_approver_ids: selectedApproverIds,
-        ...referencePayload(linkedReference),
         linked_references: linkedReferences.map((ref) => ({ type: ref.type, id: ref.id })),
       });
-      setForm({ site_name: '', location: '', client_name: '', engineer_id: '', purpose: '' });
-      setLinkedReference(null);
+      setForm({ location: '', engineer_id: '', purpose: '' });
+      clearTicket();
+      clearSite();
       setLinkedReferences([]);
-      setReferenceError('');
       setIsFormOpen(false);
       await loadData();
       toast({ title: 'Request submitted successfully' });
@@ -195,15 +256,104 @@ export default function TransportRequestForm() {
                 <input value={user ? `${user.first_name || ''} ${user.last_name || ''}`.trim() || user.username || 'User' : ''} readOnly className="w-full rounded-lg border border-slate-300 bg-slate-50 px-3 py-2.5 text-slate-700" />
               </label>
 
-              <label className="space-y-2 text-sm font-medium text-slate-700">
-                <span>Client Name</span>
-                <input value={form.client_name} onChange={(e) => setForm({ ...form, client_name: e.target.value })} placeholder="Client / company" className="w-full rounded-lg border border-slate-300 px-3 py-2.5 focus:border-amber-500 focus:outline-none" />
-              </label>
+              {/* Ticket Search — first. Client and Site auto-fill from it. Never free text. */}
+              <div className="relative space-y-2 text-sm font-medium text-slate-700 md:col-span-2">
+                <span>Ticket Search</span>
+                <div className="relative">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                  <input
+                    value={ticketQuery}
+                    onChange={(e) => { setTicketQuery(e.target.value); if (selectedTicket) clearTicket(); setTicketOpen(true); }}
+                    onFocus={() => setTicketOpen(true)}
+                    onBlur={() => setTimeout(() => setTicketOpen(false), 150)}
+                    placeholder="Search by ticket number, title, or client…"
+                    autoComplete="off"
+                    className="w-full rounded-lg border border-slate-300 py-2.5 pl-9 pr-3 focus:border-amber-500 focus:outline-none"
+                  />
+                </div>
+                <p className="text-xs font-normal text-slate-400">Search an existing ticket — Client and Site auto-fill from it.</p>
+                {ticketOpen && !selectedTicket && ticketResults.length > 0 && (
+                  <div className="absolute z-20 mt-1 w-full rounded-lg border border-slate-200 bg-white shadow-lg">
+                    {ticketResults.map((t) => (
+                      <button
+                        key={t.id}
+                        type="button"
+                        className="block w-full px-3 py-2 text-left text-sm hover:bg-slate-50"
+                        onMouseDown={() => selectTicket(t)}
+                      >
+                        <span className="font-semibold">{t.ticket_id}</span> — {t.title}
+                        <span className="ml-1 text-xs text-slate-400">
+                          {t.customer_name}{t.site_name ? ` • ${t.site_name}` : ' • no site assigned'}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
 
-              <label className="space-y-2 text-sm font-medium text-slate-700 md:col-span-2">
-                <span>Site Name</span>
-                <input value={form.site_name} onChange={(e) => setForm({ ...form, site_name: e.target.value })} placeholder="Site name" className="w-full rounded-lg border border-slate-300 px-3 py-2.5 focus:border-amber-500 focus:outline-none" />
-              </label>
+              {!selectedTicket && (
+                <div className="relative space-y-2 text-sm font-medium text-slate-700 md:col-span-2">
+                  <span>Site Search</span>
+                  <div className="relative">
+                    <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                    <input
+                      value={siteQuery}
+                      onChange={(e) => { setSiteQuery(e.target.value); if (selectedSite) clearSite(); setSiteOpen(true); }}
+                      onFocus={() => setSiteOpen(true)}
+                      onBlur={() => setTimeout(() => setSiteOpen(false), 150)}
+                      placeholder="No matching ticket? Search sites directly…"
+                      autoComplete="off"
+                      className="w-full rounded-lg border border-slate-300 py-2.5 pl-9 pr-3 focus:border-amber-500 focus:outline-none"
+                    />
+                  </div>
+                  <p className="text-xs font-normal text-slate-400">No matching ticket linked — search and select a Site directly. Its Client fills in automatically.</p>
+                  {siteOpen && !selectedSite && siteResults.length > 0 && (
+                    <div className="absolute z-20 mt-1 w-full rounded-lg border border-slate-200 bg-white shadow-lg">
+                      {siteResults.map((s) => (
+                        <button
+                          key={s.id}
+                          type="button"
+                          className="block w-full px-3 py-2 text-left text-sm hover:bg-slate-50"
+                          onMouseDown={() => selectSite(s)}
+                        >
+                          <span className="font-semibold">{s.site_name}</span> • {s.client_name || 'No client'}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {resolvedSiteId && (
+                <div className="md:col-span-2 rounded-lg border border-slate-200 bg-slate-50 p-3">
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <div>
+                      <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Client</p>
+                      <span className="mt-0.5 flex items-center gap-1.5 text-sm font-medium text-slate-800">
+                        <Building2 className="h-3.5 w-3.5 shrink-0 text-amber-600" /> {resolvedClientName || '—'}
+                      </span>
+                    </div>
+                    <div>
+                      <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Site</p>
+                      <span className="mt-0.5 flex items-center gap-1.5 text-sm font-medium text-slate-800">
+                        <MapPin className="h-3.5 w-3.5 shrink-0 text-amber-600" /> {resolvedSiteName || '—'}
+                      </span>
+                    </div>
+                  </div>
+                  {(resolvedAddress || resolvedRegion) && (
+                    <p className="mt-2 border-t border-slate-200 pt-2 text-xs text-slate-500">
+                      {[resolvedAddress, resolvedRegion].filter(Boolean).join(', ')}
+                    </p>
+                  )}
+                  <button
+                    type="button"
+                    className="mt-2 text-xs font-medium text-amber-700 hover:underline"
+                    onClick={() => { clearTicket(); clearSite(); }}
+                  >
+                    {selectedTicket ? 'Change ticket' : 'Change site'}
+                  </button>
+                </div>
+              )}
 
               <label className="space-y-2 text-sm font-medium text-slate-700 md:col-span-2">
                 <span>Location</span>
@@ -258,23 +408,11 @@ export default function TransportRequestForm() {
                 <textarea value={form.purpose} onChange={(e) => setForm({ ...form, purpose: e.target.value })} rows={4} placeholder="Describe the reason for the transport requirement." className="w-full rounded-lg border border-slate-300 px-3 py-2.5 focus:border-amber-500 focus:outline-none" />
               </label>
 
-              <div className="md:col-span-2">
-                <ReferencePicker
-                  value={linkedReference}
-                  onChange={(next) => {
-                    setLinkedReference(next);
-                    setReferenceError('');
-                  }}
-                  required={requireReference}
-                  error={referenceError}
-                />
-              </div>
-
               <div className="md:col-span-2 rounded-xl border border-slate-200 bg-slate-50 p-4">
                 <ReferenceLinkPicker
                   value={linkedReferences}
                   onChange={setLinkedReferences}
-                  required={requireReference && !linkedReference}
+                  required={requireReference}
                   hint="Link this request to related tickets, requests, or other records."
                 />
               </div>

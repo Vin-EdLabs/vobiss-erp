@@ -857,6 +857,38 @@ router.patch('/tickets/:id', async (req, res) => {
   }
 });
 
+// --- ASSIGN/BACKFILL A TICKET'S SITE (Client/Site standardization) ---
+// A ticket must have a Client and Site before it can be used for an overtime request or
+// anywhere else the master data is required — this is how an existing ticket that's missing
+// one gets fixed, via a searched-and-selected site only (never free text).
+router.patch('/tickets/:id/site', async (req, res) => {
+  const { id } = req.params;
+  const { site_id } = req.body || {};
+  try {
+    if (!site_id) return res.status(400).json({ error: 'site_id is required' });
+    const ticketRes = await pool.query('SELECT id, ticket_id, customer_id FROM tickets WHERE ticket_id = $1', [id]);
+    if (ticketRes.rowCount === 0) return res.status(404).json({ error: 'Ticket not found' });
+    const ticket = ticketRes.rows[0];
+
+    const siteRes = await pool.query('SELECT id, site_name, customer_id FROM customer_sites WHERE id = $1', [site_id]);
+    if (siteRes.rowCount === 0) return res.status(404).json({ error: 'Site not found' });
+    const site = siteRes.rows[0];
+    if (ticket.customer_id && site.customer_id && Number(site.customer_id) !== Number(ticket.customer_id)) {
+      return res.status(400).json({ error: "This site does not belong to the ticket's client." });
+    }
+
+    const updated = await pool.query(
+      `UPDATE tickets SET site_id = $1, customer_id = COALESCE(customer_id, $2), updated_at = NOW()
+       WHERE id = $3 RETURNING id, ticket_id, site_id, customer_id`,
+      [site_id, site.customer_id, ticket.id]
+    );
+    res.json({ success: true, data: updated.rows[0] });
+  } catch (err) {
+    console.error('Ticket site update error:', err);
+    res.status(500).json({ error: err.message || 'Failed to update ticket site' });
+  }
+});
+
 // --- MANUAL EMAIL SEND TO CUSTOMER ---
 router.post('/tickets/:id/send-email', async (req, res) => {
   const { id } = req.params;

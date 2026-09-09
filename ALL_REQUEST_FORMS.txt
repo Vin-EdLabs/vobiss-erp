@@ -1,0 +1,283 @@
+VOBISS ERP - ALL REQUEST FORMS IN THE SYSTEM
+===========================================
+
+This is the complete list of request forms and request-style workflows currently present in the system.
+
+1) MATERIAL REQUEST FORMS
+   Main page:
+   - src/pages/RequestForms.tsx
+   Backend API:
+   - backend/routes/requests.js
+   DB logic:
+   - backend/db.js
+   Purpose:
+   - Staff submit material requests for items needed for projects, operations, or site work.
+   Status flow:
+   - pending, approved, completed, rejected
+
+2) ITEM RETURN REQUESTS
+   Main page:
+   - src/pages/ItemReturns.tsx
+   Backend API:
+   - backend/routes/requests.js
+   DB logic:
+   - backend/db.js
+   Purpose:
+   - Return inventory items that were previously issued or assigned.
+   Status flow:
+   - pending, approved, completed, rejected
+
+3) CASH REQUEST FORMS
+   Main page:
+   - src/pages/finance/CashRequestForm.tsx
+   Detail page:
+   - src/pages/finance/CashDetails.tsx
+   Backend API:
+   - backend/routes/finance.js
+   Shared request route:
+   - backend/routes/requests.js
+   Purpose:
+   - Request cash advance or expense funds with supporting purpose and approvers.
+   Status flow:
+   - pending, approved, completed, rejected
+
+4) TRANSPORT REQUEST FORMS
+   Main page:
+   - src/pages/transport/TransportRequestForm.tsx
+   Detail page:
+   - src/pages/transport/TransportDetail.tsx
+   Approval page:
+   - src/pages/transport/TransportApprovals.tsx
+   Backend route:
+   - backend/server.js
+   Purpose:
+   - Request transport support for trips, field operations, logistics, and work movement.
+   Status flow:
+   - pending, approved, rejected, completed
+
+5) FUEL REQUEST FORMS
+   Main page:
+   - src/pages/transport/FuelRequestFormPage.tsx
+   List page:
+   - src/pages/transport/FuelRequestsListPage.tsx
+   Detail page:
+   - src/pages/transport/FuelRequestDetailPage.tsx
+   Purpose:
+   - Request fuel for vehicles and related operational travel.
+   Status flow:
+   - pending, approved, completed, rejected
+
+6) RENTAL VEHICLE REQUEST FORMS
+   Main page:
+   - src/pages/transport/NewRentalVehicleRequestPage.tsx
+   List page:
+   - src/pages/transport/RentalVehicleRequestsPage.tsx
+   Detail page:
+   - src/pages/transport/VehicleRentalRequestDetailPage.tsx
+   Backend route:
+   - backend/routes/vehicle_requests.js
+   Purpose:
+   - Request rented vehicle support and linked transport work.
+   Status flow:
+   - draft, submitted, pending_manager, pending_finance, approved, cash_issued, rejected
+
+7) CIRCUIT REQUEST FORMS
+   Main page:
+   - src/pages/ipUnit/CircuitRequests.tsx
+   Purpose:
+   - Request a new or changed circuit or IP network item from the IP unit.
+   Related backend:
+   - backend/routes/ipUnit.js
+
+8) PROJECT / SERVICE REQUEST FORMS
+   Main hubs:
+   - src/pages/production/ProjectUnitHub.tsx
+   - src/pages/production/SalesUnitPage.tsx
+   Legacy redirect:
+   - src/pages/production/ProjectRequestLegacyRedirect.tsx
+   Purpose:
+   - Create and track project or service request workflows, including design and operational approval flows.
+
+9) SIGN-OFF FORMS
+   Main page:
+   - src/pages/production/SignoffForms.tsx
+   Purpose:
+   - Sign off completed production or project work with approval/rejection flow.
+
+10) LEAVE REQUEST FORMS
+    Staff self-service leave:
+    - src/pages/hr-self/Leave.tsx
+    - src/components/hr/Leave/LeaveRequestForm.tsx
+    - src/api/leave.ts
+    Backend:
+    - backend/routes/hrSelfLeave.js
+    - backend/routes/hrLeave.js
+    Core logic:
+    - backend/services/leave.js
+    - backend/db/hr.js
+    Purpose:
+    - Employee submits annual, sick, emergency, and other leave requests.
+    Approval flow:
+    - reliever -> supervisor -> manager -> CTO/HR approval stages
+    PDF generation:
+    - backend/utils/leavePdf.js
+    - backend/utils/leaveHtml.js
+    - src/api/leave.ts -> downloadLeavePdf()
+
+11) OTHER REQUEST-STYLE WORKFLOW FORMS
+    - src/pages/RequestDetails.tsx
+      Used to view the generated request form record after submission.
+    - src/pages/PendingApprovals.tsx
+      Used to review and approve waiting requests.
+    - src/pages/ApprovedForms.tsx
+      Used to display completed and finalized forms.
+    - src/pages/ItemsOut.tsx
+      Used to review completed inventory and cash request activity.
+
+DOWNLOADABLE PDF FILES IN THE SYSTEM
+-----------------------------------
+The system generates and downloads PDFs in several modules:
+
+1) LEAVE REQUEST PDF
+   Frontend:
+   - src/pages/hr-self/Leave.tsx
+   - src/components/hr/Leave/LeaveManagementPanel.tsx
+   API:
+   - src/api/leave.ts -> downloadLeavePdf(id, scope)
+   Backend:
+   - backend/routes/hrSelfLeave.js
+   - backend/routes/hrLeave.js
+   Generator:
+   - backend/utils/leavePdf.js
+   - backend/utils/leaveHtml.js
+
+2) PAYSLIP PDF
+   Frontend:
+   - src/pages/hr-self/Payslips.tsx
+   - src/pages/hr/Payroll.tsx
+   Backend:
+   - backend/routes/hr.js
+   - backend/routes/hrSelf.js
+   Generators:
+   - backend/utils/payslipPdf.js
+   - backend/utils/payslipHtml.js
+
+3) CASH REQUEST PDF
+   Frontend:
+   - src/pages/finance/CashDetails.tsx
+   PDF generation logic:
+   - src/pages/finance/CashDetails.tsx -> React PDF document
+   Backend:
+   - not required; generated in browser from the request details view
+
+4) TICKET HISTORY REPORT PDF
+   Frontend:
+   - src/components/tickets/TicketFullReportPanel.tsx
+   PDF template:
+   - src/components/tickets/TicketHistoryReportPdf.tsx
+   Purpose:
+   - Full ticket lifecycle report with print and PDF export.
+
+5) SERVICE REQUEST / PROJECT REPORT PDF
+   Frontend:
+   - src/components/production/ServiceRequestReportPanel.tsx
+   PDF template:
+   - src/components/production/ServiceRequestHistoryPdf.tsx
+   Purpose:
+   - Full project/service request history report, including links and timeline.
+
+6) HR REPORT PDF / EXPORT
+   Frontend:
+   - src/pages/hr/Reports.tsx
+   Library:
+   - src/lib/hrPdf.ts
+   Purpose:
+   - HR report export in PDF format.
+
+7) REQUEST FORM PRINT / SHARE PREVIEW
+   Frontend:
+   - src/pages/RequestDetails.tsx
+   - src/pages/finance/CashDetails.tsx
+   - src/pages/transport/TransportDetail.tsx
+   - src/pages/transport/FuelRequestDetailPage.tsx
+   - src/pages/transport/VehicleRentalRequestDetailPage.tsx
+   Purpose:
+   - Browser print / printable summary for request records.
+
+8) ARCHIVE FILE PREVIEW / DOWNLOAD
+   Frontend:
+   - src/pages/Archive.tsx
+   Backend:
+   - backend/routes/archive.js
+   Purpose:
+   - PDF/image preview and file download from archive storage.
+
+MAIN FORM FAMILY SUMMARY
+------------------------
+The system currently uses these major request categories:
+
+- Material Request
+- Item Return
+- Cash Request
+- Transport Request
+- Fuel Request
+- Rental Vehicle Request
+- Circuit Request
+- Project / Service Request
+- Sign-off Form
+- Leave Request
+
+ALL request forms are built around the same general pattern:
+- user fills a form
+- approver IDs are selected
+- the request is submitted to the unified request API
+- the record is stored in the database
+- approvers review it
+- it is approved, rejected, or finalized
+- the detail page shows the final record and related history
+- some records also have printable or downloadable PDF versions
+
+CORE REQUEST ROUTING FILES
+-------------------------
+- backend/routes/requests.js
+- backend/db.js
+- backend/routes/finance.js
+- backend/routes/vehicle_requests.js
+- backend/server.js
+- backend/routes/hrSelfLeave.js
+- backend/routes/hrLeave.js
+- backend/services/leave.js
+- src/pages/RequestForms.tsx
+- src/pages/ItemReturns.tsx
+- src/pages/finance/CashRequestForm.tsx
+- src/pages/transport/TransportRequestForm.tsx
+- src/pages/transport/FuelRequestFormPage.tsx
+- src/pages/transport/NewRentalVehicleRequestPage.tsx
+- src/pages/hr-self/Leave.tsx
+
+If you want the next step, I can turn this into an even more complete export list with exact routes, file names, and a final table that shows form name -> page -> backend route -> PDF type.
+
+ALL request forms are built around the same general pattern:
+- user fills a form
+- approver IDs are selected
+- the request is submitted to the unified request API
+- the record is stored in the database
+- approvers review it
+- it is approved, rejected, or finalized
+- the detail page shows the final record and related history
+
+CORE REQUEST ROUTING FILES
+-------------------------
+- backend/routes/requests.js
+- backend/db.js
+- backend/routes/finance.js
+- backend/routes/vehicle_requests.js
+- backend/server.js
+- src/pages/RequestForms.tsx
+- src/pages/ItemReturns.tsx
+- src/pages/finance/CashRequestForm.tsx
+- src/pages/transport/TransportRequestForm.tsx
+- src/pages/transport/FuelRequestFormPage.tsx
+- src/pages/transport/NewRentalVehicleRequestPage.tsx
+
+If you want the next step, I can also turn this into a cleaner Excel-style list or a shorter one-page summary for management.

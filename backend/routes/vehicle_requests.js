@@ -625,6 +625,9 @@ router.post('/:id/approve', async (req, res) => {
     const admin = isAdminRole(req.user);
     const selectedApprovers = requiredApproverIds(form, transport);
     const userId = Number(req.user.id);
+    if (Number(form.requester_id) === userId && !isSystemAdminAccount(req.user)) {
+      return res.status(403).json({ error: 'You cannot approve your own rental request.' });
+    }
     if (!selectedApprovers.includes(userId) && !admin) {
       return res.status(403).json({ error: 'You are not a selected approver for this rental request.' });
     }
@@ -719,6 +722,9 @@ router.post('/:id/reject', async (req, res) => {
     const transport = await transportConfig();
     const selectedApprovers = requiredApproverIds(form, transport);
     const userId = Number(req.user.id);
+    if (Number(form.requester_id) === userId && !isSystemAdminAccount(req.user)) {
+      return res.status(403).json({ error: 'You cannot reject your own rental request.' });
+    }
     if (!selectedApprovers.includes(userId) && !isAdminRole(req.user)) {
       return res.status(403).json({ error: 'You are not a selected approver for this rental request.' });
     }
@@ -772,6 +778,9 @@ router.post('/:id/issue', async (req, res) => {
     if (result.rowCount === 0) return res.status(404).json({ error: 'Vehicle request form not found' });
     const form = result.rows[0];
     const transport = await transportConfig();
+    if (Number(form.requester_id) === Number(req.user.id) && !isSystemAdminAccount(req.user)) {
+      return res.status(403).json({ error: 'You cannot issue cash for your own rental request.' });
+    }
     if (!isFinanceUser(req.user, transport)) {
       return res.status(403).json({ error: 'Only finance users can issue cash for a vehicle request.' });
     }

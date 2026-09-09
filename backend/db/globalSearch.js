@@ -69,6 +69,40 @@ export async function globalExecutiveSearch(query) {
     console.error('[global-search] tickets:', e.message);
   }
 
+  // Sites are the primary object for the Site 360 view — searched here (name/address/region/
+  // client) so a match can jump straight into a site's full operational history instead of a
+  // single record's Flow Panel.
+  try {
+    const siteRes = await pool.query(
+      `SELECT s.id, s.site_name, s.site_code, s.region, s.connection_status,
+              c.customer_name
+       FROM customer_sites s
+       LEFT JOIN customers c ON c.id = s.customer_id AND c.deleted_at IS NULL
+       WHERE (
+         LOWER(COALESCE(s.site_name, '')) LIKE $1
+         OR LOWER(COALESCE(s.site_code, '')) LIKE $1
+         OR LOWER(COALESCE(s.site_address, '')) LIKE $1
+         OR LOWER(COALESCE(s.region, '')) LIKE $1
+         OR LOWER(COALESCE(c.customer_name, '')) LIKE $1
+       )
+       ORDER BY s.site_name
+       LIMIT $2`,
+      [like, LIMIT]
+    );
+
+    for (const row of siteRes.rows) {
+      results.push({
+        kind: 'site',
+        id: String(row.id),
+        title: row.site_name,
+        subtitle: `${row.customer_name || 'No client linked'}${row.site_code ? ` · ${row.site_code}` : ''}${row.region ? ` · ${row.region}` : ''}${row.connection_status ? ` · ${row.connection_status}` : ''}`,
+        href: `/site360/${row.id}`,
+      });
+    }
+  } catch (e) {
+    console.error('[global-search] sites:', e.message);
+  }
+
   try {
     const reqParams = [like, LIMIT * 2];
     let reqExtra = ` OR REPLACE(LOWER(COALESCE(r.type, '')), '_', ' ') LIKE $1`;

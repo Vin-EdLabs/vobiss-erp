@@ -63,9 +63,15 @@ async function sendOne(subscription, payload) {
     return { ok: true };
   } catch (err) {
     const status = err.statusCode || err.status || 0;
-    if (status === 404 || status === 410) {
-      // Expired/gone — clean up
+    // 404/410 = the push service says this subscription is gone. 403 here means the VAPID
+    // key used to sign the request doesn't match the key the browser subscribed with — almost
+    // always because VAPID_PUBLIC_KEY/PRIVATE_KEY changed since this subscription was created.
+    // Both are permanent, not transient: retrying against the same (correct, current) server
+    // keys can never succeed for this specific subscription, so it's cleaned up the same way —
+    // the device gets a working one again next time it opens the app and re-subscribes.
+    if (status === 404 || status === 410 || status === 403) {
       await deleteSubscription(subscription.id);
+      if (status === 403) console.warn('[webpush] dropped subscription', subscription.id, '— VAPID key mismatch (stale from before a key change)');
     } else {
       console.warn('[webpush] send error', status, err.body || err.message);
     }

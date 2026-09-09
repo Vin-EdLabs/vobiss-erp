@@ -1,5 +1,6 @@
 // src/pages/RequestForms.tsx
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { Plus, Search, Clock, CheckCircle, XCircle, Users } from 'lucide-react';
 import { getRequests, getItems, createRequest, getApprovers, cxApi, getWorkflowConfig } from '../api';
 import { ReferenceLinkPicker } from '@/components/references/ReferenceLinkPicker';
@@ -7,7 +8,6 @@ import type { ReferenceSummary } from '@/lib/referenceRegistry';
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
@@ -17,6 +17,8 @@ import { userHasAnyRole } from '../config/roles';
 import { vobiAmbientStore } from '@/stores/vobiAmbientStore';
 import { useVobiFormState } from '@/hooks/useVobiFormState';
 import { useVobiSection } from '@/hooks/useVobiSection';
+import { searchSitesForPicker } from '@/api/fieldWork';
+import type { LookupRow } from '@/api/ipUnit';
 
 interface Request {
   id: number;
@@ -192,6 +194,7 @@ const RequestForms: React.FC = () => {
     ticket_id?: number | null;
     linked_cash_request_id?: number | null;
     linked_references?: ReferenceSummary[];
+    siteId?: number | null;
   }) => {
     try {
       const mergedLinkedReferences = formData.linked_references?.length
@@ -210,6 +213,7 @@ const RequestForms: React.FC = () => {
         items: formData.items,
         ticket_id: formData.ticket_id,
         linked_cash_request_id: formData.linked_cash_request_id,
+        siteId: formData.siteId,
         ...(mergedLinkedReferences?.length ? { linked_references: mergedLinkedReferences } : {}),
       }, formData.selectedApproverIds, 'material_request');
 
@@ -335,7 +339,7 @@ const RequestForms: React.FC = () => {
                 <thead className="bg-gradient-to-r from-[var(--surface-secondary)] to-[var(--surface-hover)]">
                   <tr>
                     <th className="px-6 py-3 text-left text-xs font-medium text-[var(--text-muted)] uppercase tracking-wider">Request ID</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-[var(--text-muted)] uppercase tracking-wider">Project</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-[var(--text-muted)] uppercase tracking-wider">Site Name</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-[var(--text-muted)] uppercase tracking-wider">Created By</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-[var(--text-muted)] uppercase tracking-wider">Items</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-[var(--text-muted)] uppercase tracking-wider">Created At</th>
@@ -411,6 +415,7 @@ interface RequestFormProps {
     ticket_id?: number | null;
     linked_cash_request_id?: number | null;
     linked_references?: ReferenceSummary[];
+    siteId?: number | null;
   }) => void;
   onCancel: () => void;
   items: Item[];
@@ -429,6 +434,9 @@ const RequestForm: React.FC<RequestFormProps> = ({ onSave, onCancel, items, appr
     receivedBy: '',
     deployment: 'Deployment' as 'Deployment' | 'Maintenance',
   });
+  const [siteId, setSiteId] = useState<number | null>(null);
+  const [siteQuery, setSiteQuery] = useState('');
+  const [siteClientName, setSiteClientName] = useState<string | null>(null);
   const [selectedApproverIds, setSelectedApproverIds] = useState<number[]>([]);
   const [selectedItems, setSelectedItems] = useState<{ name: string; requested: string }[]>([{ name: '', requested: '' }]);
   const [submitting, setSubmitting] = useState(false);
@@ -461,7 +469,7 @@ const RequestForm: React.FC<RequestFormProps> = ({ onSave, onCancel, items, appr
     formKey: 'material-request',
     requiredFields: [
       { field: 'teamLeaderName', label: 'Team Leader Name' },
-      { field: 'projectName', label: 'Project Name' },
+      { field: 'projectName', label: 'Site' },
       { field: 'location', label: 'Location' },
       { field: 'receivedBy', label: 'Received By' },
       { field: 'selectedApproverIds', label: 'Approvers' },
@@ -482,8 +490,73 @@ const RequestForm: React.FC<RequestFormProps> = ({ onSave, onCancel, items, appr
   const locationRef = useRef<HTMLInputElement>(null);
   const receivedByRef = useRef<HTMLInputElement>(null);
   const deploymentRefs = useRef<(HTMLInputElement | null)[]>([]);
-  const itemNameRefs = useRef<(HTMLSelectElement | null)[]>([]);
+  const itemNameRefs = useRef<(HTMLInputElement | null)[]>([]);
   const itemQtyRefs = useRef<(HTMLInputElement | null)[]>([]);
+  const [openItemDropdown, setOpenItemDropdown] = useState<number | null>(null);
+  const [itemDropdownStyle, setItemDropdownStyle] = useState<React.CSSProperties>({});
+
+  // The items table sits inside an `overflow-hidden` card (for its rounded corners), which
+  // would clip an absolutely-positioned dropdown — portal it to <body> instead, positioned to
+  // track the active row's input, so it's never hidden behind the card's edge.
+  useLayoutEffect(() => {
+    if (openItemDropdown === null) return;
+    const updatePosition = () => {
+      const el = itemNameRefs.current[openItemDropdown];
+      if (!el) return;
+      const rect = el.getBoundingClientRect();
+      setItemDropdownStyle({
+        position: 'fixed',
+        top: rect.bottom + 4,
+        left: rect.left,
+        width: rect.width,
+        zIndex: 9999,
+      });
+    };
+    updatePosition();
+    window.addEventListener('resize', updatePosition);
+    window.addEventListener('scroll', updatePosition, true);
+    return () => {
+      window.removeEventListener('resize', updatePosition);
+      window.removeEventListener('scroll', updatePosition, true);
+    };
+  }, [openItemDropdown]);
+
+  const [siteResults, setSiteResults] = useState<LookupRow[]>([]);
+
+  useEffect(() => {
+    if (!siteQuery.trim() || siteId) {
+      setSiteResults([]);
+      return;
+    }
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      searchSitesForPicker(siteQuery)
+        .then((results) => { if (!cancelled) setSiteResults(results); })
+        .catch(() => { if (!cancelled) setSiteResults([]); });
+    }, 250);
+    return () => { cancelled = true; window.clearTimeout(timer); };
+  }, [siteQuery, siteId]);
+
+  const selectSite = (site: LookupRow) => {
+    const siteName = site.site_name || site.name || '';
+    setSiteId(site.id);
+    setSiteQuery(siteName);
+    setSiteClientName(site.customer_name || null);
+    setSiteResults([]);
+    setFormData(prev => ({
+      ...prev,
+      projectName: siteName,
+      location: prev.location.trim() ? prev.location : (site.site_address || prev.location),
+    }));
+  };
+
+  const clearSite = () => {
+    setSiteId(null);
+    setSiteQuery('');
+    setSiteClientName(null);
+    setSiteResults([]);
+    setFormData(prev => ({ ...prev, projectName: '' }));
+  };
 
   useEffect(() => {
     if (approvers.length > 0) {
@@ -496,7 +569,7 @@ const RequestForm: React.FC<RequestFormProps> = ({ onSave, onCancel, items, appr
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
-        const { formData: savedForm, selectedApproverIds: savedIds, selectedItems: savedItems, timestamp, selectedTicket: savedTicket, linkType: savedLinkType, cashRequestId: savedCashRequestId, selectedCashRequest: savedCashRequest } = parsed;
+        const { formData: savedForm, selectedApproverIds: savedIds, selectedItems: savedItems, timestamp, selectedTicket: savedTicket, linkType: savedLinkType, cashRequestId: savedCashRequestId, selectedCashRequest: savedCashRequest, siteId: savedSiteId, siteQuery: savedSiteQuery, siteClientName: savedSiteClientName } = parsed;
         if (Date.now() - timestamp < TTL) {
           setFormData({ ...savedForm, createdBy: currentUserName });
           setSelectedApproverIds(savedIds || []);
@@ -505,6 +578,9 @@ const RequestForm: React.FC<RequestFormProps> = ({ onSave, onCancel, items, appr
           setLinkType(savedLinkType || 'ticket');
           setCashRequestId(savedCashRequestId || '');
           setSelectedCashRequest(savedCashRequest || null);
+          setSiteId(savedSiteId || null);
+          setSiteQuery(savedSiteQuery || '');
+          setSiteClientName(savedSiteClientName || null);
         } else {
           localStorage.removeItem(DRAFT_KEY);
         }
@@ -516,9 +592,9 @@ const RequestForm: React.FC<RequestFormProps> = ({ onSave, onCancel, items, appr
   }, [currentUserName]);
 
   useEffect(() => {
-    const draft = { formData, selectedApproverIds, selectedItems, selectedTicket, linkType, cashRequestId, selectedCashRequest, timestamp: Date.now() };
+    const draft = { formData, selectedApproverIds, selectedItems, selectedTicket, linkType, cashRequestId, selectedCashRequest, siteId, siteQuery, siteClientName, timestamp: Date.now() };
     localStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
-  }, [formData, selectedApproverIds, selectedItems, selectedTicket, linkType, cashRequestId, selectedCashRequest]);
+  }, [formData, selectedApproverIds, selectedItems, selectedTicket, linkType, cashRequestId, selectedCashRequest, siteId, siteQuery, siteClientName]);
 
   useEffect(() => {
     const term = linkType === 'ticket' ? ticketSearchTerm.trim() : cashRequestId.trim();
@@ -630,10 +706,10 @@ const RequestForm: React.FC<RequestFormProps> = ({ onSave, onCancel, items, appr
         ? { field: 'teamLeaderName', label: 'Team Leader Name', message: 'Enter the team leader name before submitting.' }
         : null,
       !formData.projectName.trim()
-        ? { field: 'projectName', label: 'Project Name', message: 'Enter the project name before submitting.' }
+        ? { field: 'projectName', label: 'Site', message: 'Search for and select the site before submitting.' }
         : null,
       !formData.location.trim()
-        ? { field: 'location', label: 'Location of Project', message: 'Enter the project location before submitting.' }
+        ? { field: 'location', label: 'Site Location', message: 'Enter the site location before submitting.' }
         : null,
       !formData.receivedBy.trim()
         ? { field: 'receivedBy', label: 'Received By', message: 'Enter who will receive the requested items.' }
@@ -684,9 +760,10 @@ const RequestForm: React.FC<RequestFormProps> = ({ onSave, onCancel, items, appr
       return;
     }
 
+    const validItemNames = new Set(items.map(i => i.name));
     const validItems = selectedItems
       .map(item => ({ name: item.name, requested: parseInt(item.requested) || 0 }))
-      .filter(item => item.name && item.requested > 0);
+      .filter(item => item.name && validItemNames.has(item.name) && item.requested > 0);
 
     if (validItems.length === 0) {
       vobiAmbientStore.getState().setExactIssue({
@@ -711,6 +788,7 @@ const RequestForm: React.FC<RequestFormProps> = ({ onSave, onCancel, items, appr
       ticket_id: linkType === 'ticket' ? selectedTicket?.id : null,
       linked_cash_request_id: null,
       linked_references: linkedReferences.map((ref) => ({ type: ref.type, id: ref.id })),
+      siteId,
     });
 
     setFormData({
@@ -718,6 +796,9 @@ const RequestForm: React.FC<RequestFormProps> = ({ onSave, onCancel, items, appr
       teamLeaderName: '', teamLeaderPhone: '', projectName: '',
       ispName: '', location: '', receivedBy: '', deployment: 'Deployment'
     });
+    setSiteId(null);
+    setSiteQuery('');
+    setSiteClientName(null);
     setSelectedApproverIds(approvers.map(a => a.id));
     setSelectedItems([{ name: '', requested: '' }]);
     setSelectedTicket(null);
@@ -848,18 +929,53 @@ const RequestForm: React.FC<RequestFormProps> = ({ onSave, onCancel, items, appr
           />
         </div>
 
-        <div className="space-y-3">
-          <label className="block text-sm font-semibold text-[var(--text-body)]">Project Name *</label>
+        <div className="space-y-3 relative">
+          <label className="block text-sm font-semibold text-[var(--text-body)]">Site *</label>
           <Input
             ref={projectNameRef}
-            data-vobi-field="projectName"
-            value={formData.projectName}
-            onChange={e => setFormData({ ...formData, projectName: e.target.value })}
+            value={siteQuery}
+            onChange={e => {
+              setSiteQuery(e.target.value);
+              if (siteId) {
+                setSiteId(null);
+                setSiteClientName(null);
+                setFormData(prev => ({ ...prev, projectName: '' }));
+              }
+            }}
             onKeyDown={e => handleKeyDown(e, ispNameRef)}
-            placeholder="Project name"
+            placeholder="Search for a site..."
             className="rounded-xl"
             disabled={submitting}
+            autoComplete="off"
           />
+          <input type="hidden" data-vobi-field="projectName" value={formData.projectName} readOnly />
+          {siteQuery && !siteId && siteResults.length > 0 && (
+            <div className="absolute z-20 mt-1 w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] shadow-lg max-h-64 overflow-y-auto">
+              {siteResults.map((s) => (
+                <button
+                  key={s.id}
+                  type="button"
+                  className="block w-full px-3 py-2 text-left text-sm hover:bg-[var(--surface-secondary)]"
+                  onMouseDown={() => selectSite(s)}
+                >
+                  <div className="font-medium text-[var(--text-body)]">{s.site_name || s.name}</div>
+                  <div className="text-xs text-[var(--text-muted)]">
+                    {s.customer_name}{s.site_address ? ` · ${s.site_address}` : ''}
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+          {siteId ? (
+            <p className="text-xs text-[var(--text-muted)]">
+              Client: {siteClientName || '—'} ·{' '}
+              <button type="button" className="underline hover:text-[var(--text-body)]" onClick={clearSite} disabled={submitting}>
+                Change site
+              </button>
+            </p>
+          ) : (
+            <p className="text-xs text-[var(--text-muted)]">Type to search sites; the client fills in automatically.</p>
+          )}
         </div>
 
         <div className="space-y-3">
@@ -876,14 +992,14 @@ const RequestForm: React.FC<RequestFormProps> = ({ onSave, onCancel, items, appr
         </div>
 
         <div className="md:col-span-2 space-y-3">
-          <label className="block text-sm font-semibold text-[var(--text-body)]">Location of Project *</label>
+          <label className="block text-sm font-semibold text-[var(--text-body)]">Site Location *</label>
           <Input
             ref={locationRef}
             data-vobi-field="location"
             value={formData.location}
             onChange={e => setFormData({ ...formData, location: e.target.value })}
             onKeyDown={e => handleKeyDown(e, receivedByRef)}
-            placeholder="Project location"
+            placeholder={siteId ? "Auto-filled from the selected site — edit if needed" : "Site location"}
             className="rounded-xl"
             disabled={submitting}
           />
@@ -987,18 +1103,42 @@ const RequestForm: React.FC<RequestFormProps> = ({ onSave, onCancel, items, appr
               {selectedItems.map((item, index) => (
                 <tr key={index} className="border-t border-[var(--border)] hover:bg-[var(--surface)]/60 transition-all">
                   <td className="border-r border-[var(--border)] p-4 font-semibold text-sm text-[var(--text-primary)]">{index + 1}</td>
-                  <td className="border-r border-[var(--border)] p-4">
-                    <Select value={item.name} onValueChange={v => handleItemChange(index, 'name', v)} disabled={submitting}>
-                      <SelectTrigger ref={el => itemNameRefs.current[index] = el} className="rounded-xl" onKeyDown={e => handleKeyDown(e, itemQtyRefs.current[index])}>
-                        <span data-vobi-field="itemName" className="sr-only">Item</span>
-                        <SelectValue placeholder="Select Item" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {items.map(item => (
-                          <SelectItem key={item.id} value={item.name}>{item.name}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                  <td className="border-r border-[var(--border)] p-4 relative">
+                    <Input
+                      ref={el => itemNameRefs.current[index] = el}
+                      data-vobi-field="itemName"
+                      value={item.name}
+                      onChange={e => { handleItemChange(index, 'name', e.target.value); setOpenItemDropdown(index); }}
+                      onFocus={() => setOpenItemDropdown(index)}
+                      onBlur={() => setTimeout(() => setOpenItemDropdown(prev => (prev === index ? null : prev)), 150)}
+                      onKeyDown={e => handleKeyDown(e, itemQtyRefs.current[index])}
+                      placeholder="Search items..."
+                      className="rounded-xl"
+                      disabled={submitting}
+                      autoComplete="off"
+                    />
+                    {openItemDropdown === index && typeof document !== 'undefined' && (() => {
+                      const q = item.name.trim().toLowerCase();
+                      const matches = q ? items.filter(i => i.name.toLowerCase().includes(q)) : items;
+                      return matches.length > 0 && createPortal(
+                        <div
+                          style={itemDropdownStyle}
+                          className="max-h-56 overflow-y-auto rounded-xl border border-[var(--border)] bg-[var(--surface)] shadow-lg"
+                        >
+                          {matches.map(i => (
+                            <button
+                              key={i.id}
+                              type="button"
+                              className="block w-full px-3 py-2 text-left text-sm hover:bg-[var(--surface-secondary)]"
+                              onMouseDown={() => { handleItemChange(index, 'name', i.name); setOpenItemDropdown(null); }}
+                            >
+                              {i.name}
+                            </button>
+                          ))}
+                        </div>,
+                        document.body
+                      );
+                    })()}
                   </td>
                   <td className="border-r border-[var(--border)] p-4">
                     <Input

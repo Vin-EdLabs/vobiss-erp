@@ -517,7 +517,8 @@ router.get('/leave-requests', async (req, res) => {
       params.push(isoDateOnly(to));
       clauses.push(`r.end_date <= $${params.length}`);
     }
-    const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
+    clauses.push(`r.current_stage IS NULL`);
+    const where = `WHERE ${clauses.join(' AND ')}`;
     const result = await safeQuery(
       `SELECT r.*, e.full_name, e.department, e.photo_url, e.position
        FROM hr_leave_requests r
@@ -2753,6 +2754,9 @@ router.put('/leave-requests/:id', async (req, res) => {
     const existing = await pool.query(`SELECT * FROM hr_leave_requests WHERE id = $1`, [req.params.id]);
     if (existing.rowCount === 0) return res.status(404).json({ error: 'Leave request not found' });
     const row = existing.rows[0];
+    if (row.current_stage) {
+      return res.status(409).json({ error: 'This request uses the new multi-stage approval flow — respond from the Requests tab.' });
+    }
     if (row.status !== 'pending') return res.status(400).json({ error: 'Request has already been reviewed' });
 
     const rejectionReason = String(req.body?.rejection_reason || '').trim() || null;

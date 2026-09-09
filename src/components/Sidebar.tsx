@@ -9,7 +9,7 @@ import {
   Headphones, Ticket, MessagesSquare, Users2, User, FilePlus, Headset,
   Globe, CircleAlert, AlertCircle, Search, Network, LayoutDashboard,
   Briefcase, CalendarDays, CalendarCheck, CalendarOff, Wallet, ClipboardCheck, FolderOpen, PanelLeftClose, PanelLeft, Landmark, ShieldCheck,
-  Truck, Fuel, FileSignature, Award, Cable, Eye, Inbox, Gauge
+  Truck, Fuel, FileSignature, Award, Cable, Eye, Inbox, Gauge, HeartPulse
 } from 'lucide-react';
 import { getRequests, getLowStockItems, getNotifications, getWorkspace, cxApi } from '../api';
 import { formatPersonName } from '@/lib/displayName';
@@ -22,6 +22,8 @@ import { useIsMobile } from '@/hooks/useIsMobile';
 import { usePendingRequestBeep } from '@/hooks/usePendingRequestBeep';
 import { useQuery } from '@tanstack/react-query';
 import { hrSelfApi } from '@/api/hrSelf';
+import { leaveSelfApi } from '@/api/leave';
+import otApi from '@/api/overtime';
 import { hrApi } from '@/api/hr';
 import { UserAvatar } from '@/components/UserAvatar';
 import { isMenuPathActive } from '@/lib/menuActivePath';
@@ -286,6 +288,24 @@ const Sidebar = ({
     retry: 1,
   });
   const linkedHrEmployee = hrMeQ.data !== undefined ? hrMeQ.data : hrEmployee;
+  const leavePendingOnMeQ = useQuery({
+    queryKey: ['leave', 'pending-on-me'],
+    queryFn: leaveSelfApi.pendingOnMe,
+    enabled: !!user?.id,
+    staleTime: 15_000,
+    refetchInterval: 15_000,
+    refetchOnWindowFocus: true,
+    retry: 1,
+  });
+  const overtimePendingOnMeQ = useQuery({
+    queryKey: ['overtime', 'pending-on-me'],
+    queryFn: otApi.pendingOnMe,
+    enabled: !!user?.id,
+    staleTime: 15_000,
+    refetchInterval: 15_000,
+    refetchOnWindowFocus: true,
+    retry: 1,
+  });
   const hrStatsQ = useQuery({
     queryKey: ['hr', 'stats'],
     queryFn: hrApi.dashboardStats,
@@ -794,14 +814,25 @@ const Sidebar = ({
       subItems: [
         { icon: BarChart3,   label: 'CX Dashboard',          path: '/staff/cx/dashboard' },
         { icon: Building2,   label: 'Projects',              path: '/staff/cx/projects' },
-        { icon: MapPin,      label: 'Sites',                 path: '/staff/cx/sites' },
-        { icon: Users2,      label: 'Clients',               path: '/staff/cx/clients' },
         { icon: Ticket,      label: 'Master Ticket Queue',   path: '/staff/cx/tickets', notificationCount: ticketAttention.cx },
         { icon: FilePlus,    label: 'Create Staff Ticket',   path: '/staff/cx/create-ticket' },
         { icon: CircleAlert, label: 'Ticket Escalation',     path: '/staff/cx/escalate', notificationCount: ticketAttention.escalate },
         { icon: Search,      label: 'Ticket Search',         path: '/staff/cx/ticket-search' },
         { icon: Tags,        label: 'Ticket Tags',           path: '/staff/cx/tags' },
         { icon: Clock,       label: "Today's Tickets",       path: '/staff/tickets/today' },
+      ]
+    };
+
+    // Sales Section — Sites and Clients moved out of CX System into their own section.
+    const salesSection = {
+      icon: HandCoins,
+      label: 'Sales',
+      isCollapsible: true,
+      isOpen: sectionOpen('sales'),
+      onToggle: () => toggleSection('sales'),
+      subItems: [
+        { icon: MapPin,  label: 'Sites',   path: '/staff/cx/sites' },
+        { icon: Users2,  label: 'Clients', path: '/staff/cx/clients' },
       ]
     };
 
@@ -1017,9 +1048,10 @@ const Sidebar = ({
     const hrPendingLeave = Number(hrStatsQ.data?.pendingLeaveRequests || 0);
     const hrPendingForms = Number(hrStatsQ.data?.pendingFormRequests || 0);
     const hrAttentionCount = hrPendingLeave + hrPendingForms;
-    const myPendingLeave = Number(linkedHrEmployee?.pending_leave_count || 0);
+    const myPendingLeave = Number(linkedHrEmployee?.pending_leave_count || 0) + (leavePendingOnMeQ.data?.requests?.length || 0);
     const myPendingForms = Number(linkedHrEmployee?.pending_form_count || 0);
-    const myHrAttentionCount = myPendingLeave + myPendingForms;
+    const myPendingOvertime = overtimePendingOnMeQ.data?.requests?.length || 0;
+    const myHrAttentionCount = myPendingLeave + myPendingForms + myPendingOvertime;
 
     const hrSection = {
       icon: Briefcase,
@@ -1034,9 +1066,11 @@ const Sidebar = ({
         { icon: LayoutDashboard, label: 'HR Dashboard', path: '/hr/dashboard' },
         { icon: Users, label: 'Employees', path: '/hr/employees' },
         { icon: CalendarDays, label: 'Leave Management', path: '/hr/leave', notificationCount: hrPendingLeave },
+        { icon: Clock, label: 'Overtime Requests', path: '/hr/overtime' },
         { icon: Wallet, label: 'Payroll', path: '/hr/payroll' },
         { icon: HandCoins, label: 'Salary Advances', path: '/hr/payroll/advances' },
         { icon: ClipboardList, label: 'Payroll History', path: '/hr/payroll-history' },
+        { icon: HeartPulse, label: 'Insurance', path: '/hr/insurance' },
         { icon: ClipboardCheck, label: 'Attendance', path: '/hr/attendance' },
         { icon: MapPin, label: 'Field Arrivals', path: '/hr/field-arrivals' },
         { icon: BarChart3, label: 'Analytics', path: '/hr/analytics' },
@@ -1058,7 +1092,9 @@ const Sidebar = ({
       subItems: [
         { icon: CalendarCheck, label: 'Attendance', path: '/hr-self/attendance' },
         { icon: Wallet, label: 'My Payslips', path: '/hr-self/payslips' },
+        { icon: HeartPulse, label: 'Hospital Insurance', path: '/hr-self/insurance' },
         { icon: CalendarOff, label: 'Leave Request', path: '/hr-self/leave', notificationCount: myPendingLeave },
+        { icon: Clock, label: 'Overtime Request', path: '/hr-self/overtime', notificationCount: myPendingOvertime },
         { icon: FileText, label: 'Forms', path: '/hr-self/forms', notificationCount: myPendingForms },
       ],
     };
@@ -1076,6 +1112,7 @@ const Sidebar = ({
       subItems: [
         { icon: Users, label: 'Employees', path: '/hr/employees' },
         { icon: CalendarDays, label: 'Leave Management', path: '/hr/leave', notificationCount: hrPendingLeave },
+        { icon: Clock, label: 'Overtime Requests', path: '/hr/overtime' },
         { icon: Wallet, label: 'Payroll', path: '/hr/payroll' },
         { icon: ClipboardCheck, label: 'Attendance', path: '/hr/attendance' },
         { icon: BarChart2, label: 'Reports', path: '/hr/reports' },
@@ -1174,7 +1211,7 @@ const Sidebar = ({
         financeSection,
         cashRequest,
         assetsManager, fieldActivities,
-        cxSection, ...(reportSystemSection ? [reportSystemSection] : []), nocSection, ipSection, ipUnitSection, fieldEngSection,
+        cxSection, salesSection, ...(reportSystemSection ? [reportSystemSection] : []), nocSection, ipSection, ipUnitSection, fieldEngSection,
         customerPortal,
         directorEscalationSection,
         directorTicketsSection,
@@ -1191,7 +1228,7 @@ const Sidebar = ({
         financeSection,
         cashRequest,
         assetsManager, fieldActivities,
-        cxSection, ...(reportSystemSection ? [reportSystemSection] : []), nocSection, ipSection, ipUnitSection, fieldEngSection, customerPortal,
+        cxSection, salesSection, ...(reportSystemSection ? [reportSystemSection] : []), nocSection, ipSection, ipUnitSection, fieldEngSection, customerPortal,
         { icon: AuditIcon, label: 'Audit Logs',      path: '/audit-logs' },
         { icon: Users,     label: 'User Management', path: '/users' },
         { icon: Settings,  label: 'Settings',        path: '/settings' }
@@ -1286,6 +1323,7 @@ const Sidebar = ({
         // so Sales can see what's going on with customer tickets without needing to ask CX.
         // Customer Portal is a CX-only link — Sales doesn't need it.
         if (isCxUser || isSalesUser) unitItems.push(cxSection);
+        if (isCxUser || isSalesUser) unitItems.push(salesSection);
         if (isCxUser) unitItems.push(customerPortal);
         if (hasPosition('relationship officer')) unitItems.push(roSection);
         if (isFinance) unitItems.push(financeSection);
@@ -1296,7 +1334,7 @@ const Sidebar = ({
     }
 
     if (isHrUser && !hasSystemWideMode && !isGlobalPosition) {
-      baseItems = [hrSection, ...baseItems];
+      baseItems = [hrSection, ...baseItems, { icon: Search, label: 'Global Search', path: '/director/search' }];
     }
     if (showMyHr) {
       baseItems = [myHrSection, ...baseItems];

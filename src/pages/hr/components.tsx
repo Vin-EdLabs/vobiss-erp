@@ -20,13 +20,16 @@ export function HrPageHeader({
   actions?: React.ReactNode;
 }) {
   return (
-    <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+    <section
+      className="vobiss-card mb-4 flex flex-col gap-3 overflow-hidden rounded-r-[var(--card-radius)] rounded-l-none border bg-[var(--surface)] px-4 py-4 sm:mb-6 sm:flex-row sm:items-end sm:justify-between sm:px-6 sm:py-5"
+      style={{ borderLeftWidth: 4, borderLeftColor: 'var(--primary)' }}
+    >
       <div className="min-w-0">
         <h1 className="text-xl font-semibold tracking-tight text-[var(--text-primary)] sm:text-2xl">{title}</h1>
         {description && <p className="mt-1 text-sm text-[var(--text-secondary)]">{description}</p>}
       </div>
       {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
-    </div>
+    </section>
   );
 }
 

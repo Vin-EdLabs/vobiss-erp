@@ -631,6 +631,11 @@ export async function initDB() {
     await addColumnIfNotExists('requests', 'created_by_id', 'INTEGER REFERENCES users(id)');
     await addColumnIfNotExists('requests', 'ticket_id', 'INTEGER REFERENCES tickets(id) ON DELETE SET NULL');
     await addColumnIfNotExists('requests', 'linked_cash_request_id', 'INTEGER REFERENCES requests(id) ON DELETE SET NULL');
+    // Client/Site standardization — material/cash requests reference the same centralized Site
+    // master record instead of a free-typed "project name". project_name/location stay as the
+    // display snapshot (auto-filled from the site, editable when the site has no address on file)
+    // so existing reports/search that read those columns keep working unmodified.
+    await addColumnIfNotExists('requests', 'site_id', 'INTEGER REFERENCES customer_sites(id) ON DELETE SET NULL');
 
     await createTableIfNotExists(`
       CREATE TABLE IF NOT EXISTS shared_links (
@@ -761,6 +766,8 @@ export async function initDB() {
     await addColumnIfNotExists('transport_requests', 'reference_title', 'TEXT');
     await addColumnIfNotExists('transport_requests', 'reference_status', 'VARCHAR(80)');
     await addColumnIfNotExists('transport_requests', 'selected_approver_ids', "JSONB NOT NULL DEFAULT '[]'::jsonb");
+    await addColumnIfNotExists('transport_requests', 'site_id', 'INTEGER REFERENCES customer_sites(id) ON DELETE SET NULL');
+    await addColumnIfNotExists('transport_requests', 'client_id', 'INTEGER REFERENCES customers(id) ON DELETE SET NULL');
 
     await createTableIfNotExists(`
       CREATE TABLE IF NOT EXISTS transport_request_approvals (
@@ -2962,8 +2969,10 @@ export async function createRequest(requestData, selectedApproverIds, requestTyp
       specialInstructions,
       dateNeeded,
       totalAmount,
-      linked_cash_request_id
+      linked_cash_request_id,
+      siteId
     } = requestData;
+    let resolvedSiteId = siteId ? parseInt(siteId, 10) : null;
     if (requestType === 'cash_request') {
       teamLeaderName = null;
       teamLeaderPhone = null;
@@ -2972,11 +2981,25 @@ export async function createRequest(requestData, selectedApproverIds, requestTyp
       ispName = null;
       location = null;
       items = [];
+      resolvedSiteId = null;
     } else {
       teamLeaderName = teamLeaderName || createdBy || '';
       teamLeaderPhone = teamLeaderPhone || '';
       ispName = ispName || null;
       deployment = deployment || null;
+      // Client/Site standardization — Site is master data, searched and selected, never typed.
+      // Its name becomes the request's display "project name"; location auto-fills from the
+      // site's address on file, but stays user-editable when the site has none recorded yet.
+      if (resolvedSiteId) {
+        const siteRes = await client.query(
+          `SELECT s.id, s.site_name, s.site_address FROM customer_sites s WHERE s.id = $1`,
+          [resolvedSiteId]
+        );
+        const site = siteRes.rows[0];
+        if (!site) throw new Error('Selected site not found');
+        projectName = site.site_name;
+        if (!location || !String(location).trim()) location = site.site_address || null;
+      }
     }
     releaseBy = releaseBy || null;
     receivedBy = receivedBy || null;
@@ -2996,8 +3019,8 @@ export async function createRequest(requestData, selectedApproverIds, requestTyp
         created_by, team_leader_name, team_leader_phone, project_name, isp_name, location,
         deployment_type, release_by, received_by, type, reason, status,
         department, purpose, deliver_to, deliver_phone, special_instructions, date_needed, total_amount, created_by_id, ticket_id,
-        linked_cash_request_id, company
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'pending', $12, $13, $14, $15, $16, $17, $18, $19, $20, $21,
+        linked_cash_request_id, site_id, company
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'pending', $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22,
         COALESCE((SELECT company FROM users WHERE id = $19), 'CW'))
       RETURNING *`,
       [
@@ -3021,7 +3044,8 @@ export async function createRequest(requestData, selectedApproverIds, requestTyp
         totalAmount || null,
         userId,
         ticket_id,
-        linkedCashRequestId
+        linkedCashRequestId,
+        resolvedSiteId
       ]
     );
     const requestId = requestResult.rows[0].id;
@@ -3854,6 +3878,13 @@ export async function rejectRequest(requestId, userId, ip, rejectData) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+    const ownerCheck = await client.query('SELECT created_by_id FROM requests WHERE id = $1', [requestId]);
+    if (ownerCheck.rowCount > 0 && Number(ownerCheck.rows[0].created_by_id) === Number(userId)) {
+      const actingUser = await getUserById(userId);
+      if (!isSystemAdminAccount(actingUser)) {
+        throw forbidden('You cannot reject a request that you created');
+      }
+    }
     const result = await client.query(
       'UPDATE requests SET status = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2 AND status IN ($3, $4, $5) AND deleted_at IS NULL RETURNING *',
       ['rejected', requestId, 'pending', 'supervisor_approved', 'finance_approved']
@@ -3893,7 +3924,7 @@ export async function approveRequest(requestId, approverData, userId, ip) {
     const totalAmount = reqCheck.rows[0].total_amount != null ? parseFloat(reqCheck.rows[0].total_amount) : 0;
     const user = await getUserById(userId);
     if (!user) throw new Error('User not found');
-    if (Number(reqCheck.rows[0].created_by_id) === Number(userId) && !canBypassApprovalRestrictions(user)) {
+    if (Number(reqCheck.rows[0].created_by_id) === Number(userId) && !isSystemAdminAccount(user)) {
       throw forbidden('You cannot approve a request that you created');
     }
     const workflowConfig = await getWorkflowConfig();
@@ -4125,7 +4156,7 @@ export async function finalizeRequest(requestId, finalizeData, userId, ip) {
     const currentStatus = request.rows[0].status;
     const user = await getUserById(userId);
     if (!user) throw new Error('User not found');
-    if (Number(request.rows[0].created_by_id) === Number(userId) && !canBypassApprovalRestrictions(user)) {
+    if (Number(request.rows[0].created_by_id) === Number(userId) && !isSystemAdminAccount(user)) {
       throw forbidden('You cannot finalize a request that you created');
     }
     if (reqType === 'cash_request') {

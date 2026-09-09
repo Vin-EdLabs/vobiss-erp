@@ -6,6 +6,7 @@ import ProtectedRoute from '../components/ProtectedRoute';
 import Dashboard from './Dashboard';
 import DirectorsDashboard from './director/DirectorsDashboard';
 import GlobalSearchPage from './director/GlobalSearchPage';
+import SiteDetailPage from './SiteDetailPage';
 import Inventory from './Inventory';
 import Categories from './Categories';
 import ItemsOut from './ItemsOut';
@@ -152,6 +153,7 @@ import HrDashboard from './hr/Dashboard';
 import HrEmployees from './hr/Employees';
 import HrEmployeeProfile from './hr/EmployeeProfile';
 import HrLeave from './hr/Leave';
+import HrOvertime from './hr/Overtime';
 import HrPayroll from './hr/Payroll';
 import HrPayrollAdvances from './hr/PayrollAdvances';
 import HrPayrollHistory from './hr/PayrollHistory';
@@ -162,10 +164,13 @@ import HrAnalytics from './hr/Analytics';
 import HrReports from './hr/Reports';
 import HrDocuments from './hr/Documents';
 import HrFormRequests from './hr/FormRequests';
+import HrInsurance from './hr/Insurance';
 import HrSelfAttendance from './hr-self/Attendance';
 import HrSelfLeave from './hr-self/Leave';
+import HrSelfOvertime from './hr-self/Overtime';
 import HrSelfForms from './hr-self/Forms';
 import HrSelfPayslips from './hr-self/Payslips';
+import HrSelfInsurance from './hr-self/Insurance';
 import TransportRequestForm from './transport/TransportRequestForm';
 import TransportSupervisorDashboard from './transport/TransportSupervisorDashboard';
 import TransportApprovals from './transport/TransportApprovals';
@@ -805,8 +810,16 @@ const Index = () => {
               <Route
                 path="/director/search"
                 element={
-                  <ProtectedRoute allowedRoles={EXEC_ROLES}>
+                  <ProtectedRoute allowedRoles={[...EXEC_ROLES, 'hr']} allowedUnits={['hr']} allowedPositions={['HR']}>
                     <GlobalSearchPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/site360/:id"
+                element={
+                  <ProtectedRoute allowedRoles={[...EXEC_ROLES, 'hr']} allowedUnits={['hr']} allowedPositions={['HR']}>
+                    <SiteDetailPage />
                   </ProtectedRoute>
                 }
               />
@@ -1360,10 +1373,42 @@ const Index = () => {
                 }
               />
               <Route
+                path="/hr/leave/:id"
+                element={
+                  <ProtectedRoute allowedRoles={HR_ROLES} allowedUnits={HR_UNITS} allowedPositions={HR_POSITIONS}>
+                    <HrLeave />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/hr/overtime"
+                element={
+                  <ProtectedRoute allowedRoles={HR_ROLES} allowedUnits={HR_UNITS} allowedPositions={HR_POSITIONS}>
+                    <HrOvertime />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/hr/overtime/:id"
+                element={
+                  <ProtectedRoute allowedRoles={HR_ROLES} allowedUnits={HR_UNITS} allowedPositions={HR_POSITIONS}>
+                    <HrOvertime />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
                 path="/hr/payroll"
                 element={
                   <ProtectedRoute allowedRoles={HR_ROLES} allowedUnits={HR_UNITS} allowedPositions={HR_POSITIONS}>
                     <HrPayroll />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/hr/insurance"
+                element={
+                  <ProtectedRoute allowedRoles={HR_ROLES} allowedUnits={HR_UNITS} allowedPositions={HR_POSITIONS}>
+                    <HrInsurance />
                   </ProtectedRoute>
                 }
               />
@@ -1456,6 +1501,14 @@ const Index = () => {
                 }
               />
               <Route
+                path="/hr-self/insurance"
+                element={
+                  <ProtectedRoute allowedRoles={WORKSPACE_ROLES}>
+                    <HrSelfInsurance />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
                 path="/employee/payslips"
                 element={
                   <ProtectedRoute allowedRoles={WORKSPACE_ROLES}>
@@ -1468,6 +1521,30 @@ const Index = () => {
                 element={
                   <ProtectedRoute allowedRoles={WORKSPACE_ROLES}>
                     <HrSelfLeave />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/hr-self/leave/:id"
+                element={
+                  <ProtectedRoute allowedRoles={WORKSPACE_ROLES}>
+                    <HrSelfLeave />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/hr-self/overtime"
+                element={
+                  <ProtectedRoute allowedRoles={WORKSPACE_ROLES}>
+                    <HrSelfOvertime />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/hr-self/overtime/:id"
+                element={
+                  <ProtectedRoute allowedRoles={WORKSPACE_ROLES}>
+                    <HrSelfOvertime />
                   </ProtectedRoute>
                 }
               />

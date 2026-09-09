@@ -1,37 +1,24 @@
 import express from 'express';
-import { authenticateToken } from '../middleware/auth.js';
+import { authenticateToken, isHrOrExecutive } from '../middleware/auth.js';
+import { isSystemAdminAccount } from '../roles.js';
 import { globalExecutiveSearch } from '../db/globalSearch.js';
 
 const router = express.Router();
 
-const EXEC_ROLES = new Set(['director', 'cto', 'superadmin']);
-
-function collectRoles(user) {
-  const roles = new Set();
-  const add = (value) => {
-    String(value || '')
-      .toLowerCase()
-      .split(',')
-      .forEach((part) => {
-        const t = part.trim();
-        if (t) roles.add(t);
-      });
-  };
-  add(user?.main_role);
+function hasSuperadminRole(user) {
+  const slugs = new Set();
+  const add = (value) => String(value || '').toLowerCase().split(',').forEach((p) => { const t = p.trim(); if (t) slugs.add(t); });
   add(user?.role);
-  if (Array.isArray(user?.roles)) {
-    user.roles.forEach((r) => add(r));
-  }
-  return roles;
+  add(user?.main_role);
+  if (Array.isArray(user?.roles)) user.roles.forEach(add);
+  return slugs.has('superadmin');
 }
 
+// System Admin always sees everything, no negotiations; HR, Director, and CTO are also
+// admitted — no other role.
 function requireExecutive(req, res, next) {
-  const roles = collectRoles(req.user);
-  const allowed = [...roles].some((r) => EXEC_ROLES.has(r));
-  if (!allowed) {
-    return res.status(403).json({ error: 'Executive search is not available for your role' });
-  }
-  next();
+  if (isSystemAdminAccount(req.user) || hasSuperadminRole(req.user) || isHrOrExecutive(req.user)) return next();
+  return res.status(403).json({ error: 'Global search is not available for your role' });
 }
 
 router.use(authenticateToken, requireExecutive);
